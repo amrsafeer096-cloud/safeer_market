@@ -33,6 +33,12 @@ Future<void> main() async {
     // onboarding state apply without a flash of the defaults.
     SharedPreferences.getInstance(),
   ).wait;
+  // A restored (or just redirected-back) session means onboarding is done:
+  // save it before the first frame so the router never sends a signed-in
+  // user back to the welcome screens after a web reload.
+  if (Supabase.instance.client.auth.currentSession != null) {
+    await preferences.setBool(SettingsKeys.onboardingDone, true);
+  }
   // Media-channel audio context + warm-up of the bundled sound effects.
   unawaited(AppSoundService.instance.init());
   runApp(

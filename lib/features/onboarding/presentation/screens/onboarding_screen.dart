@@ -28,6 +28,13 @@ class OnboardingScreen extends ConsumerStatefulWidget {
   static const pageCount = 3;
   static const pageTransition = Duration(milliseconds: 350);
 
+  /// Content never gets wider than this on a big screen.
+  static const maxContentWidth = 440.0;
+
+  /// From this width (desktop web) the pages use a compact layout so the
+  /// step and the Next button fit without scrolling.
+  static const compactBreakpoint = 700.0;
+
   @override
   ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
 }
@@ -50,6 +57,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       );
 
   void _finish() {
+    // Saved right away (not only through the settings listener), so a page
+    // reload - e.g. the web Google redirect - never shows onboarding again.
+    ref
+        .read(sharedPreferencesProvider)
+        ?.setBool(SettingsKeys.onboardingDone, true);
     ref.read(isFirstLaunchProvider.notifier).state = false;
     if (mounted) {
       context.go(homeRouteFor(ref.read(userRoleProvider).valueOrNull));
@@ -156,45 +168,52 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-                child: Row(
-                  children: [
-                    _PageDots(
-                      count: OnboardingScreen.pageCount,
-                      current: _page,
-                      color: colors.primary,
-                    ),
-                    const Spacer(),
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 200),
-                      child: onLastPage
-                          ? const SizedBox(height: 52)
-                          : SizedBox(
-                              height: 52,
-                              child: FilledButton.icon(
-                                onPressed: () => _goTo(_page + 1),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: AppColors.secondary,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 22,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                        maxWidth: OnboardingScreen.maxContentWidth),
+                    child: Row(
+                      children: [
+                        _PageDots(
+                          count: OnboardingScreen.pageCount,
+                          current: _page,
+                          color: colors.primary,
+                        ),
+                        const Spacer(),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: onLastPage
+                              ? const SizedBox(height: 52)
+                              : SizedBox(
+                                  height: 52,
+                                  child: FilledButton.icon(
+                                    onPressed: () => _goTo(_page + 1),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: AppColors.secondary,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 22,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
+                                    // Mirrors to point forward in RTL.
+                                    icon:
+                                        const Icon(Icons.arrow_forward_rounded),
+                                    iconAlignment: IconAlignment.end,
+                                    label: Text(
+                                      l10n.onboardingNext,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                                // Mirrors to point forward in RTL.
-                                icon: const Icon(Icons.arrow_forward_rounded),
-                                iconAlignment: IconAlignment.end,
-                                label: Text(
-                                  l10n.onboardingNext,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],
@@ -226,48 +245,58 @@ class _OnboardingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final compact =
+        MediaQuery.sizeOf(context).width >= OnboardingScreen.compactBreakpoint;
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: leading ??
-                Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: primary.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(icon, size: 48, color: primary),
+      padding: EdgeInsets.fromLTRB(24, compact ? 4 : 16, 24, compact ? 8 : 16),
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: OnboardingScreen.maxContentWidth),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: leading ??
+                    Container(
+                      padding: EdgeInsets.all(compact ? 14 : 22),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child:
+                          Icon(icon, size: compact ? 36 : 48, color: primary),
+                    ),
+              ).animate().fadeIn(duration: 350.ms).scale(
+                  begin: const Offset(0.85, 0.85), curve: Curves.easeOutBack),
+              SizedBox(height: compact ? 14 : 24),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: compact ? 22 : 24, fontWeight: FontWeight.w900),
+              )
+                  .animate(delay: 80.ms)
+                  .fadeIn(duration: 300.ms)
+                  .slideY(begin: 0.2, curve: Curves.easeOutCubic),
+              SizedBox(height: compact ? 6 : 8),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: compact ? 14 : 15,
+                  height: 1.5,
+                  color: context.palette.muted,
                 ),
-          ).animate().fadeIn(duration: 350.ms).scale(
-              begin: const Offset(0.85, 0.85), curve: Curves.easeOutBack),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
-          )
-              .animate(delay: 80.ms)
-              .fadeIn(duration: 300.ms)
-              .slideY(begin: 0.2, curve: Curves.easeOutCubic),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              height: 1.5,
-              color: context.palette.muted,
-            ),
-          ).animate(delay: 140.ms).fadeIn(duration: 300.ms),
-          const SizedBox(height: 32),
-          child
-              .animate(delay: 200.ms)
-              .fadeIn(duration: 350.ms)
-              .slideY(begin: 0.08, curve: Curves.easeOutCubic),
-        ],
+              ).animate(delay: 140.ms).fadeIn(duration: 300.ms),
+              SizedBox(height: compact ? 18 : 32),
+              child
+                  .animate(delay: 200.ms)
+                  .fadeIn(duration: 350.ms)
+                  .slideY(begin: 0.08, curve: Curves.easeOutCubic),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -286,7 +315,12 @@ class _LanguagePage extends ConsumerWidget {
     final current = ref.watch(localeProvider);
     return _OnboardingPage(
       icon: Icons.translate_rounded,
-      leading: const AppLogo(size: 96),
+      leading: AppLogo(
+        size: MediaQuery.sizeOf(context).width >=
+                OnboardingScreen.compactBreakpoint
+            ? 72
+            : 96,
+      ),
       title: l10n.onboardingLanguageTitle,
       subtitle: l10n.onboardingLanguageSubtitle,
       child: Column(

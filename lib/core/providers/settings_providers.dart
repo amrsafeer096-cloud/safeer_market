@@ -27,12 +27,40 @@ final themeModeProvider = StateProvider<ThemeMode>((ref) {
   return ThemeMode.values.asNameMap()[saved] ?? defaultThemeMode;
 });
 
+/// Whether an auth session exists right now (restored from storage or
+/// delivered by an OAuth redirect). False when auth isn't available at all
+/// (bare provider tests).
+bool hasActiveSession(Ref ref) {
+  try {
+    return ref.read(currentUserProvider) != null;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// True until the user finishes or skips onboarding; the router sends a
-/// first launch there.
+/// first launch there. Never true for a signed-in user: after a web OAuth
+/// redirect the page reloads, and the restored session already proves the
+/// user is past onboarding.
 final isFirstLaunchProvider = StateProvider<bool>((ref) {
   final prefs = ref.watch(sharedPreferencesProvider);
-  return !(prefs?.getBool(SettingsKeys.onboardingDone) ?? false);
+  final done = prefs?.getBool(SettingsKeys.onboardingDone) ?? false;
+  if (done) return false;
+  return !hasActiveSession(ref);
 });
+
+/// Marks onboarding as finished: the in-memory flag (so the router moves on
+/// now) and the saved flag (so it survives a page reload / restart), without
+/// waiting for [settingsPersistenceProvider].
+void completeOnboarding(Ref ref) {
+  final prefs = ref.read(sharedPreferencesProvider);
+  if (prefs != null && prefs.getBool(SettingsKeys.onboardingDone) != true) {
+    prefs.setBool(SettingsKeys.onboardingDone, true);
+  }
+  if (ref.read(isFirstLaunchProvider)) {
+    ref.read(isFirstLaunchProvider.notifier).state = false;
+  }
+}
 
 /// Whether the Admin Dashboard new-order alarm is muted on this device.
 final adminOrderAlarmMutedProvider = StateProvider<bool>((ref) {
@@ -68,13 +96,20 @@ final settingsPersistenceProvider = Provider<void>((ref) {
     );
 });
 
-/// Completes first-launch onboarding as soon as any auth session appears
-/// (Google OAuth deep link, native Google, email, phone). Prevents the
-/// Language/Theme ↔ Auth redirect loop for new Google users.
+/// Completes first-launch onboarding whenever an auth session exists: on
+/// start (a session restored after the Google OAuth redirect reloaded the
+/// page) and as soon as one appears (OAuth deep link, native Google, email,
+/// phone). Prevents the Language/Theme ↔ Auth redirect loop for new users.
 final completeOnboardingOnAuthProvider = Provider<void>((ref) {
   ref.listen(currentUserProvider, (previous, next) {
-    if (previous != null || next == null) return;
-    if (!ref.read(isFirstLaunchProvider)) return;
-    ref.read(isFirstLaunchProvider.notifier).state = false;
-  });
+    if (next == null) return;
+    // Not inside a widget build: the router listens to the flag.
+    Future.microtask(() {
+      try {
+        completeOnboarding(ref);
+      } on StateError {
+        // The container was disposed first (app shutdown, tests).
+      }
+    });
+  }, fireImmediately: true);
 });

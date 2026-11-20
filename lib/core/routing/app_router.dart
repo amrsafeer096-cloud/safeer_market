@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import '../../features/addresses/presentation/screens/add_address_screen.dart';
 import '../../features/addresses/presentation/screens/addresses_screen.dart';
 import '../../features/addresses/presentation/screens/map_picker_screen.dart';
+import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
 import '../../features/cart/presentation/screens/cart_screen.dart';
 import '../../features/catalog/presentation/screens/category_screen.dart';
@@ -47,14 +48,25 @@ import 'app_routes.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final role = ValueNotifier<UserRole?>(null);
-  final firstLaunch = ValueNotifier<bool>(ref.read(isFirstLaunchProvider));
+  // Onboarding is only for a first launch with no session: a signed-in user
+  // (e.g. back from the web Google OAuth redirect) goes straight in.
+  bool needsOnboarding() =>
+      ref.read(isFirstLaunchProvider) && !hasActiveSession(ref);
+  final firstLaunch = ValueNotifier<bool>(needsOnboarding());
   ref
     ..listen(
       userRoleProvider,
       (_, next) => role.value = next.valueOrNull,
       fireImmediately: true,
     )
-    ..listen(isFirstLaunchProvider, (_, next) => firstLaunch.value = next)
+    ..listen(
+      isFirstLaunchProvider,
+      (_, __) => firstLaunch.value = needsOnboarding(),
+    )
+    ..listen(
+      currentUserProvider,
+      (_, __) => firstLaunch.value = needsOnboarding(),
+    )
     ..onDispose(role.dispose)
     ..onDispose(firstLaunch.dispose);
 

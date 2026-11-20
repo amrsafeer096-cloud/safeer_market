@@ -11,6 +11,12 @@ import '../theme/app_palette.dart';
 class ThemeSelectorWidget extends ConsumerWidget {
   const ThemeSelectorWidget({super.key});
 
+  /// The cards never get wider than this, however wide the screen.
+  static const maxWidth = 440.0;
+
+  /// From this screen width the cards use their compact size.
+  static const compactBreakpoint = 700.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
@@ -18,24 +24,35 @@ class ThemeSelectorWidget extends ConsumerWidget {
     void select(ThemeMode mode) =>
         ref.read(themeModeProvider.notifier).state = mode;
 
-    return Row(
+    // Desktop web: a narrow, compact trio instead of three huge cards.
+    final compact = MediaQuery.sizeOf(context).width >= compactBreakpoint;
+
+    final options = Row(
       children: [
         for (final (mode, label) in [
           (ThemeMode.system, l10n.themeSystem),
           (ThemeMode.dark, l10n.themeDark),
           (ThemeMode.light, l10n.themeLight),
         ]) ...[
-          if (mode != ThemeMode.system) const SizedBox(width: 10),
+          if (mode != ThemeMode.system) SizedBox(width: compact ? 8 : 10),
           Expanded(
             child: _ThemeOption(
               mode: mode,
               label: label,
               selected: current == mode,
+              compact: compact,
               onTap: () => select(mode),
             ),
           ),
         ],
       ],
+    );
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: maxWidth),
+        child: options,
+      ),
     );
   }
 }
@@ -45,12 +62,14 @@ class _ThemeOption extends StatelessWidget {
     required this.mode,
     required this.label,
     required this.selected,
+    required this.compact,
     required this.onTap,
   });
 
   final ThemeMode mode;
   final String label;
   final bool selected;
+  final bool compact;
   final VoidCallback onTap;
 
   @override
@@ -82,9 +101,9 @@ class _ThemeOption extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
-          padding: const EdgeInsets.all(6),
+          padding: EdgeInsets.all(compact ? 4 : 6),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(compact ? 14 : 18),
             border: Border.all(
               color: selected
                   ? accent
@@ -95,17 +114,21 @@ class _ThemeOption extends StatelessWidget {
           child: Column(
             children: [
               AspectRatio(
-                aspectRatio: 0.78,
+                aspectRatio: compact ? 1.15 : 0.78,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(compact ? 9 : 12),
                   child: mockup,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: compact ? 5 : 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _RadioDot(selected: selected, color: accent),
+                  _RadioDot(
+                    selected: selected,
+                    color: accent,
+                    size: compact ? 15 : 18,
+                  ),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -113,7 +136,7 @@ class _ThemeOption extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: compact ? 12 : 13,
                         fontWeight:
                             selected ? FontWeight.w800 : FontWeight.w600,
                       ),
@@ -121,7 +144,7 @@ class _ThemeOption extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
+              SizedBox(height: compact ? 0 : 2),
             ],
           ),
         ),
@@ -131,17 +154,22 @@ class _ThemeOption extends StatelessWidget {
 }
 
 class _RadioDot extends StatelessWidget {
-  const _RadioDot({required this.selected, required this.color});
+  const _RadioDot({
+    required this.selected,
+    required this.color,
+    required this.size,
+  });
 
   final bool selected;
   final Color color;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      width: 18,
-      height: 18,
+      width: size,
+      height: size,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         shape: BoxShape.circle,

@@ -511,6 +511,9 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
                 ),
                 _SectionHeader(
                   title: l10n.exploreSafeer,
+                  // Lines up with the centered desktop grid below.
+                  sideInset: CategoriesLayout.sideInset(
+                      MediaQuery.sizeOf(context).width),
                   onSeeAll: () => Scaffold.of(context).openDrawer(),
                 ),
                 SliverPadding(
@@ -675,9 +678,13 @@ class _SectionHeader extends StatelessWidget {
     this.onSeeAll,
     this.anchorKey,
     this.alert,
+    this.sideInset = 0,
   });
 
   final String title;
+
+  /// Extra space on both sides (desktop web, to match the centered grid).
+  final double sideInset;
   final VoidCallback? onSeeAll;
 
   /// Short red note after the title, e.g. the admin's missing-image count.
@@ -690,7 +697,8 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.palette;
     return SliverPadding(
-      padding: const EdgeInsetsDirectional.fromSTEB(16, 26, 8, 8),
+      padding: EdgeInsetsDirectional.fromSTEB(
+          16 + sideInset, 26, 8 + sideInset, 8),
       sliver: SliverToBoxAdapter(
         child: SizedBox(
           key: anchorKey,
