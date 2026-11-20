@@ -1,1 +1,39 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"safeer-market","appId":"1:1021134855570:android:77ee57c5dedb548e6a754b","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"safeer-market","configurations":{"android":"1:1021134855570:android:77ee57c5dedb548e6a754b","ios":"1:1021134855570:ios:f716d4d8ecc0fc226a754b","macos":"1:1021134855570:ios:f716d4d8ecc0fc226a754b","web":"1:1021134855570:web:d73c7a8cfef71f656a754b","windows":"1:1021134855570:web:1f5893bec37e459a6a754b"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "safeer-market",
+          "appId": "1:1021134855570:android:77ee57c5dedb548e6a754b",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "safeer-market",
+          "configurations": {
+            "android": "1:1021134855570:android:77ee57c5dedb548e6a754b",
+            "ios": "1:1021134855570:ios:f716d4d8ecc0fc226a754b",
+            "macos": "1:1021134855570:ios:f716d4d8ecc0fc226a754b",
+            "web": "1:1021134855570:web:d73c7a8cfef71f656a754b",
+            "windows": "1:1021134855570:web:1f5893bec37e459a6a754b"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
