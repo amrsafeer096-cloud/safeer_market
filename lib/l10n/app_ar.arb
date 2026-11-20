@@ -1,0 +1,1904 @@
+{
+  "@@locale": "ar",
+  "bannerShopBrandProducts": "تسوق منتجات الشركة",
+  "bannerAdd": "إضافة إعلان شركة",
+  "bannerTitleLabel": "اسم الشركة / عنوان الإعلان",
+  "bannerKeywordLabel": "كلمة البحث عن منتجات الشركة",
+  "bannerKeywordHint": "مثال: جهينة",
+  "bannerChooseImage": "اختيار صورة الإعلان",
+  "bannerChangeImage": "تغيير الصورة",
+  "bannerImageRequired": "اختر صورة الإعلان أولاً",
+  "bannerKeywordRequired": "اكتب كلمة البحث التي تفتح منتجات الشركة",
+  "bannerSaved": "تمت إضافة الإعلان بنجاح",
+  "bannerSaveFailed": "تعذر حفظ الإعلان: {error}",
+  "@bannerSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "bannerDeleteConfirm": "هل تريد حذف إعلان «{title}»؟",
+  "@bannerDeleteConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "bannerExistingHeader": "الإعلانات الحالية",
+  "appTitle": "سفير ماركت",
+  "@appTitle": {
+    "description": "Application title shown in the system and home header"
+  },
+  "home": "الرئيسية",
+  "settings": "الإعدادات",
+  "language": "اللغة",
+  "save": "حفظ",
+  "search": "البحث",
+  "cart": "السلة",
+  "wallet": "المحفظة",
+  "more": "المزيد",
+  "exitHint": "اضغط مرة أخرى للخروج من التطبيق",
+  "newProducts": "منتجات جديدة",
+  "trendingOffers": "عروض رائجة",
+  "noNewNotifications": "لا توجد إشعارات جديدة",
+  "loadingLatestProducts": "جاري تحميل أحدث المنتجات...",
+  "noNewProductsLast3Days": "لا توجد منتجات جديدة خلال آخر 3 أيام",
+  "loadingOffers": "جاري تحميل العروض...",
+  "noOffersCurrently": "لا توجد عروض حالياً",
+  "subscribersExclusiveFeature": "ميزة حصرية للمشتركين 👑",
+  "playAndWinPaywallBody": "لعبة \"العب واكسب\" والهدايا الأسبوعية متاحة فقط لمشتركي باقات سفير برايم وسفير برو. رقي حسابك واستمتع بالمميزات!",
+  "upgradeAccountNow": "رقي حسابك الآن",
+  "exploreSafeer": "استكشف سفير",
+  "featuredProducts": "منتجات مختارة",
+  "failedToLoadProducts": "تعذر تحميل المنتجات",
+  "noProductsCurrently": "لا توجد منتجات حالياً",
+  "seeAll": "عرض الكل",
+  "retry": "إعادة المحاولة",
+  "loyaltyPoints": "نقاط الولاء",
+  "spinWheelCollectPoints": "لف العجلة واجمع النقاط",
+  "favoriteProducts": "المنتجات المفضلة",
+  "myOrders": "طلباتي",
+  "contactUs": "تحدث معنا",
+  "help": "المساعدة",
+  "signOut": "تسجيل الخروج",
+  "signIn": "سجل دخولك",
+  "signOutConfirmMessage": "هل تريد تسجيل الخروج من حسابك؟",
+  "signedOut": "تم تسجيل الخروج",
+  "adminDashboard": "لوحة تحكم الإدارة",
+  "adminDashboardSubtitle": "إدارة طلبات العملاء وتحديث حالتها",
+  "guestName": "ضيفنا",
+  "welcomeUser": "أهلاً بك يا {name}",
+  "@welcomeUser": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "guestSubtitle": "سجّل دخولك لتتابع طلباتك ومفضلتك",
+  "personalData": "البيانات الشخصية",
+  "email": "البريد الإلكتروني",
+  "savedAddresses": "العناوين المحفوظة",
+  "savedCards": "البطاقات المحفوظة",
+  "messageAndSmsAlerts": "تنبيهات الرسائل والرسائل النصية",
+  "privacyAndTerms": "سياسة الخصوصية والشروط",
+  "deleteAccount": "حذف الحساب",
+  "deleteAccountConfirmMessage": "سيتم حذف حسابك وجميع بياناتك نهائياً. هل أنت متأكد؟",
+  "deleteAccountSuccess": "تم حذف حسابك بنجاح",
+  "passwordRequirementsTitle": "يجب أن تحتوي كلمة المرور على:",
+  "passwordRuleMinLength": "8 حروف على الأقل",
+  "passwordRuleUppercase": "حرف كبير واحد على الأقل",
+  "passwordRuleLowercase": "حرف صغير واحد على الأقل",
+  "passwordRuleDigit": "رقم واحد على الأقل",
+  "talkToUs": "تحدث معنا",
+  "supportWhatsApp": "واتساب",
+  "supportLiveChat": "محادثة مباشرة",
+  "loyaltyPointsRedeem": "{count} نقطة • استبدال",
+  "@loyaltyPointsRedeem": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "loyaltyPointsEarnNow": "نقاط الولاء • اكسب الآن 🎁",
+  "ok": "حسناً",
+  "noEmail": "لا يوجد بريد إلكتروني",
+  "changeEmailContactSupport": "لتغيير البريد الإلكتروني يرجى التواصل مع الدعم",
+  "privacyPolicyBody": "نحن في سفير ماركت نحترم خصوصيتك. نستخدم بياناتك مثل الاسم ورقم الهاتف والعنوان فقط لتوصيل طلباتك وتحسين خدماتنا، ولا نشاركها مع أي طرف ثالث دون موافقتك.\n\nباستخدامك للتطبيق فإنك توافق على شروط الاستخدام، بما في ذلك سياسات الطلب والتوصيل والاسترجاع. سيتم نشر النسخة الكاملة من السياسة قريباً.",
+  "helpTitle": "كيف يمكننا مساعدتك؟",
+  "helpBody": "فريق سفير ماركت جاهز دائماً لخدمتك.\nإذا واجهتك أي مشكلة في طلبك أو لديك استفسار، تواصل معنا وسنرد عليك في أسرع وقت.",
+  "callUs": "الاتصال بنا",
+  "callUsSubtitle": "تحدث مع خدمة العملاء مباشرة",
+  "whatsapp": "واتساب",
+  "whatsappSubtitle": "راسلنا وسنرد عليك سريعاً",
+  "messageAlerts": "تنبيهات الرسائل",
+  "appNotifications": "إشعارات التطبيق",
+  "appNotificationsSubtitle": "العروض وتحديثات حالة الطلب",
+  "smsMessages": "رسائل SMS",
+  "smsMessagesSubtitle": "رسائل نصية بتأكيد الطلب والتوصيل",
+  "cancel": "إلغاء",
+  "delete": "حذف",
+  "close": "إغلاق",
+  "refresh": "تحديث",
+  "all": "الكل",
+  "shopNow": "تسوق الآن",
+  "scanBarcode": "مسح الباركود",
+  "phoneNumber": "رقم الهاتف",
+  "categories": "الأقسام",
+  "magazines": "المجلات",
+  "addMagazine": "إضافة مجلة",
+  "unexpectedError": "حدث خطأ غير متوقع",
+  "networkError": "تعذر الاتصال بالشبكة",
+  "serverError": "حدث خطأ في الخادم",
+  "serverConnectionError": "تعذر الاتصال بالخادم، حاول مرة أخرى",
+  "pleaseSignInFirst": "يرجى تسجيل الدخول أولاً",
+  "noPermissionToEditOrder": "لا تملك صلاحية تعديل هذا الطلب",
+  "orderUpdateFailed": "تعذر تحديث الطلب: {error}",
+  "@orderUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ordersLoadFailed": "تعذر تحميل الطلبات\n{error}",
+  "@ordersLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "orderNumber": "طلب #{id}",
+  "@orderNumber": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "deletedProduct": "منتج محذوف",
+  "product": "منتج",
+  "addNewAddress": "إضافة عنوان جديد",
+  "manageAddresses": "إدارة العناوين",
+  "editLocation": "تعديل الموقع",
+  "helloName": "أهلاً يا {name}",
+  "@helloName": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cardNumber": "رقم البطاقة",
+  "cardholderName": "اسم حامل البطاقة",
+  "asWrittenOnCard": "كما هو مكتوب على البطاقة",
+  "expiryDate": "تاريخ الانتهاء",
+  "addBankCard": "إضافة بطاقة بنكية",
+  "bankCard": "بطاقة بنكية",
+  "adminPaidByVisa": "مدفوع بالفيزا",
+  "cameraOpenFailed": "تعذر فتح الكاميرا، تحقق من صلاحية الكاميرا",
+  "addressLabelHome": "المنزل",
+  "addressLabelWork": "العمل",
+  "puzzleGame": "لعبة البازل",
+  "luckyWheel": "عجلة الحظ",
+  "awesome": "رائع!",
+  "customer": "العميل",
+  "noLocationForOrder": "لا يتوفر موقع لهذا الطلب",
+  "branch": "الفرع",
+  "safeerCustomer": "عميل سفير",
+  "notSpecified": "غير محدد",
+  "cashOnDelivery": "الدفع عند الاستلام",
+  "orderStatusPending": "قيد الانتظار",
+  "orderStatusPreparing": "جاري التجهيز",
+  "orderStatusReadyForDelivery": "جاهز للتوصيل",
+  "orderStatusOutForDelivery": "في الطريق",
+  "orderStatusDelivered": "تم التوصيل",
+  "orderStatusCancelled": "ملغي",
+  "statusNew": "جديد",
+  "startPreparing": "بدء التجهيز",
+  "total": "الإجمالي",
+  "inStock": "متوفر",
+  "outOfStock": "غير متوفر",
+  "decreaseQuantity": "تقليل الكمية",
+  "increaseQuantity": "زيادة الكمية",
+  "decreaseWeight": "تقليل الوزن",
+  "increaseWeight": "زيادة الوزن",
+  "addToCart": "أضف للسلة",
+  "cartEmpty": "سلتك فارغة",
+  "productUnavailableNow": "هذا المنتج غير متوفر حالياً",
+  "distanceFromBranch": "يبعد {distance} عن الفرع",
+  "@distanceFromBranch": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceNumberRequired": "رقم الفاتورة مطلوب",
+  "addAtLeastOneItem": "أضف صنفاً واحداً على الأقل",
+  "orderOnTheWayToYou": "الطلب في الطريق إليك!",
+  "deliveryFee": "رسوم التوصيل",
+  "currencySymbol": "ج.م",
+  "unitPiece": "قطعة",
+  "unitKilo": "كيلو",
+  "gramsValue": "{value} جرام",
+  "@gramsValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "kilosValue": "{value} كيلو",
+  "@kilosValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "kmValue": "{value} كم",
+  "@kmValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "sessionExpired": "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى",
+  "adminStatusUpdateFailed": "تعذر تحديث الحالة: {error}",
+  "@adminStatusUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDeleteMagazineTitle": "حذف المجلة",
+  "adminDeleteMagazineConfirm": "هل تريد حذف «{title}»؟",
+  "@adminDeleteMagazineConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDeleteMagazineFailed": "تعذر حذف المجلة: {error}",
+  "@adminDeleteMagazineFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminErrorWithDetails": "خطأ: {error}",
+  "@adminErrorWithDetails": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNoMagazinesYet": "لا توجد مجلات بعد. اضغط «إضافة مجلة» لرفع أول مجلة.",
+  "adminMagazineExpired": "منتهية",
+  "adminMagazineUpcoming": "قادمة",
+  "adminMagazineActive": "نشطة",
+  "adminMagazineDateRange": "من {start} إلى {end}",
+  "@adminMagazineDateRange": {
+    "placeholders": {
+      "start": {
+        "type": "String"
+      },
+      "end": {
+        "type": "String"
+      }
+    }
+  },
+  "adminPickMagazinePdfTitle": "اختر ملف المجلة (PDF)",
+  "adminMagazineStartDate": "تاريخ البداية",
+  "adminMagazineEndDate": "تاريخ النهاية",
+  "adminMagazineTitleRequired": "اكتب عنوان المجلة",
+  "adminMagazineCoverRequired": "اختر صورة الغلاف",
+  "adminMagazinePdfRequired": "اختر ملف PDF للمجلة",
+  "adminMagazineEndBeforeStart": "تاريخ النهاية يجب أن يكون بعد تاريخ البداية",
+  "adminMagazineAdded": "تمت إضافة المجلة بنجاح",
+  "adminMagazineSaveFailed": "تعذر حفظ المجلة: {error}",
+  "@adminMagazineSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAddNewMagazine": "إضافة مجلة جديدة",
+  "adminMagazineTitleLabel": "عنوان المجلة",
+  "adminPickCoverImage": "اختيار صورة الغلاف",
+  "adminChangeCover": "تغيير الغلاف",
+  "adminPickPdfFile": "اختيار ملف PDF",
+  "adminUploading": "جارٍ الرفع...",
+  "adminSupervisorPermissions": "صلاحيات المشرف",
+  "adminEnterPinHint": "أدخل PIN (1234)",
+  "adminSupervisorModeEnabled": "تم تفعيل وضع المشرف",
+  "adminInvalidPin": "PIN غير صحيح",
+  "adminActivate": "تفعيل",
+  "adminAppBarTitleManagement": "{appName} - الإدارة",
+  "@adminAppBarTitleManagement": {
+    "placeholders": {
+      "appName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAppBarTitleWorkspace": "{appName} - لوحة العمل",
+  "@adminAppBarTitleWorkspace": {
+    "placeholders": {
+      "appName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCloseManagement": "إغلاق الإدارة",
+  "adminEnableManagement": "تفعيل الإدارة",
+  "adminExitToStore": "خروج للمتجر",
+  "adminMenuOrders": "الطلبات",
+  "adminMenuProducts": "المنتجات",
+  "adminMenuStaff": "طاقم العمل",
+  "adminMenuReports": "التقارير واليومية",
+  "adminStatusPreparingShort": "تحضير",
+  "adminStatusReadyForDriverShort": "للطيار",
+  "adminStatusDeliveryShort": "توصيل",
+  "adminStatusCompletedShort": "مكتمل",
+  "adminStatusUnknown": "غير معروف",
+  "adminNoOrders": "لا توجد طلبات",
+  "adminSelectOrderFromList": "اختر طلب من القائمة",
+  "adminItemsToPrepare": "المنتجات المطلوبة للتجهيز:",
+  "adminNoItemsInOrder": "لا توجد منتجات مسجلة",
+  "adminAvailableActions": "الإجراءات المتاحة",
+  "adminOrderAwaitingPreparer": "الطلب بانتظار محضر",
+  "adminPreparerName": "المحضر: {name}",
+  "@adminPreparerName": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAwaitingDriverAssignment": "بانتظار المشرف لتحديد الطيار",
+  "adminPickUpAndStartRoute": "استلام وبدء التوجه 🗺️",
+  "adminDriverName": "الطيار: {name}",
+  "@adminDriverName": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "adminOrderReadyAwaitingDriver": "تم تجهيز الطلب بنجاح. في انتظار استلام الطيار.",
+  "adminMarkDelivered": "تم التوصيل بنجاح 💵",
+  "adminCloseOrderPermanently": "إنهاء الطلب نهائياً",
+  "adminOrderWithDriverOnTheWay": "الطلب الآن مع الطيار في الطريق للعميل.",
+  "adminOrderDeliveredAndClosed": "تم توصيل هذا الطلب وإغلاقه بنجاح.",
+  "adminWhoAreYouPickName": "أنت مين؟ (اختر اسمك للبدء)",
+  "adminNoPreparers": "لا يوجد محضرين",
+  "adminFinishOrderPreparation": "إتمام تجهيز الطلب",
+  "adminCheckAllItemsFirst": "⚠️ عذراً، يجب تحديد جميع المنتجات بعلامة (صح) أولاً.",
+  "adminPreparationFinished": "تم إنهاء التجهيز بنجاح.",
+  "adminAssignDriverTitle": "تحديد الطيار (صلاحية المشرف)",
+  "adminSelectDriver": "اختر الطيار",
+  "adminOrderAssignedToDriver": "تم إسناد الطلب للطيار بنجاح",
+  "adminAssignToSelectedDriver": "إسناد للطيار المختار",
+  "adminCallFailed": "تعذر الاتصال",
+  "adminNoPhoneNumber": "بدون رقم",
+  "adminNoName": "بدون اسم",
+  "adminAddressNotSet": "لم يتم التحديد",
+  "adminCustomerInfo": "بيانات العميل",
+  "adminManageProducts": "إدارة المنتجات",
+  "adminActiveProducts": "المنتجات المفعلة",
+  "adminInactiveProducts": "غير مفعلة",
+  "adminSearchProductByName": "ابحث عن منتج بالاسم...",
+  "adminErrorOccurred": "حدث خطأ: {error}",
+  "@adminErrorOccurred": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNoProducts": "لا توجد منتجات",
+  "adminCopyProductName": "نسخ اسم المنتج",
+  "adminCopied": "تم النسخ",
+  "adminCopyBarcode": "نسخ الباركود",
+  "adminBarcodeValue": "باركود: {barcode}",
+  "@adminBarcodeValue": {
+    "placeholders": {
+      "barcode": {
+        "type": "String"
+      }
+    }
+  },
+  "adminUpdateErrorOccurred": "حدث خطأ أثناء التحديث",
+  "adminManageStaff": "إدارة طاقم العاملين",
+  "adminAddEmployee": "إضافة موظف",
+  "adminNoStaff": "لا يوجد موظفين مسجلين",
+  "adminRoleTaker": "تيكر",
+  "adminRolePreparer": "محضر",
+  "adminRoleDriver": "طيار",
+  "adminNoPhone": "بدون هاتف",
+  "adminReportsTitle": "لوحة التقارير واليومية المجمعة",
+  "adminTotalSalesCollected": "إجمالي المبيعات (المحصلة)",
+  "adminDeliveredOrdersTitle": "طلبات مكتملة وتم توصيلها",
+  "adminOrdersInPreparationTitle": "طلبات قيد التحضير حالياً",
+  "adminCancelledOrdersTitle": "طلبات ملغاة",
+  "adminTotalOrdersCumulative": "إجمالي الطلبات (التراكمي)",
+  "adminOrdersCount": "{count} طلب",
+  "@adminOrdersCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminRecentOrdersLog": "سجل الطلبات الأخير",
+  "adminOrderNumberColumn": "رقم الطلب",
+  "adminCustomerNameColumn": "اسم العميل",
+  "adminStatusColumn": "الحالة",
+  "paymentMethodCashLabel": "كاش عند الاستلام",
+  "paymentMethodCardLabel": "بطاقة بنكية (فيزا/ماستركارد)",
+  "paymentMethodInstaPayLabel": "إنستا باي (InstaPay)",
+  "paymentMethodInstaPaySubtitle": "تحويل فوري عبر تطبيق InstaPay",
+  "instaPayOpenApp": "افتح تطبيق InstaPay للدفع الآن",
+  "instaPayIpaLabel": "عنوان الدفع اللحظي IPA",
+  "instaPayPhoneLabel": "أو التحويل برقم الهاتف",
+  "instaPayCopy": "نسخ",
+  "instaPayCopied": "تم النسخ",
+  "instaPayConfirmHint": "بعد إتمام التحويل بقيمة الطلب عبر إنستا باي، اضغط على تأكيد الطلب بالأسفل.",
+  "instaPayReceiptTitle": "إيصال التحويل البنكي (سكرين شوت)",
+  "instaPayReceiptHint": "يجب إرفاق لقطة شاشة لنجاح عملية التحويل من تطبيق إنستا باي لتأكيد الطلب",
+  "instaPayReceiptPick": "اختر صورة الإيصال أو التقاط صورة",
+  "instaPayReceiptRequired": "يرجى إرفاق صورة إيصال التحويل أولاً",
+  "adminViewTransferReceipt": "عرض إيصال التحويل",
+  "adminCopyReceiptImage": "نسخ الصورة",
+  "adminShareReceipt": "مشاركة الإيصال",
+  "adminReceiptImageCopied": "تم نسخ صورة الإيصال",
+  "adminReceiptActionFailed": "تعذر تنفيذ العملية على صورة الإيصال",
+  "subscriptionConfirmInstaPay": "تأكيد الاشتراك",
+  "subscriptionPendingSuccessTitle": "تم استلام طلب الترقية",
+  "subscriptionPendingSuccessBody": "تم استلام طلب الترقية وإيصال الدفع. سيتم تفعيل حسابك (Pro) فور مراجعة الإدارة.",
+  "adminMenuPendingSubscriptions": "طلبات الترقية المعلقة",
+  "adminActivateAccount": "تفعيل الحساب",
+  "adminSubscriptionApproved": "تم تفعيل الاشتراك",
+  "adminNoPendingSubscriptions": "لا توجد طلبات ترقية معلقة",
+  "adminPendingSubscriptionTier": "الباقة المطلوبة",
+  "paymentCopyCardNumber": "نسخ رقم البطاقة",
+  "paymentCardNumberCopied": "تم نسخ رقم البطاقة",
+  "checkoutAddressOutOfRange": "العنوان خارج نطاق التوصيل",
+  "checkoutPinAddressFirst": "حدد موقع العنوان على الخريطة أولاً",
+  "checkoutOrderFailed": "تعذر إتمام الطلب: {error}",
+  "@checkoutOrderFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutTitle": "إتمام الطلب",
+  "checkoutDeliveryAddress": "عنوان التوصيل",
+  "checkoutPaymentMethod": "طريقة الدفع",
+  "checkoutOrderSummary": "ملخص الطلب",
+  "checkoutSelectAddressFirst": "اختر عنوان التوصيل أولاً لإتمام طلبك",
+  "checkoutPinLocationForFee": "حدد موقع العنوان على الخريطة لحساب مصاريف التوصيل",
+  "checkoutOrderPlaced": "تم استلام طلبك بنجاح • رقم الطلب #{id}",
+  "@checkoutOrderPlaced": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutOutOfRange": "عذراً، العنوان يبعد {distance} وخارج نطاق التوصيل (حتى {maxDistance})",
+  "@checkoutOutOfRange": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      },
+      "maxDistance": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutSignInToChooseAddress": "سجّل دخولك لاختيار عنوان التوصيل",
+  "checkoutPinThisAddressForFee": "حدد موقع هذا العنوان على الخريطة لحساب مصاريف التوصيل",
+  "checkoutPinLocation": "حدد الموقع",
+  "checkoutChangeAddress": "تغيير",
+  "checkoutAddDeliveryAddress": "أضف عنوان التوصيل لإتمام طلبك",
+  "checkoutAddAddress": "إضافة عنوان",
+  "checkoutNoAddressChosen": "لم تختر عنوان التوصيل بعد",
+  "checkoutChooseAddress": "اختر العنوان",
+  "checkoutEstimatedArrival": "وقت الوصول المتوقع:",
+  "checkoutDeliveryFeeWithDistance": "رسوم التوصيل ({distance})",
+  "@checkoutDeliveryFeeWithDistance": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "checkoutOutOfDeliveryRange": "خارج نطاق التوصيل",
+  "checkoutItemCount": "عدد المنتجات",
+  "checkoutSubtotal": "المجموع",
+  "checkoutGrandTotal": "الإجمالي النهائي",
+  "checkoutConfirmOrder": "تأكيد الطلب",
+  "paymentCardScanUnsupported": "مسح البطاقة غير مدعوم على هذا الجهاز",
+  "paymentCardScanFailed": "لم نتمكن من قراءة البطاقة، أدخل البيانات يدويًا",
+  "paymentCardScanned": "تمت قراءة البطاقة، راجع البيانات وأدخل رمز CVV",
+  "paymentCardTitle": "الدفع بالبطاقة",
+  "paymentSecureNotice": "عملية دفع آمنة ومشفرة",
+  "paymentPayNow": "ادفع الآن • {amount}",
+  "@paymentPayNow": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "paymentScanCardTooltip": "مسح البطاقة بالكاميرا",
+  "paymentAmountDue": "المبلغ المطلوب",
+  "cardNumberRequired": "أدخل رقم البطاقة",
+  "cardNumberInvalid": "رقم البطاقة غير صحيح",
+  "cardExpiryRequired": "أدخل التاريخ MM/YY",
+  "cardExpiryInvalidMonth": "شهر غير صحيح",
+  "cardExpired": "البطاقة منتهية",
+  "cardCvvInvalid": "رمز غير صحيح",
+  "cardHolderNameRequired": "أدخل الاسم كما هو على البطاقة",
+  "walletCardSaved": "تم حفظ البطاقة بنجاح",
+  "walletCardDataProtected": "بياناتك محمية ولن نحتفظ برمز CVV",
+  "walletSaveCard": "حفظ البطاقة",
+  "walletAddCardHint": "أضف بطاقتك للدفع بشكل أسرع في طلباتك القادمة",
+  "walletInAppBalance": "رصيد محفظتك في التطبيق",
+  "walletBalanceLoadFailed": "تعذر تحميل الرصيد",
+  "walletBalanceAutoApplied": "يُستخدم رصيدك تلقائياً عند الدفع",
+  "walletSignInToViewBalance": "سجل دخولك لعرض رصيدك",
+  "walletCardExpires": "تنتهي {expiry}",
+  "@walletCardExpires": {
+    "placeholders": {
+      "expiry": {
+        "type": "String"
+      }
+    }
+  },
+  "walletDeleteCard": "حذف البطاقة",
+  "checkoutUseOrAddNewCard": "+ استخدام أو إضافة بطاقة جديدة",
+  "checkoutSavedCards": "بطاقاتك المحفوظة",
+  "paywallUpgradeAccount": "ترقية الحساب",
+  "paywallDiscoverSafeer": "اكتشف عالم سفير 👑",
+  "paywallChoosePlan": "اختر الباقة التي تناسب احتياجاتك ووفر أكثر مع كل طلب.",
+  "paywallProTitle": "سفير برو (VIP)",
+  "paywallPerMonth": "/ شهرياً",
+  "paywallProUnlimitedFreeDelivery": "توصيل مجاني غير محدود 🚀",
+  "paywallProExpressDelivery": "توصيل إكسبريس (أولوية التجهيز)",
+  "paywallProWholesalePrices": "أسعار الجملة الحصرية 💰",
+  "paywallProNoMinimumOrder": "بدون حد أدنى للطلب",
+  "paywallProUnlimitedGiveaways": "دخول غير محدود لسحوبات الهدايا",
+  "paywallPrimeTitle": "سفير برايم",
+  "paywallPrimeFreeDeliveryFiveOrders": "توصيل مجاني لـ 5 طلبات",
+  "paywallPrimeOffersPriority": "أولوية حجز العروض الكبرى",
+  "paywallPrimeWeeklyPlayAndWin": "لعبة العب واكسب أسبوعياً 🎁",
+  "paywallFreeTitle": "حساب عادي",
+  "paywallFreePrice": "مجاناً",
+  "paywallFreeStandardDelivery": "توصيل عادي بتكلفة قياسية",
+  "paywallFreePublicAccess": "الوصول للمنتجات والعروض العامة",
+  "paywallBestSeller": "الأكثر مبيعاً",
+  "paywallPaymentComingSoon": "سيتم ربط الدفع قريباً",
+  "paywallSubscribeNow": "اشترك الآن",
+  "catDairyEggs": "ألبان وبيض",
+  "subcatTetraPakCheese": "جبن تترباك و مثلثات و كوب",
+  "subcatPackagedCheeseLabneh": "اجبان معبأ ولبنة و كريمة وسمنة",
+  "subcatCheeseByWeight": "أجبان وزن",
+  "subcatMozzarella": "جبن موزاريلا",
+  "subcatYogurtRicePudding": "زبادي وارز باللبن",
+  "subcatLongLifeDairy": "البان طويلة الاجل",
+  "subcatPackagedButter": "زبدة معبأ",
+  "subcatPackagedEggs": "بيض مغلف",
+  "catSweetsSnacks": "حلويات وتسالي",
+  "subcatChocolate": "شيكولاتة",
+  "subcatBiscuits": "بسكويت",
+  "subcatSweets": "حلويات",
+  "subcatChipsRoasted": "مقرمشات و محمصات",
+  "subcatNutsByWeight": "تسالي و مكسرات وزن",
+  "subcatHalawaSpreads": "حلاوة وزبدة",
+  "subcatRamadanYamish": "ياميش رمضان",
+  "catDrinksJuices": "مشروبات وعصائر",
+  "subcatWaterDrinksIceCream": "مياه ومشروبات و عصائر و ايس كريم",
+  "subcatDrinks": "مشروبات",
+  "subcatJuices": "عصائر",
+  "subcatPowderedJuices": "عصائر بودر",
+  "catMeatFrozen": "لحوم ومجمدات",
+  "subcatFrozenPoultry": "دواجن مجمدة ومصنعات دوراجن",
+  "subcatFrozenMeat": "لحوم مجمدة",
+  "subcatProcessedMeat": "مصنعات لحوم",
+  "subcatFrozenFish": "أسماك مجمدة",
+  "subcatSmokedFish": "اسماك مدخنة",
+  "subcatFrozenVegFruit": "خضروات وفاكهه مجمدة",
+  "subcatFrozenPastries": "معجنات مجمدة",
+  "catBakeryBreakfast": "مخبوزات وفطار",
+  "subcatBakery": "مخبوزات",
+  "subcatPatisserie": "باتيه و وتش",
+  "subcatCerealsOats": "كورن فليكس و موسلي وشوفان",
+  "catPastaRice": "مكرونة وأرز",
+  "subcatPasta": "مكرونه",
+  "subcatRice": "ارز",
+  "subcatLegumesSpicesBreadcrumbs": "بقوليات وعطارة وبقسماط معبأة",
+  "subcatSoupsStocksMixes": "شوربات ومرقات و خلطات",
+  "catPantryOils": "بقالة وزيوت",
+  "subcatOils": "زيوت",
+  "subcatGhee": "سمن",
+  "subcatSugarFlour": "سكر ودقيق",
+  "subcatCannedFood": "معلبات",
+  "subcatCondiments": "مشهيات",
+  "subcatOlivesPickles": "زيتون ومخللات",
+  "subcatPackagedOlivesPickles": "زيتون ومخلل معبأ",
+  "subcatSpicesByWeight": "عطارة وزن",
+  "subcatGrainsByWeight": "علافة وزن",
+  "subcatBakingSupplies": "مستلزمات حلويات وبودر",
+  "subcatSaladsByWeight": "سلاطات أنواع وزن",
+  "catCleaningCare": "منظفات وعناية",
+  "subcatDetergentsSofteners": "مساحيق ومنعمات",
+  "subcatLiquidSoapStainRemovers": "صابون سائل ومزيلات بقع",
+  "subcatBleachDisinfectants": "كلور ومطهرات",
+  "subcatPolishes": "ملمعات",
+  "subcatInsecticidesFresheners": "مبيدات ومعطرات",
+  "subcatTissuesToiletPaper": "مناديل و ورق تواليت",
+  "subcatSteelWoolScrubbers": "سلك وليف",
+  "subcatSpongesSteelWool": "أسفنج و سلك",
+  "subcatDrainCleaners": "مسلكات بلوعات",
+  "subcatIncense": "بخور",
+  "catPersonalCare": "عناية شخصية",
+  "subcatShampooConditioner": "شامبو وبلسم",
+  "subcatShowerGelHandWash": "شاور جل وهاند ووش",
+  "subcatSoap": "صابون",
+  "subcatPerfumesDeodorants": "برفانات ومزيلات عرق",
+  "subcatCreamsSerums": "كريمات وسيرم",
+  "subcatOralCare": "مستلزمات أسنان",
+  "subcatShavingSupplies": "مستلزمات حلاقة",
+  "subcatHairDyeHenna": "صبغات وحنة",
+  "subcatPersonalCareSupplies": "مستلزمات عناية شخصية",
+  "catBabyWorld": "عالم الطفل",
+  "subcatDiapersPads": "حافضات و فوط صحية",
+  "subcatBabyFood": "اكل اطفال",
+  "subcatBabySupplies": "مستلزمات اطفال",
+  "catHomeSupplies": "أدوات منزلية",
+  "subcatHousewares": "ادوات منزلية",
+  "subcatElectricalTools": "ادوات كهربية",
+  "subcatElectricalSupplies": "مستلزمات كهربائية",
+  "subcatPlasticsBags": "بلاستيكات وأكياس",
+  "subcatFoil": "فويل",
+  "subcatHardware": "خردوات",
+  "subcatBatteries": "بطاريات وحجاره",
+  "subcatMatchesLighters": "كبريت و ولاعات",
+  "subcatPetSupplies": "مستلزمات حيوانات",
+  "subcatRamadanSupplies": "مستلزمات رمضان",
+  "categoryTitle": "القسم",
+  "categoryNotFound": "هذا القسم غير موجود",
+  "categoryNoProductsNow": "لا توجد منتجات في هذا القسم حالياً",
+  "shopFromHome": "تسوق من الرئيسية",
+  "categoryProductCount": "{count} منتج",
+  "@categoryProductCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "loadMoreFailedRetry": "تعذر تحميل المزيد، إعادة المحاولة",
+  "categoriesDrawerTagline": "كل اللي محتاجه في مكان واحد",
+  "productDetailsTitle": "تفاصيل المنتج",
+  "productNotAvailable": "هذا المنتج غير متاح",
+  "productLoadFailed": "تعذر تحميل المنتج",
+  "productImageUpdated": "تم تحديث صورة المنتج بنجاح!",
+  "productImageUploadFailed": "حدث خطأ أثناء الرفع: {error}",
+  "@productImageUploadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "updateProductImage": "تحديث صورة المنتج",
+  "takePhotoWithCamera": "التقاط صورة بالكاميرا",
+  "chooseFromGallery": "اختيار من المعرض",
+  "changeProductImage": "تغيير الصورة",
+  "pricePerKiloChooseWeight": "السعر للكيلو، اختر الوزن عند الإضافة",
+  "productDescription": "الوصف",
+  "addToCartButton": "إضافة للسلة",
+  "productCurrentlyUnavailable": "غير متوفر حالياً",
+  "productDetailsInCart": "في السلة",
+  "imageLinkCopied": "تم نسخ رابط الصورة بنجاح",
+  "copyImageLink": "نسخ رابط الصورة",
+  "similarProducts": "منتجات مشابهة",
+  "searchInSafeer": "ابحث في سفير",
+  "searchProductHint": "ابحث عن منتج، مثل: لبن، جبنة...",
+  "clearSearch": "مسح",
+  "barcodeScanUnsupported": "مسح الباركود غير مدعوم على هذا الجهاز",
+  "searchFailedCheckConnection": "تعذر البحث، تحقق من اتصالك",
+  "scanAnotherProduct": "امسح منتجًا آخر",
+  "noProductWithBarcode": "لا يوجد منتج بالباركود «{barcode}»",
+  "@noProductWithBarcode": {
+    "placeholders": {
+      "barcode": {
+        "type": "String"
+      }
+    }
+  },
+  "productMayBeUnavailable": "قد يكون المنتج غير متوفر حاليًا",
+  "scanAgain": "امسح مرة أخرى",
+  "noSearchResultsFor": "لا توجد نتائج لـ «{query}»",
+  "@noSearchResultsFor": {
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "searchTryAnotherWord": "جرّب كلمة أخرى أو تأكد من الإملاء",
+  "searchResultsCount": "{count} نتيجة لـ «{query}»",
+  "@searchResultsCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "popularSearches": "عمليات بحث شائعة",
+  "searchIntroSubtitle": "ابحث بين آلاف المنتجات واطلبها في دقائق",
+  "searchSuggestionMilk": "لبن",
+  "searchSuggestionCheese": "جبنة",
+  "searchSuggestionRice": "أرز",
+  "searchSuggestionOil": "زيت",
+  "searchSuggestionSugar": "سكر",
+  "searchSuggestionTea": "شاي",
+  "receiptTypeReceive": "استلام",
+  "receiptTypeSupplierReturn": "استرجاع",
+  "warehouseGoodsReceiptTitle": "استلام بضاعة",
+  "warehouseGoodsReturnTitle": "استرجاع بضاعة",
+  "warehouseReceiptSaved": "تم حفظ أمر الاستلام",
+  "warehouseReturnSaved": "تم حفظ أمر الاسترجاع",
+  "warehouseSubmitReceipt": "إرسال أمر الاستلام",
+  "warehouseSubmitReturn": "إرسال أمر الاسترجاع",
+  "warehouseInvoiceDate": "تاريخ الفاتورة",
+  "warehouseScanOrEnterBarcode": "امسح الباركود أو اكتبه",
+  "warehouseEnterQuantityAboveZero": "أدخل كمية أكبر من صفر",
+  "warehouseCompleteRequiredFields": "أكمل الحقول المطلوبة أولاً",
+  "warehouseNoItemsYet": "لم تُضف أصناف بعد",
+  "warehouseDocumentDetails": "بيانات المستند",
+  "warehouseInvoiceNumberRequiredLabel": "رقم الفاتورة *",
+  "warehouseInvoiceDateRequiredLabel": "تاريخ الفاتورة *",
+  "warehouseInvoiceDateRequired": "تاريخ الفاتورة مطلوب",
+  "warehouseItems": "الأصناف",
+  "warehouseBarcode": "الباركود",
+  "warehouseQuantity": "الكمية",
+  "warehouseAdd": "إضافة",
+  "warehouseReloadSuppliers": "إعادة تحميل الموردين",
+  "warehouseSupplierRequiredLabel": "المورد *",
+  "warehouseSupplierHint": "ابحث أو اكتب رقم المورد",
+  "warehouseSuppliersEmpty": "قائمة الموردين فارغة",
+  "warehouseSelectSupplier": "اختر المورد",
+  "warehouseSelectSupplierFromList": "اختر المورد من القائمة",
+  "warehouseFetchingProductName": "جارٍ جلب اسم المنتج…",
+  "warehouseUnregisteredProduct": "منتج غير مسجل",
+  "warehouseQuantityValue": "الكمية: {quantity}",
+  "@warehouseQuantityValue": {
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseSelectDate": "اختر التاريخ",
+  "warehouseClearDate": "مسح التاريخ",
+  "warehouseSuppliersLoadFailed": "تعذر تحميل الموردين: {error}",
+  "@warehouseSuppliersLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseDocumentSaveFailed": "تعذر حفظ المستند: {error}",
+  "@warehouseDocumentSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseOrderAlreadyUpdated": "تعذر تحديث الطلب، ربما تم تحديثه بالفعل",
+  "warehouseSignOutConfirm": "هل تريد تسجيل الخروج من حساب المخزن؟",
+  "warehouseDashboardTitle": "لوحة المخزن",
+  "warehouseNewOrdersTab": "طلبات جديدة",
+  "warehousePreparingTab": "قيد التجهيز",
+  "warehouseItemInquiry": "استعلام عن صنف",
+  "warehouseItemInquiryFailed": "تعذر الاستعلام عن الصنف\n{error}",
+  "@warehouseItemInquiryFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseItemNotRegistered": "الصنف غير مسجل في قاعدة البيانات",
+  "warehouseBarcodeValue": "الباركود: {barcode}",
+  "@warehouseBarcodeValue": {
+    "placeholders": {
+      "barcode": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseAvailableQuantity": "الكمية المتاحة: {quantity}",
+  "@warehouseAvailableQuantity": {
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseNoNewOrders": "لا توجد طلبات جديدة\nاسحب للتحديث",
+  "warehouseNoPreparingOrders": "لا توجد طلبات قيد التجهيز",
+  "warehousePreparingStarted": "بدأ تجهيز الطلب #{id}، تجده في «قيد التجهيز»",
+  "@warehousePreparingStarted": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseOrderReady": "الطلب #{id} جاهز، تم إشعار مناديب التوصيل",
+  "@warehouseOrderReady": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseProductsCount": "المنتجات ({count})",
+  "@warehouseProductsCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseCustomerValue": "العميل: {name}",
+  "@warehouseCustomerValue": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseAddressValue": "العنوان: {address}",
+  "@warehouseAddressValue": {
+    "placeholders": {
+      "address": {
+        "type": "String"
+      }
+    }
+  },
+  "warehouseTotalValue": "الإجمالي: {amount}",
+  "@warehouseTotalValue": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "driverNewOrderAvailable": "طلب جديد متاح للتوصيل!",
+  "driverLocationSharingStartFailed": "تعذر بدء مشاركة موقعك: {error}",
+  "@driverLocationSharingStartFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "driverSignOutConfirm": "هل تريد تسجيل الخروج من حساب السائق؟",
+  "driverDashboardTitle": "لوحة السائق",
+  "driverAvailableOrdersTab": "طلبات متاحة",
+  "driverNoAvailableOrders": "لا توجد طلبات متاحة الآن\nاسحب للتحديث",
+  "driverNoActiveDeliveries": "لا توجد طلبات قيد التوصيل",
+  "driverOrderAccepted": "تم قبول الطلب #{id}، تجده في «طلباتي»",
+  "@driverOrderAccepted": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "driverOrderDelivered": "تم توصيل الطلب #{id}",
+  "@driverOrderDelivered": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "driverPhoneLabel": "الهاتف",
+  "driverAddressLabel": "العنوان",
+  "driverDistanceLabel": "المسافة",
+  "driverDistanceNotSpecified": "غير محددة",
+  "driverDistanceFromBranch": "{distance} من الفرع",
+  "@driverDistanceFromBranch": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "driverTotalToCollect": "الإجمالي (تحصيل)",
+  "driverViewMapAndLocation": "عرض الخريطة والموقع",
+  "driverAcceptOrder": "قبول الطلب",
+  "driverBroadcastingLocation": "جاري بث الموقع...",
+  "driverBroadcastingLocationLastSent": "جاري بث الموقع... آخر إرسال {time}",
+  "@driverBroadcastingLocationLastSent": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "driverRequestingLocationPermission": "جاري طلب إذن الموقع...",
+  "driverStartLocationSharing": "بدء بث الموقع",
+  "driverCopyLabel": "نسخ {label}",
+  "@driverCopyLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "driverCopiedLabel": "تم نسخ {label}",
+  "@driverCopiedLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "driverLocationReadFailed": "تعذر قراءة موقعك: {error}",
+  "@driverLocationReadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "driverLocationSharingStopped": "توقف بث الموقع، اضغط «بدء بث الموقع» للمتابعة",
+  "driverOrderTakenByAnother": "عذراً، تم قبول هذا الطلب من سائق آخر",
+  "driverAcceptOrderFailed": "تعذر قبول الطلب: {error}",
+  "@driverAcceptOrderFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "driverLocationSendFailed": "تعذر إرسال موقعك للعميل: {error} (code: {code})",
+  "@driverLocationSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "driverLocationSendNotAssigned": "تعذر إرسال موقعك للعميل: الطلب غير مُسند إليك أو لم يعد قيد التوصيل",
+  "driverGpsDisabled": "خدمة الموقع (GPS) متوقفة، فعّلها ليتمكن العميل من تتبعك",
+  "driverLocationPermissionDeniedForever": "إذن الموقع مرفوض، فعّله من إعدادات التطبيق ليتمكن العميل من تتبعك",
+  "driverLocationPermissionDenied": "لم يتم السماح بالوصول لموقعك، لن يتمكن العميل من تتبع الطلب",
+  "driverOpenGoogleMapsFailed": "تعذر فتح خرائط جوجل على هذا الجهاز",
+  "driverMapAndLocationTitle": "الخريطة والموقع",
+  "driverStartNavigation": "ابدأ التوجيه",
+  "listSeparator": "، ",
+  "storeCityName": "مدينة نصر",
+  "addressDefaultTitle": "عنوان",
+  "addressLabelOther": "أخرى",
+  "addressBuildingLine": "عمارة {building}",
+  "@addressBuildingLine": {
+    "placeholders": {
+      "building": {
+        "type": "String"
+      }
+    }
+  },
+  "addressFloorAptLine": "الدور/الشقة {floor}",
+  "@addressFloorAptLine": {
+    "placeholders": {
+      "floor": {
+        "type": "String"
+      }
+    }
+  },
+  "addressLandmarkLine": "علامة مميزة: {landmark}",
+  "@addressLandmarkLine": {
+    "placeholders": {
+      "landmark": {
+        "type": "String"
+      }
+    }
+  },
+  "addressSaveFailed": "تعذر حفظ العنوان: {error}",
+  "@addressSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "addressLocationSaveFailed": "تعذر حفظ موقع العنوان",
+  "addressLocationSaveFailedWithError": "تعذر حفظ موقع العنوان: {error}",
+  "@addressLocationSaveFailedWithError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "locationServiceDisabled": "خدمة الموقع (GPS) متوقفة، فعّلها وحاول مرة أخرى",
+  "locationPermissionDenied": "لم يتم السماح بالوصول لموقعك، يمكنك تحريك الخريطة يدوياً",
+  "locationPermissionDeniedForever": "إذن الموقع مرفوض، فعّله من إعدادات التطبيق",
+  "currentLocationUnavailable": "تعذر تحديد موقعك الحالي، حاول مرة أخرى",
+  "mapAddressReadFailed": "تعذر قراءة العنوان من الخريطة",
+  "addressesEmptyTitle": "لا توجد عناوين محفوظة بعد",
+  "addressesEmptyHint": "أضف عنوانك لتوصيل طلباتك بسرعة",
+  "addressesLoadFailed": "تعذر تحميل العناوين",
+  "signInToManageAddresses": "سجّل دخولك لإدارة عناوينك",
+  "addressDeleteTitle": "حذف العنوان",
+  "addressDeleteConfirm": "هل تريد حذف عنوان «{title}»؟",
+  "@addressDeleteConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "addressDeleteFailed": "تعذر حذف العنوان",
+  "addressSaved": "تم حفظ عنوان «{title}»",
+  "@addressSaved": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "addressPickerTitle": "اختر عنوان التوصيل",
+  "addressPickerEmpty": "لا توجد عناوين محفوظة، أضف عنوانك الأول",
+  "addressDetailsTitle": "تفاصيل العنوان",
+  "addressTitleLabel": "اسم العنوان",
+  "addressTitleHint": "مثال: المنزل، العمل",
+  "addressAreaLabel": "المنطقة",
+  "addressAreaHint": "مثال: مدينة نصر، الحي السادس",
+  "addressStreetLabel": "الشارع",
+  "addressBuildingNumberLabel": "رقم العمارة",
+  "addressFloorAptLabel": "الدور / الشقة",
+  "addressLandmarkLabel": "علامة مميزة",
+  "addressLandmarkHint": "مثال: بجوار مسجد...",
+  "addressSaveButton": "حفظ العنوان",
+  "addressOptionalFieldLabel": "{label} (اختياري)",
+  "@addressOptionalFieldLabel": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "addressFieldRequired": "هذا الحقل مطلوب",
+  "addressReviewAndComplete": "راجع العنوان وأكمل باقي البيانات.",
+  "mapAddressReadFailedFillManually": "تعذر قراءة العنوان من الخريطة، أكمل البيانات يدوياً.",
+  "mapDeliveryQuote": "يبعد {distance} عن الفرع · التوصيل {fee}",
+  "@mapDeliveryQuote": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      },
+      "fee": {
+        "type": "String"
+      }
+    }
+  },
+  "addressOutOfDeliveryRange": "هذا الموقع يبعد {distance}، خارج نطاق التوصيل (حتى {maxDistance}).",
+  "@addressOutOfDeliveryRange": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      },
+      "maxDistance": {
+        "type": "String"
+      }
+    }
+  },
+  "mapOutOfDeliveryRange": "يبعد {distance}، خارج نطاق التوصيل",
+  "@mapOutOfDeliveryRange": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "mapPinHint": "حرّك الخريطة لوضع الدبوس على مكان التوصيل بالضبط",
+  "mapMyCurrentLocation": "موقعي الحالي",
+  "mapConfirmLocation": "تأكيد الموقع",
+  "mapSetDeliveryLocation": "حدد موقع التوصيل",
+  "myOrdersLoadFailed": "تعذر تحميل طلباتك",
+  "myOrdersEmptyTitle": "لا توجد طلبات بعد",
+  "myOrdersEmptySubtitle": "ابدأ التسوق وستظهر طلباتك هنا",
+  "orderStatusReceivedLong": "تم استلام الطلب",
+  "orderStatusPreparingInWarehouse": "جاري التجهيز في المخزن",
+  "orderStatusAwaitingDriver": "في انتظار مندوب التوصيل",
+  "orderStatusReadyShort": "جاهز",
+  "orderStepReceived": "تم الاستلام",
+  "orderStepPreparing": "التجهيز",
+  "orderCardStatusLine": "حالة الطلب: {status}",
+  "@orderCardStatusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "orderCardTrackOnMap": "تتبع الطلب على الخريطة",
+  "trackingTitle": "تتبع الطلب #{id}",
+  "@trackingTitle": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "trackingYourAddressMarker": "عنوانك",
+  "trackingDriverMarker": "مندوب التوصيل",
+  "trackingOrderDelivered": "تم توصيل طلبك، بالهناء والشفاء!",
+  "trackingDriverLocationLive": "يتم تحديث موقع المندوب على الخريطة مباشرة",
+  "trackingDriverLocating": "جاري تحديد موقع المندوب… سيظهر على الخريطة قريباً",
+  "authAccountCreatedConfirmEmail": "تم إنشاء حسابك! أرسلنا رابط التأكيد إلى {email}، أكّد بريدك ثم سجّل الدخول.",
+  "@authAccountCreatedConfirmEmail": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "authFullNameLabel": "الاسم الكامل",
+  "authEnterFullName": "أدخل اسمك الكامل",
+  "authEnterValidEmail": "أدخل بريداً إلكترونياً صحيحاً",
+  "authEnterValidEgyptianPhone": "أدخل رقم هاتف مصري صحيح (11 رقماً)",
+  "authPassword": "كلمة المرور",
+  "authShowPassword": "إظهار كلمة المرور",
+  "authHidePassword": "إخفاء كلمة المرور",
+  "authPasswordMinLength": "كلمة المرور 6 أحرف على الأقل",
+  "authSignInButton": "تسجيل الدخول",
+  "authCreateAccountButton": "إنشاء الحساب",
+  "authNoAccountPrompt": "ليس لديك حساب؟ ",
+  "authHaveAccountPrompt": "لديك حساب بالفعل؟ ",
+  "authCreateNewAccountLink": "أنشئ حساباً جديداً",
+  "authSignInLink": "سجّل الدخول",
+  "authWelcomeBack": "أهلاً بعودتك!",
+  "authJoinSafeerMarket": "انضم إلى سفير ماركت",
+  "authSignInSubtitle": "سجّل دخولك لإتمام طلبك",
+  "authSignUpSubtitle": "أنشئ حسابك واستمتع بعروض سفير",
+  "authNewAccountTab": "حساب جديد",
+  "authEmailAlreadyRegistered": "هذا البريد الإلكتروني مسجل بالفعل",
+  "authAccountCreatedProfileSaveFailed": "تم إنشاء الحساب لكن تعذر حفظ البيانات: {error}",
+  "@authAccountCreatedProfileSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "authInvalidCredentials": "البريد الإلكتروني أو كلمة المرور غير صحيحة",
+  "authEmailNotConfirmed": "يرجى تأكيد بريدك الإلكتروني أولاً من الرسالة المرسلة إليك",
+  "authWeakPassword": "كلمة المرور ضعيفة، استخدم 6 أحرف على الأقل",
+  "authTooManyAttempts": "محاولات كثيرة، يرجى المحاولة بعد قليل",
+  "editProfileSignInPrompt": "سجل دخولك لتعديل بياناتك",
+  "profileSavedSuccessfully": "تم حفظ بياناتك بنجاح",
+  "profileFullNameLabel": "الاسم بالكامل",
+  "profileEnterFullName": "أدخل اسمك بالكامل",
+  "profileEnterValidPhone": "أدخل رقم هاتف مصري صحيح",
+  "profileSaveChanges": "حفظ التغييرات",
+  "profileSaveFailed": "تعذر حفظ البيانات: {error}",
+  "@profileSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationTokenSaveFailed": "تعذر حفظ رمز الإشعارات: {error}",
+  "@notificationTokenSaveFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "featureComingSoon": "{feature} متاح قريباً",
+  "@featureComingSoon": {
+    "placeholders": {
+      "feature": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardsPointsCount": "{count, plural, few{{count} نقاط} other{{count} نقطة}}",
+  "@rewardsPointsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardsGamesTitle": "الألعاب",
+  "rewardsGamesSubtitle": "العب واجمع نقاط الولاء",
+  "gameLockedUntilTomorrow": "متاح مرة أخرى بعد {countdown}",
+  "@gameLockedUntilTomorrow": {
+    "placeholders": {
+      "countdown": {
+        "type": "String"
+      }
+    }
+  },
+  "scratchCardTitle": "بطاقة الخدش - امسح واربح",
+  "scratchCardSubtitle": "امسح الطبقة واربح نقاطاً فورية",
+  "scratchCardHint": "امسح الطبقة الفضية لكشف جائزتك",
+  "scratchWonPoints": "ربحت {points} نقطة!",
+  "@scratchWonPoints": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      }
+    }
+  },
+  "scratchBetterLuck": "حظ أوفر",
+  "luckyChestTitle": "صندوق الحظ اليومي - افتح صندوقك",
+  "luckyChestSubtitle": "افتح الصندوق واربح حتى 10 نقاط",
+  "luckyChestHint": "اضغط على الصندوق لفتحه وكشف جائزتك",
+  "luckyChestTapToOpen": "اضغط لفتح الصندوق",
+  "luckyChestOpened": "تم فتح الصندوق لهذا اليوم",
+  "luckyChestWonPoints": "ربحت {points} نقطة من الصندوق!",
+  "@luckyChestWonPoints": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardsWheelCardSubtitle": "لف العجلة واربح حتى 100 نقطة",
+  "rewardsPuzzleCardSubtitle": "رتّب الشعار واربح 50 نقطة",
+  "loyaltyCurrentBalance": "رصيدك الحالي",
+  "loyaltySignInToSeePoints": "سجّل دخولك لترى نقاطك",
+  "loyaltyLoadFailedRetry": "تعذر التحميل — إعادة المحاولة",
+  "loyaltyPointsLoadFailed": "تعذر تحميل نقاط الولاء: {error}",
+  "@loyaltyPointsLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "loyaltyPointsUpdateFailed": "تعذر تحديث نقاط الولاء: {error}",
+  "@loyaltyPointsUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "wheelPrizeTryAgain": "حاول مجدداً",
+  "wheelSpinCollectLoyaltyPoints": "لف العجلة واجمع نقاط الولاء",
+  "wheelSignInToPlay": "سجل دخولك لتلعب",
+  "wheelSpinning": "العجلة تدور...",
+  "wheelSpin": "لف العجلة",
+  "wheelCongrats": "مبروك!",
+  "wheelTryAgainTitle": "حاول مرة أخرى",
+  "wheelWonPrize": "ربحت {prize} ولاء وأُضيفت إلى رصيدك.",
+  "@wheelWonPrize": {
+    "placeholders": {
+      "prize": {
+        "type": "String"
+      }
+    }
+  },
+  "wheelNoPointsThisTime": "لم تربح نقاطاً هذه المرة. حظاً أوفر في اللفة القادمة!",
+  "puzzleMoves": "الحركات: {moves}",
+  "@puzzleMoves": {
+    "placeholders": {
+      "moves": {
+        "type": "String"
+      }
+    }
+  },
+  "puzzlePrize": "الجائزة: {points} نقطة",
+  "@puzzlePrize": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      }
+    }
+  },
+  "puzzleSavePoints": "احفظ {points} نقطة",
+  "@puzzleSavePoints": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      }
+    }
+  },
+  "puzzleShuffle": "خلط القطع",
+  "puzzleOutOfMoves": "حظ أوفر المرة القادمة! لقد استنفدت عدد الحركات المتاحة.",
+  "puzzleCongrats": "مبرووك!",
+  "puzzleEarnedPoints": "كسبت {points} نقطة 🎉",
+  "@puzzleEarnedPoints": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      }
+    }
+  },
+  "puzzlePointsAddedToBalance": "أُضيفت النقاط إلى رصيد الولاء.",
+  "puzzleGuestEarnedPoints": "مبرووك! كسبت {points} نقطة 🎉",
+  "@puzzleGuestEarnedPoints": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      }
+    }
+  },
+  "puzzleSignInToAddPoints": "سجّل دخولك لنضيفها إلى رصيدك.",
+  "puzzleGoalTitle": "رتّب الشعار",
+  "puzzleGoalDescription": "حرّك القطع المجاورة للفراغ حتى يعود الشعار كما في الصورة",
+  "unitCarton": "كرتونة",
+  "unitBox": "علبة",
+  "unitBag": "كيس",
+  "unitPack": "باكو",
+  "cartTitle": "سلة التسوق",
+  "clearCart": "إفراغ السلة",
+  "cartSubtotalWithCount": "المجموع ({count} منتج)",
+  "@cartSubtotalWithCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "cartDeliveryFeeNextStep": "رسوم التوصيل تُحسب في الخطوة التالية",
+  "cartContinueOrder": "متابعة الطلب",
+  "cartEmptySubtitle": "أضف منتجاتك المفضلة وابدأ التسوق",
+  "cartSaveDeliveryFeesTitle": "وفر رسوم التوصيل! 💡",
+  "cartPrimeUpsellSubtitle": "اشترك في سفير برايم بـ 90 ج.م فقط.",
+  "cartAddedWeightOfProduct": "تمت إضافة {weight} من {product} إلى السلة",
+  "@cartAddedWeightOfProduct": {
+    "placeholders": {
+      "weight": {
+        "type": "String"
+      },
+      "product": {
+        "type": "String"
+      }
+    }
+  },
+  "cartAddedProduct": "تمت إضافة {product} إلى السلة",
+  "@cartAddedProduct": {
+    "placeholders": {
+      "product": {
+        "type": "String"
+      }
+    }
+  },
+  "viewCart": "عرض السلة",
+  "removeFromCart": "حذف من السلة",
+  "chooseWeight": "اختر الوزن",
+  "pricePerKilo": "{price} للكيلو",
+  "@pricePerKilo": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "weightPickerPrice": "السعر",
+  "updateWeight": "تحديث الوزن",
+  "homeNotificationsTooltip": "الإشعارات",
+  "homeSearchHint": "ابحث عن منتج أو ماركة",
+  "homeDeliveringTo": "التوصيل إلى · {city}",
+  "@homeDeliveringTo": {
+    "placeholders": {
+      "city": {
+        "type": "String"
+      }
+    }
+  },
+  "homeChooseYourAddress": "اختر عنوانك",
+  "homeMyAccountTooltip": "حسابي",
+  "homeSignedInSuccessfully": "تم تسجيل الدخول بنجاح",
+  "homeDeliveryEta": "توصيل خلال 30 - 45 دقيقة",
+  "quickActionLatestProducts": "أحدث المنتجات",
+  "quickActionOffers": "العروض",
+  "quickActionPlayAndWin": "العب واكسب",
+  "promoEndlessOffersTitle": "عروض سفير ما بتنتهيش",
+  "promoEndlessOffersSubtitle": "خصومات يومية على مئات المنتجات",
+  "promoSavingsStoreTitle": "سفير... محل التوفير",
+  "promoSavingsStoreSubtitle": "أسعار أقل كل يوم لكل البيت",
+  "promoOpeningDiscountsTitle": "خصومات الافتتاح",
+  "promoOpeningDiscountsSubtitle": "حتى 30% على أول طلب",
+  "promoFreeDeliveryTitle": "توصيل مجاني",
+  "promoFreeDeliverySubtitle": "على الطلبات فوق 300 ج.م",
+  "offerDiscountPercent": "خصم {percent}%",
+  "@offerDiscountPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "offerBadge": "عرض",
+  "favoritesSignInPrompt": "سجّل دخولك لحفظ منتجاتك المفضلة",
+  "favoritesLoadFailed": "تعذر تحميل المفضلة",
+  "favoritesEmptyTitle": "لا توجد منتجات مفضلة بعد",
+  "favoritesEmptySubtitle": "اضغط على ♡ في أي منتج لحفظه هنا",
+  "favoritesUpdateFailed": "تعذر تحديث المفضلة، حاول مرة أخرى",
+  "removeFromFavorites": "إزالة من المفضلة",
+  "addToFavorites": "أضف للمفضلة",
+  "magazinesLoadFailed": "تعذر تحميل المجلات",
+  "noMagazinesCurrently": "لا توجد مجلات حالياً",
+  "magazineNoPdf": "لا يوجد ملف PDF لهذه المجلة",
+  "magazineOpenFailed": "تعذر فتح المجلة. حاول مرة أخرى لاحقاً.",
+  "magazinePreviousPage": "الصفحة السابقة",
+  "magazineNextPage": "الصفحة التالية",
+  "magazinePageOf": "صفحة {page} من {count}",
+  "@magazinePageOf": {
+    "placeholders": {
+      "page": {
+        "type": "String"
+      },
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "authWelcomeTitle": "أهلاً بك في سفير ماركت",
+  "authWelcomeSubtitle": "سجّل دخولك أو أنشئ حساباً في ثوانٍ",
+  "authContinueWithGoogle": "المتابعة باستخدام Google",
+  "authContinueWithPhone": "المتابعة برقم الهاتف",
+  "authContinueWithEmail": "المتابعة بالبريد الإلكتروني",
+  "authOr": "أو",
+  "authOtherSignInOptions": "طرق دخول أخرى",
+  "authTermsNotice": "بالمتابعة، أنت توافق على سياسة الخصوصية والشروط",
+  "authGoogleFailed": "تعذر تسجيل الدخول بحساب Google، حاول مرة أخرى",
+  "authProviderUnavailable": "طريقة تسجيل الدخول هذه غير متاحة حالياً",
+  "authOtpInvalid": "الرمز غير صحيح أو انتهت صلاحيته",
+  "authSmsSendFailed": "تعذر إرسال رسالة التحقق، تأكد من الرقم وحاول مرة أخرى",
+  "authPhoneSheetTitle": "الدخول برقم الهاتف",
+  "authPhoneSheetSubtitle": "سنرسل لك رمز تحقق مكوّناً من 6 أرقام في رسالة نصية",
+  "authSendCode": "إرسال الرمز",
+  "authEnterCodeTitle": "أدخل رمز التحقق",
+  "authCodeSentTo": "أرسلنا الرمز في رسالة نصية إلى {phone}",
+  "@authCodeSentTo": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
+  "authVerifyCode": "تأكيد الرمز",
+  "authEnterSixDigitCode": "أدخل الرمز المكوّن من 6 أرقام",
+  "authResendCode": "إعادة إرسال الرمز",
+  "authResendCodeIn": "إعادة الإرسال بعد {seconds} ث",
+  "@authResendCodeIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "authChangeNumber": "تغيير الرقم",
+  "authCodeResent": "تم إرسال رمز جديد",
+  "productNoImageBadge": "بدون صورة",
+  "newProductsMissingImageCount": "منتجات جديدة (بدون صورة: {count})",
+  "@newProductsMissingImageCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "missingImageCountBadge": "بدون صورة: {count}",
+  "@missingImageCountBadge": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "productImageSaveBlocked": "تم رفع الصورة لكن لم يتم حفظها على المنتج: صلاحية تعديل المنتجات مرفوضة. راجع صلاحيات المسؤول في Supabase.",
+  "authPhoneLoginDisabled": "تسجيل الدخول برقم الهاتف غير مفعّل حالياً، استخدم Google أو البريد الإلكتروني",
+  "onboardingLanguageTitle": "اختر لغتك",
+  "onboardingLanguageSubtitle": "يمكنك تغييرها في أي وقت من الإعدادات",
+  "onboardingAppearanceTitle": "اختر مظهر التطبيق",
+  "onboardingAppearanceSubtitle": "فاتح أو داكن، أو حسب إعدادات جهازك",
+  "onboardingAccountTitle": "سجّل دخولك لتجربة كاملة",
+  "onboardingAccountSubtitle": "اطلب منتجاتك، تابع طلباتك، واحفظ عناوينك ومفضلتك",
+  "onboardingNext": "التالي",
+  "onboardingSignInOrRegister": "تسجيل الدخول أو إنشاء حساب",
+  "onboardingBrowseFirst": "تصفح التطبيق أولاً",
+  "appearance": "المظهر",
+  "themeSystem": "حسب النظام",
+  "themeDark": "داكن",
+  "themeLight": "فاتح",
+  "settingsAccountSection": "الحساب",
+  "guestSignInTitle": "سجّل دخولك للمتابعة",
+  "guestCartMessage": "أنشئ حساباً أو سجّل دخولك لإضافة المنتجات إلى السلة وإتمام طلبك.",
+  "guestProfileMessage": "سجّل دخولك لعرض بياناتك وطلباتك وعناوينك ومفضلتك.",
+  "notNow": "لاحقاً",
+  "unitSet": "طقم",
+  "unitBoxOf": "علبة {count} قطعة",
+  "@unitBoxOf": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "paywallSignInToSubscribe": "سجّل دخولك للاشتراك في باقات سفير",
+  "paymentChooseMethod": "اختر طريقة الدفع",
+  "paymentMethodCard": "بطاقة بنكية (فيزا / ماستركارد / ميزة)",
+  "paymentMethodWallet": "محفظة إلكترونية (فودافون كاش وغيرها)",
+  "paymentWalletPhoneLabel": "رقم المحفظة",
+  "paymentWalletPhoneInvalid": "أدخل رقم محفظة صحيحاً يبدأ بـ 01",
+  "paymentContinue": "متابعة",
+  "paymentStartFailed": "تعذّر بدء الدفع، حاول مرة أخرى",
+  "paymentMethodUnavailable": "طريقة الدفع هذه غير متاحة حالياً",
+  "paymentPageOpenFailed": "تعذّر فتح صفحة الدفع",
+  "paymentVerifying": "جارٍ التحقق من الدفع…",
+  "paymentFailedMessage": "لم تكتمل عملية الدفع أو تم رفض البطاقة من البنك. يرجى المحاولة مرة أخرى.",
+  "paymentStillProcessing": "لم يكتمل تأكيد الدفع بعد. يمكنك مراجعة حالة طلبك من طلباتي.",
+  "subscriptionActivatedTitle": "تم تفعيل الاشتراك بنجاح 👑",
+  "subscriptionActiveUntil": "باقة {plan} فعّالة حتى {date}",
+  "@subscriptionActiveUntil": {
+    "placeholders": {
+      "plan": {
+        "type": "String"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "subscriptionContinueShopping": "متابعة التسوق",
+  "redeemPoints": "تبديل النقاط",
+  "redeemQrTitle": "اعرض الكود على الكاشير",
+  "redeemQrSubtitle": "كل 50 نقطة = 1 جنيه خصم. يُغلق الكود تلقائياً بعد تطبيق الخصم.",
+  "redeemSuccess": "تم تطبيق الخصم بنجاح",
+  "scanCustomerCode": "مسح كود العميل",
+  "scanCustomerHint": "وجّه الكاميرا إلى كود العميل",
+  "scanInvalidCode": "هذا ليس كود عميل من سفير ماركت",
+  "scanCameraFailed": "تعذّر تشغيل الكاميرا: {error}",
+  "@scanCameraFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "redeemInsufficientPoints": "الرصيد لا يكفي لخصم 1 جنيه",
+  "redeemNotAllowed": "هذا الحساب غير مصرّح له بخصم النقاط",
+  "redeemCustomerNotFound": "لم يتم العثور على العميل",
+  "redeemFailed": "تعذّر خصم النقاط: {error}",
+  "@redeemFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "cashierRedeemTitle": "خصم نقاط الولاء",
+  "cashierCustomer": "العميل",
+  "cashierCurrentBalance": "الرصيد الحالي",
+  "cashierPointsToDeduct": "النقاط المخصومة",
+  "cashierDiscount": "قيمة الخصم",
+  "cashierRemainingPoints": "الرصيد بعد الخصم",
+  "cashierBarcodeHint": "امسح هذا الباركود بجهاز الكاشير، ثم اضغط تأكيد",
+  "confirmPointsDeduction": "تأكيد خصم النقاط",
+  "cashierRedeemDone": "تم خصم {points} نقطة (خصم {amount}) بنجاح",
+  "@cashierRedeemDone": {
+    "placeholders": {
+      "points": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneOrdersTitle": "طلبات التليفون / بحث العملاء",
+  "phoneOrderOpen": "طلب تليفون",
+  "phoneOrderSearchHint": "ابحث برقم الهاتف أو اسم العميل...",
+  "phoneOrderNewCustomer": "+ عميل جديد",
+  "phoneOrderTypeToSearch": "اكتب رقم الهاتف أو الاسم للبحث",
+  "phoneOrderNoCustomers": "لا يوجد عميل مطابق. أضفه كعميل جديد.",
+  "phoneOrderAppCustomer": "مسجل بالتطبيق",
+  "phoneOrderPosCustomer": "عميل الكاشير",
+  "phoneOrderNoAddress": "لا يوجد عنوان محفوظ",
+  "phoneOrderChangeCustomer": "تغيير العميل",
+  "phoneOrderCustomerName": "اسم العميل",
+  "phoneOrderCustomerPhone": "رقم الهاتف",
+  "phoneOrderCustomerAddress": "العنوان",
+  "phoneOrderCustomerZone": "المنطقة",
+  "phoneOrderSaveCustomer": "حفظ العميل",
+  "phoneOrderNameRequired": "اكتب اسم العميل",
+  "phoneOrderPhoneInvalid": "اكتب رقم موبايل مصري صحيح (01XXXXXXXXX)",
+  "phoneOrderProductSearchHint": "ابحث باسم المنتج أو الباركود...",
+  "phoneOrderSearchProductsPrompt": "ابحث عن منتج بالاسم أو الباركود",
+  "phoneOrderNoProducts": "لا توجد منتجات مطابقة",
+  "phoneOrderCartTitle": "سلة العميل",
+  "phoneOrderCartEmpty": "لم تتم إضافة منتجات بعد",
+  "phoneOrderItemsTotal": "إجمالي المنتجات",
+  "phoneOrderTotal": "الإجمالي",
+  "phoneOrderFreeDelivery": "مجاني",
+  "phoneOrderConfirm": "إتمام وتسجيل الطلب",
+  "phoneOrderPlaced": "تم تسجيل الطلب #{id}",
+  "@phoneOrderPlaced": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneOrderFailed": "تعذّر تسجيل الطلب: {error}",
+  "@phoneOrderFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneOrderSearchFailed": "تعذّر البحث: {error}",
+  "@phoneOrderSearchFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "phoneOrderNotAllowed": "هذا الحساب غير مصرّح له بتسجيل طلبات التليفون",
+  "phoneOrderBadge": "تليفون",
+  "phoneOrderSetupMissing": "الدالة {function} غير موجودة في قاعدة البيانات. شغّل ملف supabase/migrations/20261111010000_phone_orders.sql من Supabase SQL Editor.",
+  "@phoneOrderSetupMissing": {
+    "placeholders": {
+      "function": {
+        "type": "String"
+      }
+    }
+  },
+  "adminToggleMenu": "إظهار/إخفاء القائمة",
+  "adminResizeColumn": "اسحب لتغيير عرض العمود",
+  "phoneOrderShowCart": "عرض السلة والتوصيل",
+  "phoneOrderHideCart": "إخفاء السلة",
+  "driverDeliveryAddress": "عنوان التوصيل",
+  "driverNavigateViaMap": "التوجه عبر الخريطة",
+  "mapSearchHint": "ابحث عن منطقة أو شارع...",
+  "mapSearchNoResults": "لا توجد نتائج لهذا البحث",
+  "mapSearchFailed": "تعذّر البحث عن المكان: {error}",
+  "@mapSearchFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "mapSearchClear": "مسح البحث",
+  "supportLiveChat": "محادثة فورية مع خدمة العملاء",
+  "supportLiveChatSubtitle": "اكتب لنا من داخل التطبيق وسيرد عليك فريقنا مباشرة",
+  "supportSignInMessage": "سجّل دخولك لتبدأ محادثة مع خدمة العملاء.",
+  "supportLaunchFailed": "تعذر فتح التطبيق، يمكنك الاتصال بنا على {phone}",
+  "@supportLaunchFailed": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
+  "supportChatTitle": "خدمة العملاء",
+  "supportChatSubtitle": "فريق سفير ماركت يرد عليك هنا",
+  "supportChatWelcome": "أهلاً بك! اكتب سؤالك أو مشكلتك وسيرد عليك فريق خدمة العملاء في أقرب وقت.",
+  "supportMessageHint": "اكتب رسالتك...",
+  "supportLoadFailed": "تعذر تحميل المحادثة: {error}",
+  "@supportLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "supportSetupMissing": "خدمة المحادثة غير مفعلة بعد. شغّل supabase/migrations/20261114210000_support_chat.sql في Supabase SQL Editor.",
+  "supportNotAllowed": "لا تملك صلاحية الوصول إلى هذه المحادثة",
+  "supportRequestFailed": "تعذر إتمام العملية: {error}",
+  "@supportRequestFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "supportCenterTitle": "الشكاوى والمحادثات",
+  "supportNoChats": "لا توجد محادثات مفتوحة حالياً",
+  "supportSelectChat": "اختر محادثة من القائمة للرد على العميل",
+  "supportNoMessagesYet": "لا توجد رسائل في هذه المحادثة بعد",
+  "supportReplyHint": "اكتب ردك على العميل...",
+  "supportLatestOrders": "آخر الطلبات",
+  "supportLatestOrdersTitle": "آخر طلبات {name}",
+  "@supportLatestOrdersTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "supportNoOrders": "لا توجد طلبات لهذا العميل",
+  "supportNewMessageToast": "رسالة جديدة من {name}: {message}",
+  "@supportNewMessageToast": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "supportOpenChat": "فتح المحادثة",
+  "notificationsTitle": "الإشعارات",
+  "notificationsEmptySubtitle": "سنقوم بإشعارك فور توفر عروض أو مجلات جديدة من سفير ماركت",
+  "notificationsLoadFailed": "تعذر تحميل الإشعارات: {error}",
+  "@notificationsLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "notificationsSetupMissing": "الإشعارات غير مفعلة بعد. شغّل supabase/migrations/20261114220000_app_notifications.sql في Supabase SQL Editor.",
+  "notificationsNotAllowed": "إرسال الإشعارات وحذفها متاح لحساب المدير فقط",
+  "timeJustNow": "الآن",
+  "timeMinutesAgo": "{count, plural, =1{منذ دقيقة} =2{منذ دقيقتين} few{منذ {count} دقائق} other{منذ {count} دقيقة}}",
+  "@timeMinutesAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "timeHoursAgo": "{count, plural, =1{منذ ساعة} =2{منذ ساعتين} few{منذ {count} ساعات} other{منذ {count} ساعة}}",
+  "@timeHoursAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "timeDaysAgo": "{count, plural, =1{منذ يوم} =2{منذ يومين} few{منذ {count} أيام} other{منذ {count} يوماً}}",
+  "@timeDaysAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "notificationTypeGeneral": "عام",
+  "notificationTypePromo": "عروض وخصومات",
+  "notificationTypeMagazine": "مجلة جديدة",
+  "notificationTypeOrder": "طلباتك",
+  "notificationTypeSupportChat": "خدمة العملاء",
+  "adminSendNotifications": "إرسال إشعارات",
+  "adminNotificationFormSubtitle": "يظهر الإشعار فوراً في تطبيق جميع العملاء",
+  "adminNotificationTitleLabel": "عنوان الإشعار",
+  "adminNotificationTitleHint": "مثال: مجلة عروض الشهر نزلت الآن! 🔥",
+  "adminNotificationTitleRequired": "اكتب عنوان الإشعار",
+  "adminNotificationBodyLabel": "نص الإشعار",
+  "adminNotificationBodyHint": "مثال: تصفح أحدث العروض والخصومات الحصرية في سفير ماركت",
+  "adminNotificationBodyRequired": "اكتب نص الإشعار",
+  "adminNotificationTypeLabel": "نوع الإشعار",
+  "adminNotificationImageLabel": "رابط صورة العرض - اختياري",
+  "adminNotificationImageInvalid": "أدخل رابطاً صحيحاً يبدأ بـ https://",
+  "adminSendNotificationButton": "إرسال الإشعار لجميع العملاء",
+  "adminNotificationSent": "تم إرسال الإشعار لجميع العملاء",
+  "adminNotificationSendFailed": "تعذر إرسال الإشعار: {error}",
+  "@adminNotificationSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNotificationsHistory": "الإشعارات المرسلة",
+  "adminNoNotificationsSent": "لم يتم إرسال أي إشعارات بعد",
+  "adminDeleteNotificationTitle": "حذف الإشعار",
+  "adminDeleteNotificationConfirm": "هل تريد حذف الإشعار «{title}»؟ سيختفي من تطبيق العملاء.",
+  "@adminDeleteNotificationConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDeleteNotificationFailed": "تعذر حذف الإشعار: {error}",
+  "@adminDeleteNotificationFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "orderCardShowDetails": "عرض التفاصيل",
+  "orderCardHideDetails": "إخفاء التفاصيل",
+  "orderCardItemsTitle": "منتجات الطلب",
+  "orderCardItemsFailed": "تعذر تحميل منتجات الطلب",
+  "orderCardNoItems": "لا توجد منتجات مسجلة لهذا الطلب",
+  "orderCardCancelledNote": "تم إلغاء هذا الطلب",
+  "cancelOrder": "إلغاء الطلب",
+  "cancelOrderConfirmTitle": "هل أنت متأكد من إلغاء الطلب؟",
+  "cancelOrderReasonPrompt": "اختر سبب الإلغاء:",
+  "cancelOrderDismiss": "تراجع",
+  "cancelOrderConfirm": "تأكيد الإلغاء",
+  "cancelReasonDeliveryDelay": "تأخير في التوصيل",
+  "cancelReasonOrderedByMistake": "طلبت بالخطأ",
+  "cancelReasonChangedMind": "تغيير رأيي",
+  "cancelReasonOther": "سبب آخر",
+  "cancellationReasonLine": "سبب الإلغاء: {reason}",
+  "@cancellationReasonLine": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "orderCancelledSuccess": "تم إلغاء الطلب بنجاح",
+  "orderCancelTooLate": "تعذر إلغاء الطلب لأن تجهيزه اكتمل أو خرج للتوصيل",
+  "orderCancelSetupMissing": "إلغاء الطلب غير مفعّل بعد. شغّل supabase/migrations/20261114240000_customer_cancel_order.sql في Supabase SQL Editor.",
+  "orderCancelFailed": "تعذر إلغاء الطلب: {error}",
+  "@orderCancelFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMenuReceiveOrders": "تلقي الطلبات",
+  "adminMenuOrderStatus": "حالة الطلب",
+  "adminStatusDelayedShort": "متأخر",
+  "adminStatusCancelledShort": "ملغي",
+  "adminResendNotification": "إعادة إرسال",
+  "adminResendFillForm": "تعبئة النموذج",
+  "adminResendNotificationTitle": "إعادة إرسال الإشعار؟",
+  "adminResendNotificationConfirm": "سيتم إرسال الإشعار «{title}» لجميع العملاء مرة أخرى.",
+  "@adminResendNotificationConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNotificationSearchHint": "بحث بالاسم أو العنوان",
+  "adminNotificationFilterByDate": "فلترة بالتاريخ",
+  "adminNotificationFilterByType": "فلترة بالسبب/النوع",
+  "adminNotificationClearDateFilter": "مسح فلتر التاريخ",
+  "adminSelectCustomerFirst": "اختر عميلاً لبدء الطلب"
+}

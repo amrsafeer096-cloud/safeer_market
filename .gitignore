@@ -1,0 +1,60 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Generated
+*.iml
+.idea/
+.vscode/
+
+# Platform (regenerated via `flutter create .`)
+/android/.gradle/
+/ios/Pods/
+/ios/.symlinks/
+
+# Secrets
+.env
+.env.*
+*.jks
+*.keystore
+
+# OS
+.DS_Store
+Thumbs.db
+node_modules
+
+# Scraped product images / Python cache (huge; exhausts Windows paging memory)
+amazon_images/
+carrefour_images/
+elfar_images/
+seoudi_images/
+talabat_images/
+/images/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.gradle-home/
+build/
+.dart_tool/
+node_modules/
+__pycache__/
+
+.gradle-home/
+build/
+.dart_tool/
+node_modules/
+__pycache__/
+
+seoudi_images/
+talabat_images/
+
+firebase-debug.log
+firebase-debug*.log

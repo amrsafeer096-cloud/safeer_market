@@ -1,0 +1,80 @@
+name: safeer_market
+description: Safeer Market — Arabic RTL grocery delivery app.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  intl: any
+  supabase_flutter: ^2.9.0
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.8.1
+  google_fonts: ^6.2.1
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+  geolocator: ^14.1.1
+  geocoding: ^5.0.0
+  http: ^1.6.0
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
+  # 23.x needs androidx.core 1.19 (AGP 9.1+); stay on 18.x for AGP 9.0.1.
+  flutter_local_notifications: 18.0.1
+  flutter_fortune_wheel: ^1.3.2
+  url_launcher: ^6.3.2
+  google_maps_flutter: ^2.18.2
+  flutter_polyline_points: ^3.1.0
+  google_maps: 8.3.0
+  simple_barcode_scanner: ^0.6.1
+  audioplayers: ^6.8.1
+  cached_network_image: ^4.0.4
+  add_to_cart_animation: ^2.0.4
+  flutter_animate: ^4.5.2
+  shimmer: ^4.0.0
+  share_plus: ^13.3.1
+  image_picker: ^1.2.4
+  file_picker: ^13.3.2
+  syncfusion_flutter_pdfviewer: ^35.1.43
+  google_sign_in: ^7.2.0
+  shared_preferences: ^2.5.6
+  flutter_secure_storage: ^10.0.0
+  permission_handler: ^13.0.2
+  app_links: ^7.2.2
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.5.0
+  barcode_widget: ^2.0.4
+  record: ^7.2.0
+  path_provider: ^2.1.6
+  webview_flutter: ^4.14.1
+  flutter_svg: ^2.4.0
+  pasteboard: ^0.6.1
+  scratcher: ^2.5.0
+  confetti: ^0.8.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
+  google_maps_flutter_platform_interface: ^2.17.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/images/
+    - assets/images/categories/
+    - assets/sounds/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # logo.png padded onto a white 1024x1024 square so it isn't stretched.
+  image_path: "assets/images/app_icon.png"
+  # The App Store rejects icons with transparency.
+  remove_alpha_ios: true

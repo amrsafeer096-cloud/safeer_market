@@ -1,0 +1,437 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../../../core/l10n/l10n.dart';
+import '../../../../core/network/postgrest_helpers.dart';
+import '../../../catalog/domain/main_categories.dart';
+import '../../../home/data/models/product_model.dart';
+import '../../../home/domain/entities/product.dart';
+import '../../domain/phone_order.dart';
+import '../../domain/repositories/phone_orders_repository.dart';
+
+/// Customers and orders go through the security-definer functions in
+/// 20261111010000_phone_orders.sql (staff only; prices come from
+/// `products`); product search reads `products` directly.
+class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
+  const SupabasePhoneOrdersRepository(this._client);
+
+  static const productLimit = 40;
+  static const receiptsBucket = 'payment_receipts';
+  static const _productColumns = 'id, barcode, name, price, discount_price, '
+      'unit, category, category_id, stock_quantity, is_active, image_url, '
+      'is_weight_based';
+
+  final SupabaseClient _client;
+
+  @override
+  Future<List<PhoneOrderCustomer>> searchCustomers(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 2) return const [];
+    final rows = await _rpc(
+      'search_phone_order_customers',
+      {'p_query': trimmed, 'p_limit': 20},
+    );
+    return [for (final row in _rows(rows)) _toCustomer(row)];
+  }
+
+  @override
+  Future<PhoneOrderCustomer> createCustomer({
+    required String fullName,
+    required String phone,
+    String? address,
+    String? zone,
+    String? fujitsuZoneId,
+    String? phone2,
+    PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
+    String? governorate,
+    String? city,
+    String? building,
+    String? floor,
+    String? apartment,
+    double? latitude,
+    double? longitude,
+  }) async {
+    // Extras are sent only when set, so a plain customer still works on a
+    // database that hasn't had the customer-details migration yet.
+    final rows = _rows(await _rpc('create_phone_order_customer', {
+      'p_full_name': fullName,
+      'p_phone': phone,
+      'p_address': address,
+      'p_zone': zone,
+      if (fujitsuZoneId != null) 'p_fujitsu_zone_id': fujitsuZoneId,
+      if (phone2 != null) 'p_phone2': phone2,
+      if (type != PhoneOrderCustomerType.regular) 'p_customer_type': type.value,
+      if (governorate != null) 'p_governorate': governorate,
+      if (city != null) 'p_city': city,
+      if (building != null) 'p_building': building,
+      if (floor != null) 'p_floor': floor,
+      if (apartment != null) 'p_apartment': apartment,
+      if (latitude != null && longitude != null) ...{
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+      },
+    }));
+    if (rows.isEmpty) {
+      throw PhoneOrderFailure(L10n.current.phoneOrderFailed('no customer'));
+    }
+    return _toCustomer(rows.first);
+  }
+
+  @override
+  Future<List<PhoneOrderArea>> fetchAreas({String? city}) async {
+    try {
+      var request = _client
+          .from('delivery_zones')
+          .select('fujitsu_zone_id, name, delivery_fee')
+          .eq('is_active', true);
+      if (city != null) request = request.eq('city', city);
+      final rows = await request.order('name');
+      return [
+        for (final row in rows)
+          if ('${row['name'] ?? ''}'.trim().isNotEmpty)
+            PhoneOrderArea(
+              name: '${row['name']}'.trim(),
+              deliveryFee: _asDouble(row['delivery_fee']),
+              fujitsuZoneId: row['fujitsu_zone_id'] == null
+                  ? null
+                  : '${row['fujitsu_zone_id']}',
+            ),
+      ];
+    } on PostgrestException catch (error) {
+      // No `delivery_zones` table yet: the zone list simply stays empty.
+      debugPrint('Zones read failed: ${error.code} ${error.message}');
+      return const [];
+    }
+  }
+
+  @override
+  Future<List<Product>> searchProducts(
+    String query, {
+    MainCategory? category,
+  }) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty && category == null) return const [];
+
+    var request = _client.from('products').select(_productColumns).inStock();
+    if (category != null) {
+      request = request.inFilter('category', [
+        for (final name in category.subCategories) ...[name, '$name '],
+      ]);
+    }
+    final words =
+        trimmed.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (words.isNotEmpty) {
+      final first = _escapeLike(words.first);
+      request = RegExp(r'^\d{4,}$').hasMatch(trimmed)
+          ? request.or('barcode.ilike.$first*,name.ilike.*$first*')
+          : request.ilike('name', '%$first%');
+    }
+
+    try {
+      final rows = await request.order('name').limit(productLimit * 2);
+      final products = rows.map(ProductModel.fromJson).toList();
+      // Every typed word, in any order (the query only filtered the first).
+      final lowered = [for (final w in words) w.toLowerCase()];
+      return products
+          .where((product) {
+            final name = product.name.toLowerCase();
+            final barcode = product.barcode ?? '';
+            return lowered.every(
+              (word) => name.contains(word) || barcode.startsWith(word),
+            );
+          })
+          .take(productLimit)
+          .toList();
+    } on PostgrestException catch (error) {
+      debugPrint('Phone order product search failed: '
+          '${error.code} ${error.message}');
+      throw PhoneOrderFailure(
+          L10n.current.phoneOrderSearchFailed(error.message));
+    }
+  }
+
+  @override
+  Future<String> placeOrder({
+    required PhoneOrderCustomer customer,
+    required List<PhoneOrderLine> lines,
+    required double deliveryFee,
+    PhoneOrderPayment paymentMethod = PhoneOrderPayment.cash,
+    PaymentReceiptImage? receipt,
+  }) async {
+    String? receiptUrl;
+    if (paymentMethod.needsReceipt) {
+      if (receipt == null) {
+        throw const PhoneOrderFailure('أرفق صورة التحويل لإتمام طلب إنستا باي');
+      }
+      receiptUrl = await _uploadReceipt(receipt);
+    }
+
+    final Object? orderId;
+    try {
+      orderId = await _rpc('place_phone_order', {
+        'p_user_id': customer.userId,
+        'p_pos_customer_id': customer.posCustomerId,
+        'p_customer_name': customer.fullName,
+        'p_customer_phone': customer.phone,
+        'p_address': customer.address,
+        'p_area': customer.zone,
+        'p_items': [
+          for (final line in lines)
+            {
+              'product_id': line.product.id,
+              'quantity': line.quantity,
+              if (line.weightInGrams case final grams?)
+                'weight_in_grams': grams,
+            },
+        ],
+        'p_delivery_fee': deliveryFee,
+        // Cash is the function's default, so a plain order still works on a
+        // database that hasn't had the payment migration yet.
+        if (paymentMethod != PhoneOrderPayment.cash) ...{
+          'p_payment_method': paymentMethod.value,
+          'p_payment_status': paymentMethod.paymentStatus,
+          if (receiptUrl != null) 'p_receipt_url': receiptUrl,
+        },
+      });
+    } catch (_) {
+      if (receiptUrl != null) await _removeReceipt(receiptUrl);
+      rethrow;
+    }
+    if (orderId is! String || orderId.isEmpty) {
+      throw PhoneOrderFailure(L10n.current.phoneOrderFailed('$orderId'));
+    }
+    return orderId;
+  }
+
+  /// The InstaPay screenshot goes to the public `payment_receipts` bucket,
+  /// under the signed-in staff member's folder (what its policy allows).
+  Future<String> _uploadReceipt(PaymentReceiptImage receipt) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) {
+      throw const PhoneOrderFailure('سجّل الدخول لرفع صورة التحويل');
+    }
+    final safeName = receipt.fileName.replaceAll(RegExp(r'[^\w.\-]+'), '_');
+    final path = '$userId/${DateTime.now().millisecondsSinceEpoch}_$safeName';
+    try {
+      final storage = _client.storage.from(receiptsBucket);
+      await storage.uploadBinary(
+        path,
+        receipt.bytes,
+        fileOptions: FileOptions(contentType: receipt.contentType),
+      );
+      return storage.getPublicUrl(path);
+    } on StorageException catch (error) {
+      debugPrint('Receipt upload failed: ${error.statusCode} ${error.message}');
+      throw PhoneOrderFailure('تعذّر رفع صورة التحويل: ${error.message}');
+    }
+  }
+
+  /// Best effort: an order that failed leaves no orphan image behind.
+  Future<void> _removeReceipt(String url) async {
+    final marker = '/$receiptsBucket/';
+    final index = url.indexOf(marker);
+    if (index < 0) return;
+    try {
+      await _client.storage
+          .from(receiptsBucket)
+          .remove([Uri.decodeComponent(url.substring(index + marker.length))]);
+    } catch (_) {}
+  }
+  @override
+  Future<CustomerPurchaseHistory> fetchCustomerHistory(
+    PhoneOrderCustomer customer,
+  ) async {
+    // Omit nulls so PostgREST matches the defaulted signature cleanly.
+    final params = <String, Object?>{
+      'p_limit': 40,
+      if (customer.userId case final id?) 'p_user_id': id,
+      if (customer.posCustomerId case final id?) 'p_pos_customer_id': id,
+      if (customer.phone case final phone?
+          when phone.trim().isNotEmpty)
+        'p_customer_phone': phone.trim(),
+    };
+    final raw = await _rpc('phone_order_customer_history', params);
+    final map = _asHistoryMap(raw);
+    return CustomerPurchaseHistory(
+      items: [
+        for (final row in _rows(map['items']))
+          if (_toPurchaseItem(row) case final item?) item,
+      ],
+      lastOrderLines: [
+        for (final row in _rows(map['last_order_items']))
+          if (_toHistoryLine(row) case final line?) line,
+      ],
+    );
+  }
+
+  static Map<String, dynamic> _asHistoryMap(Object? raw) {
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is String) return _tryDecodeMap(raw);
+    if (raw is List && raw.isNotEmpty && raw.first is Map) {
+      // Rare: PostgREST wrapping a single jsonb object in an array.
+      return Map<String, dynamic>.from(raw.first as Map);
+    }
+    return const {};
+  }
+
+  static Map<String, dynamic> _tryDecodeMap(String value) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+    return const {};
+  }
+
+  static CustomerPurchaseItem? _toPurchaseItem(Map<String, dynamic> row) {
+    final product = _productFromHistoryRow(row);
+    if (product == null) return null;
+    final lastAt = DateTime.tryParse('${row['last_ordered_at'] ?? ''}') ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    return CustomerPurchaseItem(
+      product: product,
+      timesOrdered: _asInt(row['times_ordered']) ?? 0,
+      totalQuantity: _asDouble(row['total_quantity']) ?? 0,
+      lastOrderedAt: lastAt.toLocal(),
+      lastQuantity: _asInt(row['last_quantity']) ?? 1,
+      lastWeightInGrams: _asInt(row['last_weight_in_grams']),
+    );
+  }
+
+  static PhoneOrderLine? _toHistoryLine(Map<String, dynamic> row) {
+    final product = _productFromHistoryRow(row);
+    if (product == null) return null;
+    final weight = _asInt(row['weight_in_grams']);
+    final quantity = _asInt(row['quantity']) ?? 1;
+    if (weight != null && weight > 0) {
+      return PhoneOrderLine(
+        product: product,
+        quantity: 1,
+        weightInGrams: weight,
+      );
+    }
+    return PhoneOrderLine(product: product, quantity: quantity.clamp(1, 999));
+  }
+
+  static Product? _productFromHistoryRow(Map<String, dynamic> row) {
+    final id = row['product_id']?.toString();
+    if (id == null || id.isEmpty) return null;
+    return ProductModel.fromJson({
+      'id': id,
+      'name': row['name'],
+      'price': row['price'],
+      'discount_price': row['discount_price'],
+      'image_url': row['image_url'],
+      'unit': row['unit'],
+      'barcode': row['barcode'],
+      'stock_quantity': row['stock_quantity'],
+      'is_active': row['is_active'],
+      'is_weight_based': row['is_weight_based'] == true,
+    });
+  }
+
+  static int? _asInt(Object? value) => switch (value) {
+        final int value => value,
+        final num value => value.toInt(),
+        final String value => int.tryParse(value),
+        _ => null,
+      };
+
+  static double? _asDouble(Object? value) => switch (value) {
+        final double value => value,
+        final num value => value.toDouble(),
+        final String value => double.tryParse(value),
+        _ => null,
+      };
+
+  Future<Object?> _rpc(String function, Map<String, Object?> params) async {
+    try {
+      return await _client.rpc<Object?>(function, params: params);
+    } on PostgrestException catch (error) {
+      debugPrint('$function failed: ${error.code} ${error.message} '
+          '${error.details ?? ''}');
+      throw PhoneOrderFailure(_message(error));
+    }
+  }
+
+  static String _message(PostgrestException error) {
+    final l10n = L10n.current;
+    final message = error.message;
+    // The function isn't in the database (or PostgREST hasn't reloaded).
+    if (error.code == 'PGRST202') {
+      final function = RegExp(r'public\.(\w+)').firstMatch(message)?.group(1);
+      if (function == 'place_phone_order' && message.contains('p_payment')) {
+        return 'طرق الدفع تحتاج ترحيلاً جديداً. شغّل ملف '
+            'supabase/migrations/20261119220000_phone_order_payment.sql '
+            'من Supabase SQL Editor.';
+      }
+      if (function == 'create_phone_order_customer' &&
+          message.contains('p_fujitsu_zone_id')) {
+        return 'ربط العميل بمنطقة Fujitsu يحتاج ترحيلاً جديداً. شغّل ملف '
+            'supabase/migrations/20261119210000_delivery_zones_fujitsu.sql '
+            'من Supabase SQL Editor.';
+      }
+      if (function == 'create_phone_order_customer' &&
+          RegExp(r'p_(phone2|customer_type|governorate|city|building|floor|'
+                  r'apartment|latitude|longitude)')
+              .hasMatch(message)) {
+        return 'تفاصيل العميل والعنوان تحتاج ترحيلاً جديداً. شغّل ملف '
+            'supabase/migrations/20261119000000_phone_order_customer_details.sql '
+            'من Supabase SQL Editor.';
+      }
+      return l10n.phoneOrderSetupMissing(function ?? message);
+    }
+    if (message.contains('not_allowed')) return l10n.phoneOrderNotAllowed;
+    if (message.contains('invalid_phone')) return l10n.phoneOrderPhoneInvalid;
+    if (message.contains('name_required')) return l10n.phoneOrderNameRequired;
+    if (message.contains('receipt_required')) {
+      return 'أرفق صورة التحويل لإتمام طلب إنستا باي';
+    }
+    if (message.contains('invalid_zone')) {
+      return 'المنطقة المختارة غير موجودة في «المناطق». حدّث القائمة وأعد المحاولة.';
+    }
+    return l10n.phoneOrderFailed('$message (${error.code})');
+  }
+
+  static List<Map<String, dynamic>> _rows(Object? data) => [
+        if (data is List)
+          for (final row in data)
+            if (row is Map) Map<String, dynamic>.from(row),
+      ];
+
+  static PhoneOrderCustomer _toCustomer(Map<String, dynamic> row) {
+    String? text(String key) {
+      final value = row[key]?.toString().trim();
+      return value == null || value.isEmpty ? null : value;
+    }
+
+    int? integer(Object? value) => switch (value) {
+          final num id => id.toInt(),
+          final String id => int.tryParse(id),
+          _ => null,
+        };
+    final isApp = row['source'] == 'app';
+    return PhoneOrderCustomer(
+      source:
+          isApp ? PhoneOrderCustomerSource.app : PhoneOrderCustomerSource.pos,
+      userId: text('user_id'),
+      // A bare pos_customers row (no `source`) carries its id as `id`.
+      posCustomerId: integer(row['pos_customer_id']) ??
+          (isApp || row.containsKey('source') ? null : integer(row['id'])),
+      fullName: text('full_name'),
+      phone: text('phone'),
+      address: text('address'),
+      zone: text('zone'),
+      fujitsuZoneId: text('fujitsu_zone_id'),
+    );
+  }
+
+  static String _escapeLike(String value) => value
+      .replaceAll(r'\', r'\\')
+      .replaceAll('%', r'\%')
+      .replaceAll('_', r'\_')
+      .replaceAll(',', '')
+      .replaceAll('(', '')
+      .replaceAll(')', '');
+}

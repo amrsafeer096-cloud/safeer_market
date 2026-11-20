@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1021134855570",
+    "project_id": "safeer-market",
+    "storage_bucket": "safeer-market.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1021134855570:android:77ee57c5dedb548e6a754b",
+        "android_client_info": {
+          "package_name": "com.example.safeer_market"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCf5ZnILk5dCCZBYesuY7Jo1ud2dyeLPuk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
