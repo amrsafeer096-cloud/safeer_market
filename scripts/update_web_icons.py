@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Builds the web/PWA icons from assets/images/logo_source.png.
+"""Regenerates the web/PWA icons from assets/images/logo_source.png.
 
-The source is the circular badge on a dark navy background with a second
-"SAFEER MARKET" line underneath. This script
+Run it again whenever logo_source.png is replaced. The source is the
+circular badge on a dark navy background (a "SAFEER MARKET" line may sit
+underneath). This script
 
-1. finds the outer white ring (ignoring the white text below the circle),
+1. finds the outer white ring (ignoring any white text below the circle),
 2. crops a square around it and masks everything outside the circle, so the
-   navy background and the bottom text become fully transparent,
-3. writes the icon sizes the manifest / index.html point to.
+   background and the bottom text become fully transparent,
+3. writes web/icons/Icon-192/512, the maskable variants and web/favicon.png.
 
-Usage (from the repo root):  python tools/generate_web_icons.py
-Requires Pillow (pip install pillow) and numpy.
+The same file is the source for the Android / iOS / Windows launcher icons:
+    dart run flutter_launcher_icons
+
+Usage (from the repo root):  python scripts/update_web_icons.py
+Requires Pillow and numpy (pip install pillow numpy).
 """
 
 from __future__ import annotations
@@ -97,7 +101,15 @@ def maskable(badge: Image.Image, size: int) -> Image.Image:
 
 
 def main() -> None:
-    badge = circular_badge(Image.open(SOURCE))
+    source = Image.open(SOURCE)
+    width, height = source.size
+    if width != height:
+        print(
+            f"note: {SOURCE.name} is {width}x{height}; flutter_launcher_icons "
+            "stretches non-square images, so a square source (1024x1024+) "
+            "keeps the launcher icons undistorted."
+        )
+    badge = circular_badge(source)
     ICONS.mkdir(parents=True, exist_ok=True)
 
     outputs = {

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../../core/network/realtime_session.dart';
+import '../../../../core/network/resilient_realtime_stream.dart';
 import '../../domain/entities/warehouse_order.dart';
 import '../../domain/repositories/warehouse_orders_repository.dart';
 
@@ -61,24 +63,49 @@ class SupabaseWarehouseOrdersRepository implements WarehouseOrdersRepository {
 
   @override
   Stream<void> changes() {
-    late final RealtimeChannel channel;
-    late final StreamController<void> controller;
-    controller = StreamController<void>(
-      onListen: () {
-        channel = _client
-            .channel(
-                'warehouse-orders-${DateTime.now().microsecondsSinceEpoch}')
-            .onPostgresChanges(
-              event: PostgresChangeEvent.all,
-              schema: 'public',
-              table: 'orders',
-              callback: (_) => controller.add(null),
-            )
-            .subscribe();
+    // Tick stream: each Realtime event (or the periodic poll) notifies the
+    // dashboard so it can invalidate its queue without dying on a
+    // channelError / expired JWT.
+    var tick = 0;
+    return resilientRealtimeStream<int>(
+      create: () {
+        late final RealtimeChannel channel;
+        late final StreamController<int> controller;
+        controller = StreamController<int>(
+          onListen: () {
+            channel = _client
+                .channel(
+                    'warehouse-orders-${DateTime.now().microsecondsSinceEpoch}')
+                .onPostgresChanges(
+                  event: PostgresChangeEvent.all,
+                  schema: 'public',
+                  table: 'orders',
+                  callback: (_) {
+                    if (!controller.isClosed) controller.add(++tick);
+                  },
+                )
+                .subscribe((status, [error]) {
+                  if (status == RealtimeSubscribeStatus.channelError ||
+                      status == RealtimeSubscribeStatus.timedOut) {
+                    if (!controller.isClosed) {
+                      controller.addError(
+                        RealtimeSubscribeException(status, error),
+                      );
+                    }
+                  }
+                });
+          },
+          onCancel: () {
+            unawaited(_client.removeChannel(channel));
+          },
+        );
+        return controller.stream;
       },
-      onCancel: () => _client.removeChannel(channel),
-    );
-    return controller.stream;
+      // Poll tick so a sleeping tab still refreshes the queue.
+      poll: () async => ++tick,
+      pollInterval: const Duration(seconds: 45),
+      onReconnect: () => ensureRealtimeAuth(_client),
+    ).map((_) {});
   }
 
   static WarehouseOrder _toOrder(Map<String, dynamic> row) {

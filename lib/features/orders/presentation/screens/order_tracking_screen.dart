@@ -6,6 +6,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/config/store_location.dart';
+import '../../../../core/network/realtime_session.dart';
+import '../../../../core/network/resilient_realtime_stream.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/widgets/mobile_frame.dart';
@@ -58,23 +60,40 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    final orders = ref
-            .read(trackedOrderStreamOverrideProvider(widget.orderId)) ??
-        Supabase.instance.client
+    final override =
+        ref.read(trackedOrderStreamOverrideProvider(widget.orderId));
+    if (override != null) {
+      _order = override;
+    } else {
+      final client = Supabase.instance.client;
+      final orderId = widget.orderId;
+      CustomerOrder? fromRows(List<Map<String, dynamic>> rows) =>
+          rows.isEmpty ? null : CustomerOrder.fromRow(rows.first);
+      _order = resilientRealtimeStream<CustomerOrder?>(
+        create: () => client
             .from('orders')
             .stream(primaryKey: ['id'])
-            .eq('id', widget.orderId)
-            .map(
-              (rows) => rows.isEmpty ? null : CustomerOrder.fromRow(rows.first),
-            );
-    _order = orders.map((order) {
-      debugPrint(
-        '[Tracking] order ${order?.status ?? 'not found'}, '
-        'driver_lat: ${order?.driverLatitude}, '
-        'driver_lng: ${order?.driverLongitude}',
-      );
-      return order;
-    });
+            .eq('id', orderId)
+            .map(fromRows),
+        poll: () async {
+          final row = await client
+              .from('orders')
+              .select()
+              .eq('id', orderId)
+              .maybeSingle();
+          return row == null ? null : CustomerOrder.fromRow(row);
+        },
+        pollInterval: const Duration(seconds: 30),
+        onReconnect: () => ensureRealtimeAuth(client),
+      ).map((order) {
+        debugPrint(
+          '[Tracking] order ${order?.status ?? 'not found'}, '
+          'driver_lat: ${order?.driverLatitude}, '
+          'driver_lng: ${order?.driverLongitude}',
+        );
+        return order;
+      });
+    }
     _loadDriverIcon();
   }
 

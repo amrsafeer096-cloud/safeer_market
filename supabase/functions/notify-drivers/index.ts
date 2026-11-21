@@ -8,47 +8,19 @@
 // by Supabase automatically.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { importPKCS8, SignJWT } from "npm:jose@5";
+import {
+  googleAccessToken,
+  sendFcmMessage,
+  serviceAccount,
+} from "../_shared/fcm.ts";
 
 const DRIVERS_TOPIC = "drivers";
-
-interface ServiceAccount {
-  project_id: string;
-  client_email: string;
-  private_key: string;
-}
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   });
-
-async function googleAccessToken(account: ServiceAccount): Promise<string> {
-  const key = await importPKCS8(account.private_key, "RS256");
-  const assertion = await new SignJWT({
-    scope: "https://www.googleapis.com/auth/firebase.messaging",
-  })
-    .setProtectedHeader({ alg: "RS256", typ: "JWT" })
-    .setIssuer(account.client_email)
-    .setAudience("https://oauth2.googleapis.com/token")
-    .setIssuedAt()
-    .setExpirationTime("1h")
-    .sign(key);
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Google OAuth failed: ${await response.text()}`);
-  }
-  return (await response.json()).access_token;
-}
 
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "POST only" }, 405);
@@ -92,35 +64,26 @@ Deno.serve(async (request) => {
     return json({ error: "Order not found" }, 404);
   }
 
-  const account: ServiceAccount = JSON.parse(
-    Deno.env.get("FIREBASE_SERVICE_ACCOUNT")!,
-  );
+  const account = serviceAccount();
   const accessToken = await googleAccessToken(account);
-
-  const response = await fetch(
-    `https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: {
-          topic: DRIVERS_TOPIC,
-          notification: {
-            title: "سفير ماركت",
-            body: "طلب جديد متاح للتوصيل!",
-          },
-          data: { type: "new_order", order_id: String(order.id) },
-          android: { priority: "high" },
-          apns: { payload: { aps: { sound: "default" } } },
-        },
-      }),
+  const result = await sendFcmMessage(account, accessToken, {
+    topic: DRIVERS_TOPIC,
+    notification: {
+      title: "سفير ماركت",
+      body: "طلب جديد متاح للتوصيل!",
     },
-  );
-  if (!response.ok) {
-    return json({ error: `FCM failed: ${await response.text()}` }, 502);
+    data: { type: "new_order", order_id: String(order.id) },
+    android: {
+      priority: "high",
+      notification: { channel_id: "safeer_orders", sound: "order_chime" },
+    },
+    apns: {
+      headers: { "apns-priority": "10" },
+      payload: { aps: { sound: "order_chime.caf" } },
+    },
+  });
+  if (!result.ok) {
+    return json({ error: `FCM failed: ${result.error}` }, 502);
   }
   return json({ sent: true });
 });

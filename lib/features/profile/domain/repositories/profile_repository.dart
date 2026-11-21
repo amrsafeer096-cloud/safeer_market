@@ -24,7 +24,8 @@ abstract class ProfileRepository {
     String? avatarUrl,
   });
 
-  /// Stores this device's push token in `profiles.fcm_token`.
+  /// Registers this device's push token in `user_fcm_tokens` (with the
+  /// user's role and platform) and `profiles.fcm_token`.
   Future<void> saveFcmToken({required String userId, required String token});
 }
 

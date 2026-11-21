@@ -71,10 +71,20 @@ flutter:
     - assets/images/categories/
     - assets/sounds/
 
+# One source image for every platform: replace assets/images/logo_source.png,
+# then run `dart run flutter_launcher_icons` (Android / iOS / Windows) and
+# `python scripts/update_web_icons.py` (web/icons + favicon). Keep the image
+# square, since non-square sources are stretched.
 flutter_launcher_icons:
+  image_path: "assets/images/logo_source.png"
   android: true
   ios: true
-  # logo.png padded onto a white 1024x1024 square so it isn't stretched.
-  image_path: "assets/images/app_icon.png"
   # The App Store rejects icons with transparency.
   remove_alpha_ios: true
+  windows:
+    generate: true
+    image_path: "assets/images/logo_source.png"
+    icon_size: 256
+  # The web icons are transparent circles cut by scripts/update_web_icons.py.
+  web:
+    generate: false

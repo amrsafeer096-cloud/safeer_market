@@ -10,6 +10,8 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/constants/app_currency.dart';
+import '../../../../core/network/realtime_session.dart';
+import '../../../../core/network/resilient_realtime_stream.dart';
 import '../../../../core/notifications/system_alerts_service.dart';
 import '../../../../core/providers/settings_providers.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -85,9 +87,23 @@ final adminProductFilterProvider = StateProvider<int>((ref) => 0);
 
 final liveOrdersProvider =
     StreamProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
-  return Supabase.instance.client
-      .from('orders')
-      .stream(primaryKey: ['id']).order('created_at', ascending: false);
+  final client = Supabase.instance.client;
+  return resilientRealtimeStream<List<Map<String, dynamic>>>(
+    create: () => client
+        .from('orders')
+        .stream(primaryKey: ['id'])
+        .order('created_at', ascending: false),
+    // Fallback when the WebSocket briefly drops (sleeping Chrome tab, etc.).
+    poll: () async {
+      final rows = await client
+          .from('orders')
+          .select()
+          .order('created_at', ascending: false);
+      return List<Map<String, dynamic>>.from(rows);
+    },
+    pollInterval: const Duration(seconds: 45),
+    onReconnect: () => ensureRealtimeAuth(client),
+  );
 });
 
 /// Names and phones by user id, for ids joined with ','.
@@ -416,43 +432,50 @@ class _UnifiedDashboardScreenState
           const BackButton(),
       ];
 
-      Widget orderStatusBody() => liveOrdersAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) =>
-                Center(child: Text(l10n.adminErrorWithDetails('$e'))),
-            data: (orders) {
-              if (isDesktop) {
-                return ResizableColumns(
-                  layoutId: 'admin-order-status',
-                  columns: [
-                    ResizableColumn(
-                      flex: 3,
-                      minWidth: 240,
-                      child:
-                          _OrdersList(orders: orders, userRole: userRole),
-                    ),
-                    ResizableColumn(
-                      flex: 7,
-                      minWidth: 360,
-                      child: _OrderDetailsView(
-                          orders: orders,
-                          userRole: userRole,
-                          showAdminFeatures: showAdminFeatures,
-                          isDesktop: true),
-                    ),
-                  ],
-                );
-              }
-              if (selectedId == null) {
-                return _OrdersList(orders: orders, userRole: userRole);
-              }
-              return _OrderDetailsView(
-                  orders: orders,
-                  userRole: userRole,
-                  showAdminFeatures: showAdminFeatures,
-                  isDesktop: false);
-            },
+      Widget orderStatusBody() {
+        // Prefer the last successful list so a brief Realtime blip never
+        // replaces the dashboard with a dead error screen.
+        final orders = liveOrdersAsync.valueOrNull;
+        if (orders != null) {
+          if (isDesktop) {
+            return ResizableColumns(
+              layoutId: 'admin-order-status',
+              columns: [
+                ResizableColumn(
+                  flex: 3,
+                  minWidth: 240,
+                  child: _OrdersList(orders: orders, userRole: userRole),
+                ),
+                ResizableColumn(
+                  flex: 7,
+                  minWidth: 360,
+                  child: _OrderDetailsView(
+                      orders: orders,
+                      userRole: userRole,
+                      showAdminFeatures: showAdminFeatures,
+                      isDesktop: true),
+                ),
+              ],
+            );
+          }
+          if (selectedId == null) {
+            return _OrdersList(orders: orders, userRole: userRole);
+          }
+          return _OrderDetailsView(
+              orders: orders,
+              userRole: userRole,
+              showAdminFeatures: showAdminFeatures,
+              isDesktop: false);
+        }
+        if (liveOrdersAsync.hasError) {
+          return Center(
+            child: Text(
+              l10n.adminErrorWithDetails('${liveOrdersAsync.error}'),
+            ),
           );
+        }
+        return const Center(child: CircularProgressIndicator());
+      }
 
       final Widget menuBody = switch (activeMenu) {
         AdminMenu.receiveOrders when showAdminFeatures => PhoneOrderColumn(

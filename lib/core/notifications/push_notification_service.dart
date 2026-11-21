@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../firebase_options.dart';
+import '../config/app_config.dart';
 
 final pushNotificationServiceProvider = Provider<PushNotificationService>(
   (ref) => PushNotificationService(),
@@ -15,12 +16,18 @@ final pushNotificationServiceProvider = Provider<PushNotificationService>(
 /// working when Firebase isn't configured or the user declines permission.
 class PushNotificationService {
   Future<bool>? _ready;
+  Future<void>? _deleting;
 
-  /// Web needs a VAPID key and a service worker, which aren't set up yet.
+  /// Android, iOS and the browser (web/firebase-messaging-sw.js shows
+  /// notifications while the tab is in the background or closed).
   bool get isSupported =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS);
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// `android`, `ios` or `web`, as stored in `user_fcm_tokens.platform`.
+  static String get platformName =>
+      kIsWeb ? 'web' : defaultTargetPlatform.name.toLowerCase();
 
   /// Initializes Firebase and asks for notification permission once;
   /// resolves to whether push notifications can be used.
@@ -35,23 +42,19 @@ class PushNotificationService {
         );
       }
       final messaging = FirebaseMessaging.instance;
-      // TODO: Connect Firebase to this project before notifications can ring
-      // on a device. Download google-services.json from the Firebase console
-      // (Project settings → Your apps → Android) and place it at
-      // android/app/google-services.json, matching this app's package name.
-      // Until that file is the one generated for this app, requestPermission
-      // and the foreground handler below will not deliver real pushes.
       final settings = await messaging.requestPermission();
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
         debugPrint('Push notifications: permission denied.');
         return false;
       }
-      // iOS hides notifications while the app is open unless told otherwise.
-      await messaging.setForegroundNotificationPresentationOptions(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
+      if (!kIsWeb) {
+        // iOS hides notifications while the app is open unless told otherwise.
+        await messaging.setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
       return true;
     } catch (error) {
       debugPrint('Push notifications disabled: $error');
@@ -62,13 +65,32 @@ class PushNotificationService {
   /// The FCM token for this device, or null when push is unavailable.
   Future<String?> getToken() async {
     if (!await initialize()) return null;
+    await _deleting;
     try {
-      return await FirebaseMessaging.instance.getToken();
+      return await FirebaseMessaging.instance.getToken(
+        vapidKey: kIsWeb && AppConfig.firebaseVapidKey.isNotEmpty
+            ? AppConfig.firebaseVapidKey
+            : null,
+      );
     } catch (error) {
-      // On iOS this fails until APNs has registered the device.
+      // On iOS this fails until APNs has registered the device; on the web
+      // when the service worker can't be registered.
       debugPrint('Push notifications: could not get token: $error');
       return null;
     }
+  }
+
+  /// Invalidates this device's token, so a signed-out device stops getting
+  /// the previous user's notifications. The next [getToken] issues a new one.
+  Future<void> deleteToken() {
+    return _deleting = () async {
+      if (!await initialize()) return;
+      try {
+        await FirebaseMessaging.instance.deleteToken();
+      } catch (error) {
+        debugPrint('Push notifications: could not delete token: $error');
+      }
+    }();
   }
 
   /// Emits whenever FCM rotates this device's token.
@@ -77,22 +99,19 @@ class PushNotificationService {
     yield* FirebaseMessaging.instance.onTokenRefresh;
   }
 
-  /// Data payloads of messages received while the app is open.
-  ///
-  /// Uses `FirebaseMessaging.onMessage` so a foreground message (for example
-  /// the driver accepting an order) can update the UI without a system tray
-  /// banner. Background ringing still depends on the TODO in [initialize]:
-  /// google-services.json must be connected first.
+  /// Data payloads of messages received while the app is open, so a
+  /// foreground message (for example a new order) can update the UI.
   Stream<Map<String, dynamic>> get foregroundMessages async* {
     if (!await initialize()) return;
     yield* FirebaseMessaging.onMessage.map((message) => message.data);
   }
 
+  /// FCM topics aren't available in the browser.
   Future<void> setTopicSubscription(
     String topic, {
     required bool subscribed,
   }) async {
-    if (!await initialize()) return;
+    if (kIsWeb || !await initialize()) return;
     try {
       final messaging = FirebaseMessaging.instance;
       if (subscribed) {

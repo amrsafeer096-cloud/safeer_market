@@ -10,19 +10,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/audio/app_sound_service.dart';
 import 'core/config/app_config.dart';
+import 'core/notifications/push_background_handler.dart';
 import 'core/providers/settings_providers.dart';
-
-/// FCM entry when the app is killed / backgrounded (mobile only).
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Payload is shown by the OS tray; deep-link runs on tap via onMessageOpenedApp.
-  debugPrint('FCM background: ${message.messageId} ${message.data}');
-}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!kIsWeb) {
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  // Web handles background pushes in web/firebase-messaging-sw.js.
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS)) {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
   final (_, preferences) = await (
     Supabase.initialize(

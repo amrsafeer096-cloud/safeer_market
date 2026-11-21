@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/l10n/l10n.dart';
+import 'core/network/realtime_session.dart';
 import 'core/notifications/fcm_token_sync.dart';
 import 'core/notifications/system_alerts_service.dart';
 import 'core/providers/locale_provider.dart';
@@ -26,7 +27,10 @@ class SafeerMarketApp extends ConsumerWidget {
     ref
       ..watch(settingsPersistenceProvider)
       ..watch(completeOnboardingOnAuthProvider)
+      // Keeps Realtime's JWT fresh on token refresh and tab/app resume.
+      ..watch(realtimeAuthSyncProvider)
       ..watch(fcmTokenSyncProvider)
+      ..watch(fcmSignOutCleanupProvider)
       ..watch(driverTopicSyncProvider)
       ..watch(profileSyncProvider)
       ..watch(subscriptionAutoRefreshProvider)

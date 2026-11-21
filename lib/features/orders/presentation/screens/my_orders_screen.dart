@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/network/realtime_session.dart';
+import '../../../../core/network/resilient_realtime_stream.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/widgets/mobile_frame.dart';
 import '../../../../l10n/app_localizations.dart';
@@ -24,8 +26,9 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
   int _liveGeneration = -1;
   String? _liveUserId;
 
-  /// Opens a realtime subscription on `orders`. A new status from the driver
-  /// (such as `out_for_delivery`) arrives on this stream and rebuilds the list.
+  /// Opens a resilient realtime subscription on `orders`. A new status from
+  /// the driver arrives on this stream; expired JWT / channelError reconnect
+  /// automatically without a dead error screen.
   Stream<List<CustomerOrder>> _ordersStream() {
     final override = ref.watch(customerOrdersStreamOverrideProvider);
     if (override != null) return override;
@@ -42,15 +45,30 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
       return _live = Stream.value(const []);
     }
 
-    return _live = Supabase.instance.client
-        .from('orders')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', currentUserId)
-        .map((rows) {
-          final orders = rows.map(CustomerOrder.fromRow).toList()
-            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-          return orders;
-        });
+    final client = Supabase.instance.client;
+    List<CustomerOrder> mapRows(List<Map<String, dynamic>> rows) {
+      final orders = rows.map(CustomerOrder.fromRow).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return orders;
+    }
+
+    return _live = resilientRealtimeStream<List<CustomerOrder>>(
+      create: () => client
+          .from('orders')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', currentUserId)
+          .map(mapRows),
+      poll: () async {
+        final rows = await client
+            .from('orders')
+            .select()
+            .eq('user_id', currentUserId)
+            .order('created_at', ascending: false);
+        return mapRows(List<Map<String, dynamic>>.from(rows));
+      },
+      pollInterval: const Duration(seconds: 60),
+      onReconnect: () => ensureRealtimeAuth(client),
+    );
   }
 
   @override
@@ -71,6 +89,28 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
           child: StreamBuilder<List<CustomerOrder>>(
             stream: ordersStream,
             builder: (context, snapshot) {
+              // Keep the last list visible while a reconnect is in flight.
+              final orders = snapshot.data;
+              if (orders != null) {
+                if (orders.isEmpty) {
+                  return _OrdersMessage(
+                    icon: Icons.receipt_long_outlined,
+                    title: l10n.myOrdersEmptyTitle,
+                    subtitle: l10n.myOrdersEmptySubtitle,
+                    actionLabel: l10n.shopNow,
+                    onAction: () => goToHomeTab(context, ref),
+                  );
+                }
+                return ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: orders.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 12),
+                  itemBuilder: (context, index) =>
+                      OrderCard(order: orders[index]),
+                );
+              }
               if (snapshot.hasError) {
                 return _OrdersMessage(
                   icon: Icons.wifi_off_rounded,
@@ -79,28 +119,7 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
                   onAction: () => setState(() => _generation++),
                 );
               }
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final orders = snapshot.data!;
-              if (orders.isEmpty) {
-                return _OrdersMessage(
-                  icon: Icons.receipt_long_outlined,
-                  title: l10n.myOrdersEmptyTitle,
-                  subtitle: l10n.myOrdersEmptySubtitle,
-                  actionLabel: l10n.shopNow,
-                  onAction: () => goToHomeTab(context, ref),
-                );
-              }
-              return ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                itemCount: orders.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 12),
-                itemBuilder: (context, index) =>
-                    OrderCard(order: orders[index]),
-              );
+              return const Center(child: CircularProgressIndicator());
             },
           ),
         ),

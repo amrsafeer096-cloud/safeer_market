@@ -24,10 +24,19 @@ double? orderCoordinate(Object? value) => switch (value) {
       _ => null,
     };
 
-bool orderHasMapPin(Map<String, dynamic> order) => hasValidDeliveryCoordinates(
+/// The order's saved Google Maps pin link, if any.
+Uri? orderMapPinUri(Map<String, dynamic> order) =>
+    savedMapPinUri(order['delivery_map_url']);
+
+/// Whether the order was placed with a GPS pin (or a saved map link). Legacy
+/// imported customers only have a written building / apartment address, and
+/// get no «التوجه عبر الخريطة» button.
+bool orderHasMapPin(Map<String, dynamic> order) =>
+    hasValidDeliveryCoordinates(
       orderCoordinate(order['delivery_latitude']),
       orderCoordinate(order['delivery_longitude']),
-    );
+    ) ||
+    orderMapPinUri(order) != null;
 
 String? orderReceiptUrl(Map<String, dynamic> order) {
   final raw = order['receipt_url'] ?? order['receiptUrl'];
@@ -41,20 +50,21 @@ String? _text(Object? value) {
   return text == null || text.isEmpty ? null : text;
 }
 
-/// Google Maps directions to the order's delivery pin, else its written
-/// address. Checkout stores both on the order row; the coordinates arrive
-/// as numbers or text.
+/// Google Maps directions to the order's delivery pin, else its saved map
+/// link. Does nothing for orders without either ([orderHasMapPin]); the
+/// coordinates arrive as numbers or text.
 Future<void> navigateToOrder(
   BuildContext context,
   WidgetRef ref,
   Map<String, dynamic> order,
-) {
-  return openCustomerInGoogleMaps(
+) async {
+  if (!orderHasMapPin(order)) return;
+  await openCustomerInGoogleMaps(
     context,
     ref,
     latitude: orderCoordinate(order['delivery_latitude']),
     longitude: orderCoordinate(order['delivery_longitude']),
-    address: order['address_details']?.toString(),
+    mapPinUri: orderMapPinUri(order),
   );
 }
 

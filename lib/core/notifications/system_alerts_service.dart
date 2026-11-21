@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../routing/app_routes.dart';
 import '../routing/app_router.dart';
 import 'browser_notifications.dart';
+import 'push_channels.dart';
 import 'push_notification_service.dart';
 
 /// Payload keys used when a system tray / browser notification is tapped.
@@ -28,9 +29,6 @@ class SystemAlertsService {
   StreamSubscription<RemoteMessage>? _foregroundSub;
   StreamSubscription<RemoteMessage>? _openedSub;
 
-  static const _channelId = 'safeer_alerts';
-  static const _channelName = 'سفير ماركت';
-
   static const _isFlutterTest = bool.fromEnvironment('FLUTTER_TEST');
 
   bool get _mobileTray =>
@@ -46,6 +44,13 @@ class SystemAlertsService {
     try {
       if (kIsWeb) {
         await requestBrowserNotificationPermission();
+        if (_isFlutterTest) return;
+        // Background / closed-tab pushes are shown by
+        // web/firebase-messaging-sw.js; this covers the open tab.
+        if (await _ref.read(pushNotificationServiceProvider).initialize()) {
+          _foregroundSub =
+              FirebaseMessaging.onMessage.listen(_onForegroundMessage);
+        }
         return;
       }
       if (!_mobileTray) return;
@@ -59,6 +64,13 @@ class SystemAlertsService {
       final initial = await FirebaseMessaging.instance.getInitialMessage();
       if (initial != null) {
         _navigateFromData(initial.data);
+        return;
+      }
+      // A local notification shown by the background handler launched us.
+      final launch = await _local.getNotificationAppLaunchDetails();
+      final payload = launch?.notificationResponse?.payload;
+      if (launch?.didNotificationLaunchApp == true && payload != null) {
+        _openPayload(payload);
       }
     } catch (error) {
       debugPrint('SystemAlerts: start skipped: $error');
@@ -78,31 +90,31 @@ class SystemAlertsService {
       onDidReceiveNotificationResponse: (response) {
         final payload = response.payload;
         if (payload == null || payload.isEmpty) return;
-        try {
-          final data = jsonDecode(payload) as Map<String, dynamic>;
-          _navigateFromData(data);
-        } catch (_) {
-          _navigateFromData({SystemAlertPayload.route: payload});
-        }
+        _openPayload(payload);
       },
     );
-    final androidPlugin = _local.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    await androidPlugin?.createNotificationChannel(
-      const AndroidNotificationChannel(
-        _channelId,
-        _channelName,
-        importance: Importance.high,
-      ),
-    );
+    // FCM displays background / terminated pushes on these channels, so they
+    // must exist before the first push arrives.
+    await PushChannels.createAll(_local);
   }
 
-  /// In-app realtime → OS/browser banner (deduped by [id]).
+  void _openPayload(String payload) {
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      _navigateFromData(data);
+    } catch (_) {
+      _navigateFromData({SystemAlertPayload.route: payload});
+    }
+  }
+
+  /// In-app realtime → OS/browser banner (deduped by [id]). A [type] of
+  /// `new_order` uses the order chime channel.
   Future<void> present({
     required String id,
     required String title,
     required String body,
     String route = AppRoutes.notifications,
+    String? type,
   }) async {
     if (seenIds.contains(id)) return;
     seenIds.add(id);
@@ -130,20 +142,7 @@ class SystemAlertsService {
         id.hashCode & 0x7fffffff,
         'سفير ماركت',
         displayBody.isEmpty ? displayTitle : '$displayTitle\n$displayBody',
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _channelId,
-            _channelName,
-            importance: Importance.high,
-            priority: Priority.high,
-            icon: '@mipmap/ic_launcher',
-          ),
-          iOS: DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        ),
+        PushChannels.detailsFor(type),
         payload: payload,
       );
     } catch (error) {
@@ -157,12 +156,17 @@ class SystemAlertsService {
         'سفير ماركت';
     final body =
         message.notification?.body ?? message.data['body']?.toString() ?? '';
+    // notification_id matches the bell's realtime row, so the same
+    // notification isn't shown twice.
+    final notificationId = message.data['notification_id']?.toString();
     unawaited(present(
-      id: message.messageId ??
+      id: notificationId ??
+          message.messageId ??
           '${DateTime.now().millisecondsSinceEpoch}-$title',
       title: title,
       body: body,
       route: routeFromData(message.data),
+      type: message.data['type']?.toString(),
     ));
   }
 
@@ -176,6 +180,7 @@ class SystemAlertsService {
     final type = data['type']?.toString();
     if (type == 'support_chat') return AppRoutes.supportChat;
     if (type == 'order') return AppRoutes.orders;
+    if (type == 'new_order') return AppRoutes.driver;
     return AppRoutes.notifications;
   }
 

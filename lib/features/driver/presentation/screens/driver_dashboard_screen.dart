@@ -261,7 +261,7 @@ class _DriverOrderCardState extends ConsumerState<_DriverOrderCard> {
     final order = widget.order;
     final latitude = order.latitude;
     final longitude = order.longitude;
-    if (latitude == null || longitude == null) {
+    if (!hasValidDeliveryCoordinates(latitude, longitude)) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -272,7 +272,7 @@ class _DriverOrderCardState extends ConsumerState<_DriverOrderCard> {
       return;
     }
     context.push(
-      AppRoutes.driverMapFor(latitude: latitude, longitude: longitude),
+      AppRoutes.driverMapFor(latitude: latitude!, longitude: longitude!),
     );
   }
 

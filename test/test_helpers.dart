@@ -460,6 +460,13 @@ class FakePushNotificationService implements PushNotificationService {
   @override
   Future<String?> getToken() async => token;
 
+  var deletedTokens = 0;
+
+  @override
+  Future<void> deleteToken() async {
+    if (token != null) deletedTokens++;
+  }
+
   @override
   Stream<String> get onTokenRefresh => refreshes.stream;
 

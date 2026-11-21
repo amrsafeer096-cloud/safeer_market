@@ -3,6 +3,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Android 13+: asked at runtime by FirebaseMessaging.requestPermission. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:label="safeer_market"
@@ -56,6 +59,10 @@
             android:name="flutterEmbedding"
             android:value="2" />
             <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyBDdWen3FJroDEGEtDcObZcPtakCDPzQfQ"/>
+        <!-- FCM pushes without a channel_id (lib/core/notifications/push_channels.dart). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="safeer_alerts" />
         <!-- pasteboard: copy receipt images to the system clipboard on Android. -->
         <provider
             android:name="androidx.core.content.FileProvider"

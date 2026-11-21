@@ -12,23 +12,45 @@ import '../../../../l10n/app_localizations.dart';
 
 export '../../../../core/services/external_url_launcher.dart';
 
-/// True when an order has a real map pin (not null and not 0,0).
-/// Phone / legacy POS orders often only have a written address.
+/// True when an order has a real GPS pin from the app's map picker: both
+/// coordinates present, finite, non-zero and on the globe. Legacy imported
+/// customers and phone orders only have a written address (building /
+/// apartment numbers), so they get no map navigation.
 bool hasValidDeliveryCoordinates(double? latitude, double? longitude) {
   if (latitude == null || longitude == null) return false;
-  if (latitude == 0 && longitude == 0) return false;
-  return true;
+  if (!latitude.isFinite || !longitude.isFinite) return false;
+  if (latitude == 0 || longitude == 0) return false;
+  return latitude.abs() <= 90 && longitude.abs() <= 180;
+}
+
+/// A saved Google Maps pin link (`https://maps.app.goo.gl/…`,
+/// `https://www.google.com/maps/…`, `geo:…`), or null when [value] isn't one.
+Uri? savedMapPinUri(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty) return null;
+  final uri = Uri.tryParse(text);
+  if (uri == null) return null;
+  if (uri.scheme == 'geo') return uri;
+  if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+  final host = uri.host.toLowerCase();
+  final mapsPath = uri.path.startsWith('/maps');
+  final isMaps = host == 'maps.app.goo.gl' ||
+      host == 'maps.google.com' ||
+      (host == 'goo.gl' && mapsPath) ||
+      ((host == 'google.com' || host.startsWith('www.google.')) && mapsPath);
+  return isMaps ? uri : null;
 }
 
 /// «التوجه عبر الخريطة»: Google Maps turn-by-turn directions to the
-/// customer's pin. Callers should hide the button when
-/// [hasValidDeliveryCoordinates] is false.
+/// customer's pin, else a saved map pin link. Callers should hide the button
+/// when neither exists (see [hasValidDeliveryCoordinates], [savedMapPinUri]).
 Future<void> openCustomerInGoogleMaps(
   BuildContext context,
   WidgetRef ref, {
   double? latitude,
   double? longitude,
   String? address,
+  Uri? mapPinUri,
 }) async {
   final l10n = AppLocalizations.of(context)!;
   final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
@@ -36,6 +58,8 @@ Future<void> openCustomerInGoogleMaps(
   final Uri uri;
   if (hasValidDeliveryCoordinates(latitude, longitude)) {
     uri = OrderMapScreen.directionsUri(latitude!, longitude!);
+  } else if (mapPinUri != null) {
+    uri = mapPinUri;
   } else if (written != null && written.isNotEmpty) {
     uri = OrderMapScreen.addressDirectionsUri(written);
   } else {
@@ -105,8 +129,9 @@ class OrderMapScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final latitude = this.latitude;
-    final longitude = this.longitude;
+    final hasPin = hasValidDeliveryCoordinates(this.latitude, this.longitude);
+    final latitude = hasPin ? this.latitude : null;
+    final longitude = hasPin ? this.longitude : null;
     final palette = context.palette;
 
     return MobileFrame(

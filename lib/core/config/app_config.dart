@@ -40,4 +40,16 @@ abstract final class AppConfig {
   /// linked in Supabase → Authentication → Providers → Phone; turn on with
   /// `--dart-define=PHONE_AUTH_ENABLED=true`.
   static const phoneAuthEnabled = bool.fromEnvironment('PHONE_AUTH_ENABLED');
+
+  /// Web Push certificate (VAPID *public* key, safe to ship) from Firebase
+  /// console → Project settings → Cloud Messaging → Web configuration.
+  static const _defaultVapidKey =
+      'BC-js1JfN9IS0qpEWY5xNOTns5FgBseNSOYXlY4gt2-zW7IUeiq74aVu2Z6wRA0QOs_fdort2NGG4jnVNxju_mE';
+
+  static const _vapidKeyOverride = String.fromEnvironment('FIREBASE_VAPID_KEY');
+
+  /// Override with `--dart-define=FIREBASE_VAPID_KEY=...`; an empty define
+  /// (for example an unset CI secret) falls back to the built-in key.
+  static String get firebaseVapidKey =>
+      _vapidKeyOverride.isEmpty ? _defaultVapidKey : _vapidKeyOverride;
 }

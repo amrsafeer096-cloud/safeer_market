@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/auth/presentation/providers/auth_providers.dart';
 import '../../features/profile/domain/entities/user_role.dart';
 import '../../features/profile/presentation/providers/profile_providers.dart';
+import '../network/page_visibility.dart';
 import 'new_order_notifier.dart';
 import 'push_notification_service.dart';
 
@@ -27,9 +29,10 @@ final driverTopicSyncProvider = Provider<void>((ref) {
   );
 });
 
-/// Keeps the signed-in user's `profiles.fcm_token` current: on app start with
-/// a saved session, on every sign-in, and whenever FCM rotates the token.
-/// Watch it once at the app root.
+/// Keeps the signed-in user's device token registered in `user_fcm_tokens`
+/// (with their role and platform) and `profiles.fcm_token`: on app start with
+/// a saved session, on every sign-in, whenever FCM rotates the token, and
+/// again when a sleeping tab / app wakes up. Watch it once at the app root.
 final fcmTokenSyncProvider = Provider<void>((ref) {
   final userId = ref.watch(currentUserProvider.select((user) => user?.id));
   if (userId == null) return;
@@ -47,10 +50,41 @@ final fcmTokenSyncProvider = Provider<void>((ref) {
     }
   }
 
-  unawaited(push.getToken().then(save));
+  Future<void> sync({int attempts = 3}) async {
+    for (var i = 0; i < attempts && !disposed; i++) {
+      final token = await push.getToken();
+      if (token != null) {
+        await save(token);
+        return;
+      }
+      // Web often needs a moment after notification permission is granted.
+      await Future<void>.delayed(Duration(milliseconds: 400 * (i + 1)));
+    }
+  }
+
+  unawaited(sync());
   final subscription = push.onTokenRefresh.listen(save);
+  final lifecycle = AppLifecycleListener(onResume: () => unawaited(sync()));
+  final visibility = listenPageBecameVisible(() => unawaited(sync()));
+
   ref.onDispose(() {
     disposed = true;
     subscription.cancel();
+    lifecycle.dispose();
+    visibility?.cancel();
   });
+});
+
+/// Deletes the device token on sign-out, so a signed-out phone or browser
+/// stops receiving the previous user's orders and updates; send-push prunes
+/// the dead token from `user_fcm_tokens`. Watch it once at the app root.
+final fcmSignOutCleanupProvider = Provider<void>((ref) {
+  ref.listen(
+    currentUserProvider.select((user) => user?.id),
+    (previous, next) {
+      if (previous != null && next == null) {
+        unawaited(ref.read(pushNotificationServiceProvider).deleteToken());
+      }
+    },
+  );
 });

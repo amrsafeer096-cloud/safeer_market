@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../../core/notifications/push_notification_service.dart';
 import '../../domain/entities/user_profile.dart';
 import '../../domain/entities/user_role.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -87,6 +89,18 @@ class SupabaseProfileRepository implements ProfileRepository {
     required String userId,
     required String token,
   }) async {
+    try {
+      // user_fcm_tokens feeds the send-push Edge Function (one row per
+      // device, role read from profiles). Before that migration runs, only
+      // the legacy profiles.fcm_token is kept.
+      await _client.rpc('register_fcm_token', params: {
+        'p_token': token,
+        'p_platform': PushNotificationService.platformName,
+      });
+    } on PostgrestException catch (error) {
+      debugPrint('Push notifications: register_fcm_token failed: '
+          '${error.message}');
+    }
     try {
       await _saveOwnRow(userId, {'fcm_token': token});
     } on PostgrestException catch (error) {
