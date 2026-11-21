@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
 import '../../domain/repositories/admin_orders_repository.dart';
@@ -67,6 +70,13 @@ class SupabaseAdminOrdersRepository implements AdminOrdersRepository {
   @override
   Future<void> updateStatus(String orderId, OrderStatus status) async {
     try {
+      final existing = await _client
+          .from('orders')
+          .select('id, status')
+          .eq('id', orderId)
+          .maybeSingle();
+      final previousStatus =
+          (existing?['status'] ?? 'pending').toString();
       final updated = await _client
           .from('orders')
           .update({'status': status.value})
@@ -75,6 +85,12 @@ class SupabaseAdminOrdersRepository implements AdminOrdersRepository {
       if (updated.isEmpty) {
         throw AdminFailure(L10n.current.noPermissionToEditOrder);
       }
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: previousStatus,
+        ),
+      );
     } on PostgrestException catch (error) {
       throw AdminFailure(L10n.current.adminStatusUpdateFailed(error.message));
     }

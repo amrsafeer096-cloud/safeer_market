@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/config/paymob_config.dart';
+import '../../../core/notifications/order_push_dispatcher.dart';
 import '../domain/pending_subscription.dart';
 import '../domain/subscription.dart';
 
@@ -340,6 +342,12 @@ class PaymobService {
       await _client.rpc('mark_order_paid_visa', params: {
         'p_order_id': orderId,
       });
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: 'pending',
+        ),
+      );
       return;
     } catch (e, st) {
       debugPrint('mark_order_paid_visa RPC failed, trying update: $e\n$st');
@@ -350,6 +358,12 @@ class PaymobService {
         'payment_method': 'visa',
         'status': 'preparing',
       }).eq('id', orderId);
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: 'pending',
+        ),
+      );
     } catch (e, st) {
       debugPrint('Direct order paid update failed: $e\n$st');
       throw PaymentFailure('Could not mark order paid: $e');

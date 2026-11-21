@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/l10n/l10n.dart';
 import '../../../../core/network/realtime_session.dart';
 import '../../../../core/network/resilient_realtime_stream.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../domain/entities/warehouse_order.dart';
 import '../../domain/repositories/warehouse_orders_repository.dart';
 
@@ -56,6 +57,12 @@ class SupabaseWarehouseOrdersRepository implements WarehouseOrdersRepository {
       if (updated.isEmpty) {
         throw WarehouseFailure(L10n.current.warehouseOrderAlreadyUpdated);
       }
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: from,
+        ),
+      );
     } on PostgrestException catch (error) {
       throw WarehouseFailure(L10n.current.orderUpdateFailed(error.message));
     }

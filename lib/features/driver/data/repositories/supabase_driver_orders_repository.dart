@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../domain/entities/driver_order.dart';
 import '../../domain/repositories/driver_orders_repository.dart';
 
@@ -69,6 +72,12 @@ class SupabaseDriverOrdersRepository implements DriverOrdersRepository {
       if (updated.isEmpty) {
         throw DriverFailure(L10n.current.driverOrderTakenByAnother);
       }
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: 'ready_for_delivery',
+        ),
+      );
     } on PostgrestException catch (error) {
       throw DriverFailure(L10n.current.driverAcceptOrderFailed(error.message));
     }
@@ -86,6 +95,12 @@ class SupabaseDriverOrdersRepository implements DriverOrdersRepository {
       if (updated.isEmpty) {
         throw DriverFailure(L10n.current.noPermissionToEditOrder);
       }
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: 'out_for_delivery',
+        ),
+      );
     } on PostgrestException catch (error) {
       throw DriverFailure(L10n.current.orderUpdateFailed(error.message));
     }
@@ -105,7 +120,9 @@ class SupabaseDriverOrdersRepository implements DriverOrdersRepository {
           .from('orders')
           .update({'driver_lat': latitude, 'driver_lng': longitude})
           .eq('id', orderId)
-          .select('id');
+          .select(
+            'id, delivery_latitude, delivery_longitude, arriving_soon_notified',
+          );
     } on PostgrestException catch (error) {
       throw DriverFailure(
         L10n.current.driverLocationSendFailed(
@@ -117,6 +134,17 @@ class SupabaseDriverOrdersRepository implements DriverOrdersRepository {
     if (updated.isEmpty) {
       throw DriverFailure(L10n.current.driverLocationSendNotAssigned);
     }
+    final row = updated.first;
+    unawaited(
+      OrderPushDispatcher(_client).maybeNotifyArrivingSoon(
+        orderId: orderId,
+        driverLat: latitude,
+        driverLng: longitude,
+        deliveryLat: _toDouble(row['delivery_latitude']),
+        deliveryLng: _toDouble(row['delivery_longitude']),
+        alreadyNotified: row['arriving_soon_notified'] == true,
+      ),
+    );
   }
 
   static DriverOrder _toOrder(Map<String, dynamic> row) {

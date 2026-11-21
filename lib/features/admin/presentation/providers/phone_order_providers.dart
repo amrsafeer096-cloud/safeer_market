@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/network/supabase_providers.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../../catalog/domain/main_categories.dart';
 import '../../../cart/domain/weight_options.dart';
 import '../../../home/domain/entities/product.dart';
@@ -324,6 +327,9 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
             paymentMethod: state.paymentMethod,
             receipt: state.receipt,
           );
+      unawaited(
+        ref.read(orderPushDispatcherProvider).notifyOrderCreated(orderId),
+      );
       _closeActive();
       return orderId;
     } catch (_) {

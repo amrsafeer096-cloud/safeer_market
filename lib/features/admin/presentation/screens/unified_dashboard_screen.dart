@@ -12,6 +12,7 @@ import '../../../../core/theme/app_palette.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/network/live_query.dart';
 import '../../../../core/network/realtime_session.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../../../core/notifications/system_alerts_service.dart';
 import '../../../../core/providers/settings_providers.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -1323,8 +1324,17 @@ class _OrderDetailsView extends ConsumerWidget {
                 icon: Icons.motorcycle_rounded,
                 color: Colors.blue,
                 onTap: () async {
+                  final orderId = order['id'].toString();
+                  final previous =
+                      (order['status'] ?? 'ready_for_delivery').toString();
                   await Supabase.instance.client.from('orders').update(
-                      {'status': 'outForDelivery'}).eq('id', order['id']);
+                      {'status': 'outForDelivery'}).eq('id', orderId);
+                  dispatchOrderPush(
+                    Supabase.instance.client,
+                    orderId: orderId,
+                    trigger: 'status',
+                    previousStatus: previous,
+                  );
                   if (context.mounted) navigateToOrder(context, ref, order);
                 },
               )
@@ -1344,9 +1354,18 @@ class _OrderDetailsView extends ConsumerWidget {
               icon: Icons.done_all,
               color: AppColors.success,
               onTap: () async {
+                final orderId = order['id'].toString();
+                final previous =
+                    (order['status'] ?? 'out_for_delivery').toString();
                 await Supabase.instance.client
                     .from('orders')
-                    .update({'status': 'delivered'}).eq('id', order['id']);
+                    .update({'status': 'delivered'}).eq('id', orderId);
+                dispatchOrderPush(
+                  Supabase.instance.client,
+                  orderId: orderId,
+                  trigger: 'status',
+                  previousStatus: previous,
+                );
                 if (!isDesktop && context.mounted) {
                   ref.read(selectedOrderIdProvider.notifier).state =
                       null; // يرجع للستة
@@ -1413,6 +1432,12 @@ class _OrderDetailsView extends ConsumerWidget {
                               'status': 'preparing',
                               'preparer_name': p['name']
                             }).eq('id', orderId);
+                            dispatchOrderPush(
+                              Supabase.instance.client,
+                              orderId: orderId,
+                              trigger: 'status',
+                              previousStatus: 'pending',
+                            );
                             AudioPlayer().play(UrlSource(
                                 'https://jugdxfhmjakmzjvfltjv.supabase.co/storage/v1/object/public/product_images/accept_order.mp3.mp3'));
                           },
@@ -1551,10 +1576,20 @@ class _AdminDriverAssignerState extends ConsumerState<_AdminDriverAssigner> {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _saving = true);
     try {
+      final orderId = widget.order['id'].toString();
+      final previous = (widget.order['status'] ?? 'preparing').toString();
       await Supabase.instance.client.from('orders').update({
         'driver_name': selectedDriver,
         if (widget.startDelivery) 'status': 'readyForDelivery',
-      }).eq('id', widget.order['id']);
+      }).eq('id', orderId);
+      if (widget.startDelivery) {
+        dispatchOrderPush(
+          Supabase.instance.client,
+          orderId: orderId,
+          trigger: 'status',
+          previousStatus: previous,
+        );
+      }
       messenger.showSnackBar(SnackBar(
           content: Text(l10n.adminOrderAssignedToDriver),
           backgroundColor: AppColors.success));

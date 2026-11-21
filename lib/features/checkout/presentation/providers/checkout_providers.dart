@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/l10n/l10n.dart';
 import '../../../../core/network/supabase_providers.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../../addresses/domain/entities/address.dart';
 import '../../../addresses/presentation/providers/addresses_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -146,6 +147,10 @@ class CheckoutController extends AutoDisposeAsyncNotifier<void> {
         paymentStatus: paymentStatus,
         paymentMethodOverride: paymentMethodOverride,
         receiptUrl: uploadedReceiptUrl,
+      );
+      // Push to admin/taker devices even if the DB webhook is not configured.
+      unawaited(
+        ref.read(orderPushDispatcherProvider).notifyOrderCreated(orderId),
       );
       if (clearCart) {
         ref.read(cartProvider.notifier).clear();

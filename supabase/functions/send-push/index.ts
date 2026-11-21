@@ -1,15 +1,20 @@
-// Dispatches FCM v1 push notifications for database events. Called by the
-// dispatch_push_webhook() trigger with the body of a Supabase Database
-// Webhook: { type, table, record, old_record }.
+// Dispatches FCM v1 push notifications for order / notification events.
+//
+// Two callers are supported (deploy with --no-verify-jwt so both work):
+//
+// 1. Flutter  →  supabase.functions.invoke('send-push', body: {
+//                  order_id, trigger: 'insert'|'status'|'location',
+//                  previous_status? })
+//    Auth: the signed-in user's JWT (Authorization: Bearer …).
+//
+// 2. DB webhook / pg_net  →  POST with header x-push-secret and body
+//    { type, table, record, old_record } (Vault secrets push_webhook_*).
 //
 //   orders INSERT              → admins + takers ("طلب جديد"), order chime.
 //   orders UPDATE (status)     → customer lifecycle stages (preparing /
 //                                out_for_delivery / delivered / cancelled).
 //   orders UPDATE (driver GPS) → one-shot "arriving soon" when ≤ 600 m.
 //   app_notifications INSERT   → target user, or every customer (broadcast).
-//
-// Every payload carries both `notification` and `data` so Android / iOS show
-// a tray banner while the app is completely killed (Talabat-style).
 //
 // Secrets: FIREBASE_SERVICE_ACCOUNT, PUSH_WEBHOOK_SECRET, optional PUBLIC_WEB_URL.
 // Deploy: supabase functions deploy send-push --no-verify-jwt
@@ -417,22 +422,144 @@ function buildMessage(push: Push, row: TokenRow): Record<string, unknown> {
   };
 }
 
+/** Flutter invoke body: { order_id, trigger, previous_status? }. */
+interface AppInvokeBody {
+  order_id?: string;
+  trigger?: string;
+  previous_status?: string;
+  // Legacy / webhook fields may also be present.
+  type?: string;
+  table?: string;
+  record?: Record<string, unknown> | null;
+  old_record?: Record<string, unknown> | null;
+}
+
+async function authorize(
+  request: Request,
+): Promise<{ ok: true } | { ok: false; response: Response }> {
+  const secret = Deno.env.get("PUSH_WEBHOOK_SECRET") ?? "";
+  const given = request.headers.get("x-push-secret") ?? "";
+  if (secret && given && safeEqual(given, secret)) {
+    return { ok: true };
+  }
+
+  // Flutter supabase.functions.invoke attaches the user JWT.
+  const auth = request.headers.get("Authorization") ?? "";
+  if (!auth.toLowerCase().startsWith("bearer ")) {
+    return {
+      ok: false,
+      response: json({
+        error:
+          "Unauthorized: pass x-push-secret (webhook) or a user JWT (app invoke)",
+      }, 401),
+    };
+  }
+  const userClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: auth } } },
+  );
+  const { data: { user }, error } = await userClient.auth.getUser();
+  if (error || !user) {
+    return {
+      ok: false,
+      response: json({ error: "Unauthorized: invalid session" }, 401),
+    };
+  }
+  return { ok: true };
+}
+
+/** Turns a Flutter { order_id, trigger } call into a webhook-shaped event. */
+async function eventFromAppInvoke(
+  body: AppInvokeBody,
+): Promise<WebhookBody | null> {
+  const orderId = text(body.order_id);
+  const trigger = text(body.trigger).toLowerCase();
+  if (!orderId || !trigger) return null;
+
+  const { data: record, error } = await admin
+    .from("orders")
+    .select("*")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!record) return null;
+
+  if (trigger === "insert" || trigger === "created" || trigger === "new") {
+    return {
+      type: "INSERT",
+      table: "orders",
+      record,
+      old_record: null,
+    };
+  }
+
+  if (trigger === "status" || trigger === "status_changed") {
+    const previous = text(body.previous_status) || "pending";
+    return {
+      type: "UPDATE",
+      table: "orders",
+      record,
+      old_record: { ...record, status: previous },
+    };
+  }
+
+  if (
+    trigger === "location" ||
+    trigger === "driver_location" ||
+    trigger === "arriving_soon"
+  ) {
+    // Pretend GPS just changed from "far away" so plan() evaluates distance.
+    return {
+      type: "UPDATE",
+      table: "orders",
+      record,
+      old_record: {
+        ...record,
+        driver_lat: null,
+        driver_lng: null,
+      },
+    };
+  }
+
+  return null;
+}
+
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "POST only" }, 405);
 
-  const secret = Deno.env.get("PUSH_WEBHOOK_SECRET") ?? "";
-  const given = request.headers.get("x-push-secret") ?? "";
-  if (!secret || !safeEqual(given, secret)) {
-    return json({ error: "Unauthorized" }, 401);
+  const auth = await authorize(request);
+  if (!auth.ok) return auth.response;
+
+  const body = await request.json().catch(() => null) as AppInvokeBody | null;
+  if (!body) return json({ error: "Expected JSON body" }, 400);
+
+  let event: WebhookBody | null = null;
+  if (body.table && body.type) {
+    event = {
+      type: body.type as WebhookBody["type"],
+      table: body.table,
+      record: body.record ?? null,
+      old_record: body.old_record ?? null,
+    };
+  } else {
+    event = await eventFromAppInvoke(body);
+  }
+  if (!event?.table || !event.type) {
+    return json({
+      error:
+        "Expected { type, table, record } or { order_id, trigger: insert|status|location }",
+    }, 400);
   }
 
-  const event = await request.json().catch(() => null) as WebhookBody | null;
-  if (!event?.table || !event.type) {
-    return json({ error: "Expected a database webhook body" }, 400);
-  }
+  console.log(
+    `send-push: ${event.type} ${event.table} ` +
+      `id=${text(event.record?.id)} status=${text(event.record?.status)}`,
+  );
 
   const planned = await plan(event);
   if (!planned || planned.tokens.length === 0) {
+    console.log("send-push: skipped (no plan or no tokens)");
     return json({ sent: 0, skipped: true });
   }
 
@@ -465,5 +592,6 @@ Deno.serve(async (request) => {
   if (stale.length > 0) {
     await admin.from("user_fcm_tokens").delete().in("token", stale);
   }
+  console.log(`send-push: sent=${sent} failed=${failed} pruned=${stale.length}`);
   return json({ sent, failed, pruned: stale.length });
 });
