@@ -63,11 +63,12 @@ class SupabaseWarehouseOrdersRepository implements WarehouseOrdersRepository {
 
   @override
   Stream<void> changes() {
-    // Tick stream: each Realtime event (or the periodic poll) notifies the
-    // dashboard so it can invalidate its queue without dying on a
-    // channelError / expired JWT.
+    // Tick stream: Realtime events (or the 20s HTTP poll while the socket
+    // is down) notify the dashboard so it can invalidate its queue without
+    // dying on channelError / WebSocketChannelException.
     var tick = 0;
     return resilientRealtimeStream<int>(
+      fetch: () async => ++tick,
       create: () {
         late final RealtimeChannel channel;
         late final StreamController<int> controller;
@@ -101,9 +102,6 @@ class SupabaseWarehouseOrdersRepository implements WarehouseOrdersRepository {
         );
         return controller.stream;
       },
-      // Poll tick so a sleeping tab still refreshes the queue.
-      poll: () async => ++tick,
-      pollInterval: const Duration(seconds: 45),
       onReconnect: () => ensureRealtimeAuth(_client),
     ).map((_) {});
   }

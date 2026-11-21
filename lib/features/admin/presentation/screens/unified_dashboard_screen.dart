@@ -10,8 +10,8 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/constants/app_currency.dart';
+import '../../../../core/network/live_query.dart';
 import '../../../../core/network/realtime_session.dart';
-import '../../../../core/network/resilient_realtime_stream.dart';
 import '../../../../core/notifications/system_alerts_service.dart';
 import '../../../../core/providers/settings_providers.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -85,26 +85,73 @@ final orderPrepChecklistProvider = StateProvider<Set<String>>((ref) => {});
 final adminProductSearchProvider = StateProvider<String>((ref) => '');
 final adminProductFilterProvider = StateProvider<int>((ref) => 0);
 
-final liveOrdersProvider =
-    StreamProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
-  final client = Supabase.instance.client;
-  return resilientRealtimeStream<List<Map<String, dynamic>>>(
-    create: () => client
-        .from('orders')
-        .stream(primaryKey: ['id'])
-        .order('created_at', ascending: false),
-    // Fallback when the WebSocket briefly drops (sleeping Chrome tab, etc.).
-    poll: () async {
+/// Live admin/taker orders: HTTP `.select()` first, Realtime in the background.
+/// WebSocket / token failures never become a dead error screen — the last
+/// loaded list stays visible while we refetch and resubscribe.
+final liveOrdersProvider = AsyncNotifierProvider.autoDispose<LiveOrdersNotifier,
+    List<Map<String, dynamic>>>(LiveOrdersNotifier.new);
+
+class LiveOrdersNotifier
+    extends AutoDisposeAsyncNotifier<List<Map<String, dynamic>>> {
+  LiveQuery<List<Map<String, dynamic>>>? _live;
+
+  @override
+  Future<List<Map<String, dynamic>>> build() async {
+    final client = Supabase.instance.client;
+
+    Future<List<Map<String, dynamic>>> fetch() async {
       final rows = await client
           .from('orders')
           .select()
           .order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(rows);
-    },
-    pollInterval: const Duration(seconds: 45),
-    onReconnect: () => ensureRealtimeAuth(client),
-  );
-});
+    }
+
+    final live = LiveQuery<List<Map<String, dynamic>>>(
+      fetch: fetch,
+      onReconnect: () => ensureRealtimeAuth(client),
+      disconnectedPollInterval: const Duration(seconds: 20),
+      subscribe: (onData, onError) {
+        final subscription = client
+            .from('orders')
+            .stream(primaryKey: ['id'])
+            .order('created_at', ascending: false)
+            .listen(
+              onData,
+              onError: onError,
+              onDone: () => onError(StateError('orders Realtime closed')),
+              cancelOnError: false,
+            );
+        return subscription.cancel;
+      },
+    );
+    _live = live;
+    ref.onDispose(live.dispose);
+
+    live.addListener(() {
+      if (!live.hasValue) return;
+      // Always AsyncData once we have rows — never AsyncError for sockets.
+      state = AsyncData(live.value ?? const []);
+    });
+
+    await live.start();
+    if (live.hasValue) return live.value ?? const [];
+    // First HTTP load failed and Realtime has not delivered yet.
+    throw live.fatalError ?? StateError('Could not load orders');
+  }
+
+  Future<void> refresh() => _live?.refresh() ?? Future.value();
+}
+
+/// Test / preview override: a fixed orders list with no Realtime socket.
+class FixedLiveOrdersNotifier extends LiveOrdersNotifier {
+  FixedLiveOrdersNotifier(this.orders);
+
+  final List<Map<String, dynamic>> orders;
+
+  @override
+  Future<List<Map<String, dynamic>>> build() async => orders;
+}
 
 /// Names and phones by user id, for ids joined with ','.
 final orderCustomersProvider = FutureProvider.autoDispose
@@ -433,48 +480,60 @@ class _UnifiedDashboardScreenState
       ];
 
       Widget orderStatusBody() {
-        // Prefer the last successful list so a brief Realtime blip never
-        // replaces the dashboard with a dead error screen.
-        final orders = liveOrdersAsync.valueOrNull;
-        if (orders != null) {
-          if (isDesktop) {
-            return ResizableColumns(
-              layoutId: 'admin-order-status',
-              columns: [
-                ResizableColumn(
-                  flex: 3,
-                  minWidth: 240,
-                  child: _OrdersList(orders: orders, userRole: userRole),
-                ),
-                ResizableColumn(
-                  flex: 7,
-                  minWidth: 360,
-                  child: _OrderDetailsView(
-                      orders: orders,
-                      userRole: userRole,
-                      showAdminFeatures: showAdminFeatures,
-                      isDesktop: true),
+        // Never show RealtimeSubscribeException / WebSocket failures: keep
+        // the last HTTP snapshot on screen (or a spinner on first load).
+        final orders = liveOrdersAsync.valueOrNull ?? const <Map<String, dynamic>>[];
+        final waitingFirstLoad =
+            liveOrdersAsync.isLoading && liveOrdersAsync.valueOrNull == null;
+        if (waitingFirstLoad) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        // Only a true first-load HTTP failure has no list yet.
+        if (liveOrdersAsync.valueOrNull == null && liveOrdersAsync.hasError) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(l10n.adminErrorWithDetails('${liveOrdersAsync.error}')),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () =>
+                      ref.read(liveOrdersProvider.notifier).refresh(),
+                  child: Text(l10n.retry),
                 ),
               ],
-            );
-          }
-          if (selectedId == null) {
-            return _OrdersList(orders: orders, userRole: userRole);
-          }
-          return _OrderDetailsView(
-              orders: orders,
-              userRole: userRole,
-              showAdminFeatures: showAdminFeatures,
-              isDesktop: false);
-        }
-        if (liveOrdersAsync.hasError) {
-          return Center(
-            child: Text(
-              l10n.adminErrorWithDetails('${liveOrdersAsync.error}'),
             ),
           );
         }
-        return const Center(child: CircularProgressIndicator());
+        if (isDesktop) {
+          return ResizableColumns(
+            layoutId: 'admin-order-status',
+            columns: [
+              ResizableColumn(
+                flex: 3,
+                minWidth: 240,
+                child: _OrdersList(orders: orders, userRole: userRole),
+              ),
+              ResizableColumn(
+                flex: 7,
+                minWidth: 360,
+                child: _OrderDetailsView(
+                    orders: orders,
+                    userRole: userRole,
+                    showAdminFeatures: showAdminFeatures,
+                    isDesktop: true),
+              ),
+            ],
+          );
+        }
+        if (selectedId == null) {
+          return _OrdersList(orders: orders, userRole: userRole);
+        }
+        return _OrderDetailsView(
+            orders: orders,
+            userRole: userRole,
+            showAdminFeatures: showAdminFeatures,
+            isDesktop: false);
       }
 
       final Widget menuBody = switch (activeMenu) {

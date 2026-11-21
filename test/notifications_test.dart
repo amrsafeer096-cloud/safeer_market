@@ -215,8 +215,7 @@ void main() {
           authRepositoryProvider
               .overrideWithValue(FakeAuthRepository(user: testUser)),
           userRoleProvider.overrideWith((ref) async => UserRole.admin),
-          liveOrdersProvider.overrideWith(
-              (ref) => Stream.value(const <Map<String, dynamic>>[])),
+          liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier(const <Map<String, dynamic>>[])),
           adminOrdersRepositoryProvider
               .overrideWithValue(FakeAdminOrdersRepository()),
           supportRepositoryProvider.overrideWithValue(FakeSupportRepository()),

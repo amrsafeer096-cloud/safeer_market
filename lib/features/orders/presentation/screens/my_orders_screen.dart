@@ -25,10 +25,10 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
   int _generation = 0;
   int _liveGeneration = -1;
   String? _liveUserId;
+  List<CustomerOrder>? _lastOrders;
 
-  /// Opens a resilient realtime subscription on `orders`. A new status from
-  /// the driver arrives on this stream; expired JWT / channelError reconnect
-  /// automatically without a dead error screen.
+  /// HTTP-first live stream. WebSocket / token failures keep [_lastOrders]
+  /// on screen and resubscribe in the background.
   Stream<List<CustomerOrder>> _ordersStream() {
     final override = ref.watch(customerOrdersStreamOverrideProvider);
     if (override != null) return override;
@@ -53,20 +53,23 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
     }
 
     return _live = resilientRealtimeStream<List<CustomerOrder>>(
+      fetch: () async {
+        final rows = await client
+            .from('orders')
+            .select(
+              'id, created_at, total_amount, status, address_details, '
+              'delivery_latitude, delivery_longitude, '
+              'driver_lat, driver_lng, driver_name, driver_phone',
+            )
+            .eq('user_id', currentUserId)
+            .order('created_at', ascending: false);
+        return mapRows(List<Map<String, dynamic>>.from(rows));
+      },
       create: () => client
           .from('orders')
           .stream(primaryKey: ['id'])
           .eq('user_id', currentUserId)
           .map(mapRows),
-      poll: () async {
-        final rows = await client
-            .from('orders')
-            .select()
-            .eq('user_id', currentUserId)
-            .order('created_at', ascending: false);
-        return mapRows(List<Map<String, dynamic>>.from(rows));
-      },
-      pollInterval: const Duration(seconds: 60),
       onReconnect: () => ensureRealtimeAuth(client),
     );
   }
@@ -89,8 +92,11 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
           child: StreamBuilder<List<CustomerOrder>>(
             stream: ordersStream,
             builder: (context, snapshot) {
-              // Keep the last list visible while a reconnect is in flight.
-              final orders = snapshot.data;
+              if (snapshot.hasData) {
+                _lastOrders = snapshot.data;
+              }
+              // Never swap the list for a Realtime error screen.
+              final orders = snapshot.data ?? _lastOrders;
               if (orders != null) {
                 if (orders.isEmpty) {
                   return _OrdersMessage(
@@ -111,15 +117,15 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
                       OrderCard(order: orders[index]),
                 );
               }
-              if (snapshot.hasError) {
-                return _OrdersMessage(
-                  icon: Icons.wifi_off_rounded,
-                  title: l10n.myOrdersLoadFailed,
-                  actionLabel: l10n.retry,
-                  onAction: () => setState(() => _generation++),
-                );
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
               }
-              return const Center(child: CircularProgressIndicator());
+              return _OrdersMessage(
+                icon: Icons.wifi_off_rounded,
+                title: l10n.myOrdersLoadFailed,
+                actionLabel: l10n.retry,
+                onAction: () => setState(() => _generation++),
+              );
             },
           ),
         ),

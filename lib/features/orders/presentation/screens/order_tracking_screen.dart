@@ -76,12 +76,7 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
       CustomerOrder? fromRows(List<Map<String, dynamic>> rows) =>
           rows.isEmpty ? null : CustomerOrder.fromRow(rows.first);
       _order = resilientRealtimeStream<CustomerOrder?>(
-        create: () => client
-            .from('orders')
-            .stream(primaryKey: ['id'])
-            .eq('id', orderId)
-            .map(fromRows),
-        poll: () async {
+        fetch: () async {
           final row = await client
               .from('orders')
               .select()
@@ -89,7 +84,11 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
               .maybeSingle();
           return row == null ? null : CustomerOrder.fromRow(row);
         },
-        pollInterval: const Duration(seconds: 30),
+        create: () => client
+            .from('orders')
+            .stream(primaryKey: ['id'])
+            .eq('id', orderId)
+            .map(fromRows),
         onReconnect: () => ensureRealtimeAuth(client),
       ).map((order) {
         debugPrint(

@@ -51,7 +51,7 @@ Future<void> _pump(
   await tester.pumpWidget(ProviderScope(
     overrides: [
       userRoleProvider.overrideWith((ref) async => UserRole.admin),
-      liveOrdersProvider.overrideWith((ref) => Stream.value(orders)),
+      liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier(orders)),
       adminClockTicksProvider.overrideWithValue(false),
       activeStaffProvider.overrideWith((ref) async => const [
             {'id': '1', 'name': 'سيد', 'role': 'driver'},

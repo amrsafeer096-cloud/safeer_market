@@ -19,8 +19,7 @@ Future<void> _pumpDashboard(WidgetTester tester,
   await tester.pumpWidget(ProviderScope(
     overrides: [
       userRoleProvider.overrideWith((ref) async => UserRole.admin),
-      liveOrdersProvider.overrideWith(
-        (ref) => Stream.value(const <Map<String, dynamic>>[]),
+      liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier(const <Map<String, dynamic>>[]),
       ),
     ],
     child: MaterialApp(

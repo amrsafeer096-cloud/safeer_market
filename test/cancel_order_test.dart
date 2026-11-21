@@ -166,7 +166,7 @@ void main() {
           authRepositoryProvider
               .overrideWithValue(FakeAuthRepository(user: testUser)),
           userRoleProvider.overrideWith((ref) async => UserRole.admin),
-          liveOrdersProvider.overrideWith((ref) => Stream.value([
+          liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier([
                 {
                   'id': 'a1b2c3d4-0000-0000-0000-000000000000',
                   'user_id': testUser.id,

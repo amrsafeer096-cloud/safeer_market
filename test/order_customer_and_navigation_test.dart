@@ -88,7 +88,7 @@ void main() {
       final launched = <Uri>[];
       await tester.pumpWidget(_app([
         userRoleProvider.overrideWith((ref) async => UserRole.admin),
-        liveOrdersProvider.overrideWith((ref) => Stream.value([order])),
+        liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier([order])),
         adminOrdersRepositoryProvider.overrideWithValue(
           FakeAdminOrdersRepository(customers: {
             _customerId: const OrderCustomer(
@@ -176,7 +176,7 @@ void main() {
       final launched = <Uri>[];
       await tester.pumpWidget(_app([
         userRoleProvider.overrideWith((ref) async => UserRole.driver),
-        liveOrdersProvider.overrideWith((ref) => Stream.value([
+        liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier([
               {
                 ...order,
                 'status': 'outForDelivery',
@@ -246,8 +246,7 @@ void main() {
         ),
         driverOrdersRepository: FakeDriverOrdersRepository(available: [order]),
         overrides: [
-          liveOrdersProvider.overrideWith(
-            (ref) => Stream.value(const <Map<String, dynamic>>[]),
+          liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier(const <Map<String, dynamic>>[]),
           ),
           externalUrlLauncherProvider.overrideWithValue((uri) async {
             launched.add(uri);
