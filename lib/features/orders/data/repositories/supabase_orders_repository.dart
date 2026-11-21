@@ -16,7 +16,8 @@ class SupabaseOrdersRepository implements OrdersRepository {
         .from('orders')
         .select(
           'id, created_at, total_amount, status, address_details, '
-          'delivery_latitude, delivery_longitude',
+          'delivery_latitude, delivery_longitude, '
+          'driver_lat, driver_lng, driver_name, driver_phone',
         )
         .eq('user_id', userId)
         .order('created_at', ascending: false);
@@ -83,6 +84,27 @@ class SupabaseOrdersRepository implements OrdersRepository {
       }
       throw OrdersFailure(
         L10n.current.orderCancelFailed('${error.message} (${error.code})'),
+      );
+    }
+  }
+
+  @override
+  Future<void> submitRating({
+    required String orderId,
+    required int deliveryRating,
+    required int productRating,
+    String? comment,
+  }) async {
+    try {
+      await _client.rpc('submit_order_rating', params: {
+        'p_order_id': orderId,
+        'p_delivery_rating': deliveryRating,
+        'p_product_rating': productRating,
+        'p_comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      });
+    } on PostgrestException catch (error) {
+      throw OrdersFailure(
+        'تعذر حفظ التقييم: ${error.message} (${error.code})',
       );
     }
   }

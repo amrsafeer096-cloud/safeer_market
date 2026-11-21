@@ -9,6 +9,8 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
+  androidPushConfig,
+  apnsPushConfig,
   googleAccessToken,
   sendFcmMessage,
   serviceAccount,
@@ -72,15 +74,20 @@ Deno.serve(async (request) => {
       title: "سفير ماركت",
       body: "طلب جديد متاح للتوصيل!",
     },
-    data: { type: "new_order", order_id: String(order.id) },
-    android: {
-      priority: "high",
-      notification: { channel_id: "safeer_orders", sound: "order_chime" },
+    data: {
+      type: "new_order",
+      order_id: String(order.id),
+      title: "سفير ماركت",
+      body: "طلب جديد متاح للتوصيل!",
+      route: "/driver",
     },
-    apns: {
-      headers: { "apns-priority": "10" },
-      payload: { aps: { sound: "order_chime.caf" } },
-    },
+    android: androidPushConfig({
+      channelId: "safeer_orders",
+      sound: "order_chime",
+      tag: String(order.id),
+      urgent: true,
+    }),
+    apns: apnsPushConfig({ sound: "order_chime.caf", urgent: true }),
   });
   if (!result.ok) {
     return json({ error: `FCM failed: ${result.error}` }, 502);

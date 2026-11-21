@@ -3,6 +3,10 @@
 // Needs the FIREBASE_SERVICE_ACCOUNT secret: the Firebase service-account
 // JSON (Project settings > Service accounts > Generate new private key),
 // pasted whole.
+//
+// Every mobile payload must carry both a top-level `notification` block
+// (so Android / iOS show a tray banner while the app is killed) and a
+// `data` map (so the Flutter tap handler can deep-link).
 
 import { importPKCS8, SignJWT } from "npm:jose@5";
 
@@ -86,4 +90,47 @@ export async function sendFcmMessage(
     (response.status === 400 &&
       error.includes("registration token is not a valid"));
   return { ok: false, status: response.status, error, unregistered };
+}
+
+/** Android options that wake the tray even when the app process is gone. */
+export function androidPushConfig(options: {
+  channelId: string;
+  sound?: string;
+  tag?: string;
+  urgent?: boolean;
+}): Record<string, unknown> {
+  return {
+    priority: "HIGH",
+    ttl: options.urgent ? "1800s" : "86400s",
+    notification: {
+      channel_id: options.channelId,
+      sound: options.sound ?? (options.urgent ? "order_chime" : "default"),
+      default_vibrate_timings: true,
+      visibility: "PUBLIC",
+      ...(options.tag ? { tag: options.tag } : {}),
+      notification_priority: options.urgent
+        ? "PRIORITY_MAX"
+        : "PRIORITY_HIGH",
+    },
+  };
+}
+
+/** APNs options: high priority alert + content-available for background wake. */
+export function apnsPushConfig(options: {
+  sound?: string;
+  urgent?: boolean;
+}): Record<string, unknown> {
+  return {
+    headers: {
+      "apns-priority": "10",
+      "apns-push-type": "alert",
+    },
+    payload: {
+      aps: {
+        sound: options.sound ??
+          (options.urgent ? "order_chime.caf" : "default"),
+        "content-available": 1,
+      },
+    },
+  };
 }

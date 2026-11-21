@@ -1,24 +1,23 @@
 // Dispatches FCM v1 push notifications for database events. Called by the
-// dispatch_push_webhook() trigger (migration 20261120100000) with the body
-// of a Supabase Database Webhook: { type, table, record, old_record }.
+// dispatch_push_webhook() trigger with the body of a Supabase Database
+// Webhook: { type, table, record, old_record }.
 //
-//   orders INSERT            → admins and order takers ("طلب جديد"), with the
-//                              order chime, even when the app is closed.
-//   orders UPDATE (status)   → the order's customer.
-//   app_notifications INSERT → its target_user_id, or every customer device
-//                              for a broadcast (target_user_id null).
+//   orders INSERT              → admins + takers ("طلب جديد"), order chime.
+//   orders UPDATE (status)     → customer lifecycle stages (preparing /
+//                                out_for_delivery / delivered / cancelled).
+//   orders UPDATE (driver GPS) → one-shot "arriving soon" when ≤ 600 m.
+//   app_notifications INSERT   → target user, or every customer (broadcast).
 //
-// Secrets (Dashboard > Edge Functions > Secrets):
-//   FIREBASE_SERVICE_ACCOUNT  the Firebase service-account JSON, pasted whole.
-//   PUSH_WEBHOOK_SECRET       same value as the vault secret
-//                             'push_webhook_secret'.
-//   PUBLIC_WEB_URL            optional, the hosted web app used for links in
-//                             desktop notifications (default below).
-// Deploy without JWT verification; the shared secret authenticates calls:
-//   supabase functions deploy send-push --no-verify-jwt
+// Every payload carries both `notification` and `data` so Android / iOS show
+// a tray banner while the app is completely killed (Talabat-style).
+//
+// Secrets: FIREBASE_SERVICE_ACCOUNT, PUSH_WEBHOOK_SECRET, optional PUBLIC_WEB_URL.
+// Deploy: supabase functions deploy send-push --no-verify-jwt
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
+  androidPushConfig,
+  apnsPushConfig,
   googleAccessToken,
   sendFcmMessage,
   serviceAccount,
@@ -42,13 +41,12 @@ interface TokenRow {
 interface Push {
   title: string;
   body: string;
-  /** `type` in the data payload; the app picks the channel and route by it. */
   type: string;
-  /** In-app route per recipient role (falls back to `default`). */
   routes: Partial<Record<PushRole | "default", string>>;
   data?: Record<string, string>;
-  /** New orders ring the custom chime and stay on screen. */
   urgent?: boolean;
+  /** Prefer the order-chime channel even when not a new_order admin alert. */
+  channel?: "orders" | "alerts";
 }
 
 const APP_NAME = "سفير ماركت";
@@ -57,6 +55,8 @@ const ALERTS_CHANNEL = "safeer_alerts";
 const WEB_URL = (Deno.env.get("PUBLIC_WEB_URL") ??
   "https://safeer-market.web.app").replace(/\/+$/, "");
 const CONCURRENCY = 25;
+/** ~3 minutes at typical city delivery speed (~12–20 km/h). */
+const ARRIVING_SOON_METERS = 600;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -74,6 +74,11 @@ const money = (value: unknown) => {
   return Number.isFinite(amount) ? `${amount.toFixed(2)} ج.م` : "";
 };
 
+const num = (value: unknown): number | null => {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
 /** Same normalization as OrderStatus.normalize in the app. */
 function normalizeStatus(value: unknown): string {
   const compact = text(value).toLowerCase().replace(/[\s_-]/g, "");
@@ -85,24 +90,31 @@ function normalizeStatus(value: unknown): string {
     readyfordelivery: "ready_for_delivery",
     outfordelivery: "out_for_delivery",
     delivered: "delivered",
+    completed: "delivered",
     cancelled: "cancelled",
     canceled: "cancelled",
   } as Record<string, string>)[compact] ?? compact;
 }
-
-const CUSTOMER_STATUS_MESSAGES: Record<string, string> = {
-  preparing: "جاري تجهيز طلبك الآن.",
-  ready_for_delivery: "طلبك جاهز وسيخرج للتوصيل قريبًا.",
-  out_for_delivery: "طلبك في الطريق إليك!",
-  delivered: "تم توصيل طلبك. بالهنا والشفا!",
-  cancelled: "تم إلغاء طلبك.",
-};
 
 function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(a));
 }
 
 const admin = createClient(
@@ -128,11 +140,125 @@ async function tokensForUser(userId: string): Promise<TokenRow[]> {
   return data ?? [];
 }
 
+async function resolveDriverContact(record: Record<string, unknown>) {
+  let name = text(record.driver_name);
+  let phone = text(record.driver_phone);
+  const driverId = text(record.driver_id);
+  if (driverId && (!name || !phone)) {
+    const { data } = await admin
+      .from("profiles")
+      .select("full_name, phone")
+      .eq("id", driverId)
+      .maybeSingle();
+    name = name || text(data?.full_name);
+    phone = phone || text(data?.phone);
+  }
+  if (!phone && name) {
+    const { data } = await admin
+      .from("staff")
+      .select("phone")
+      .eq("name", name)
+      .eq("role", "driver")
+      .limit(1)
+      .maybeSingle();
+    phone = text(data?.phone);
+  }
+  return { name: name || "المندوب", phone };
+}
+
+/** Claim the one-shot arriving-soon flag; returns false if already sent. */
+async function claimArrivingSoon(orderId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from("orders")
+    .update({ arriving_soon_notified: true })
+    .eq("id", orderId)
+    .eq("arriving_soon_notified", false)
+    .select("id");
+  if (error) {
+    console.error(`claimArrivingSoon: ${error.message}`);
+    return false;
+  }
+  return (data?.length ?? 0) > 0;
+}
+
+function customerLifecyclePush(
+  record: Record<string, unknown>,
+  status: string,
+  driver: { name: string; phone: string },
+): Push | null {
+  const id = text(record.id);
+  const preparer = text(record.preparer_name) || "المحضر";
+
+  switch (status) {
+    case "preparing":
+      return {
+        title: "جاري تجهيز طلبك 🛒",
+        body: `تم استلام الأوردر من المحضر ${preparer} وجاري تجهيزه.`,
+        type: "order",
+        routes: { default: "/orders" },
+        data: { order_id: id, status, stage: "preparing" },
+      };
+    case "out_for_delivery": {
+      const phoneLine = driver.phone
+        ? ` للتواصل: ${driver.phone}`
+        : "";
+      return {
+        title: "طلبك في الطريق إليك 🛵",
+        body:
+          `طلبك مع مندوب التوصيل ${driver.name} وهو في طريقه إليك!${phoneLine}`,
+        type: "order",
+        routes: { default: `/orders/${id}/track` },
+        data: {
+          order_id: id,
+          status,
+          stage: "out_for_delivery",
+          driver_name: driver.name,
+          ...(driver.phone ? { driver_phone: driver.phone } : {}),
+        },
+        channel: "orders",
+      };
+    }
+    case "delivered":
+      return {
+        title: "تم تسليم الأوردر بنجاح ✅",
+        body:
+          "نتمنى لك تجربة سعيدة! اضغط هنا لتقييم خدمة التوصيل وجودة المنتجات.",
+        type: "order",
+        routes: { default: `/orders/${id}/rate` },
+        data: {
+          order_id: id,
+          status,
+          stage: "delivered",
+          action: "rate_order",
+        },
+      };
+    case "ready_for_delivery":
+      return {
+        title: `تحديث طلبك #${shortId(id)}`,
+        body: "طلبك جاهز وسيخرج للتوصيل قريبًا.",
+        type: "order",
+        routes: { default: "/orders" },
+        data: { order_id: id, status, stage: "ready_for_delivery" },
+      };
+    case "cancelled":
+      return {
+        title: `تحديث طلبك #${shortId(id)}`,
+        body: "تم إلغاء طلبك.",
+        type: "order",
+        routes: { default: "/orders" },
+        data: { order_id: id, status, stage: "cancelled" },
+      };
+    default:
+      return null;
+  }
+}
+
 /** Decides who hears about a database event, and what they see. */
 async function plan(
   event: WebhookBody,
 ): Promise<{ push: Push; tokens: TokenRow[] } | null> {
   const record = event.record ?? {};
+  const old = event.old_record ?? {};
 
   if (event.table === "orders" && event.type === "INSERT") {
     const name = text(record.customer_name);
@@ -150,6 +276,7 @@ async function plan(
         routes: { admin: "/admin/orders", taker: "/warehouse" },
         data: { order_id: text(record.id) },
         urgent: true,
+        channel: "orders",
       },
       tokens: await tokensForRoles(["admin", "taker"]),
     };
@@ -157,21 +284,53 @@ async function plan(
 
   if (event.table === "orders" && event.type === "UPDATE") {
     const status = normalizeStatus(record.status);
-    if (status === normalizeStatus(event.old_record?.status)) return null;
-    const message = CUSTOMER_STATUS_MESSAGES[status];
+    const oldStatus = normalizeStatus(old.status);
     const userId = text(record.user_id);
-    if (!message || !userId) return null;
     const id = text(record.id);
-    return {
-      push: {
-        title: `تحديث طلبك #${shortId(id)}`,
-        body: message,
-        type: "order",
-        routes: { default: "/orders" },
-        data: { order_id: id, status },
-      },
-      tokens: await tokensForUser(userId),
-    };
+
+    // Stage 3: driver GPS crossed the arriving-soon radius (once per order).
+    const gpsChanged =
+      num(record.driver_lat) !== num(old.driver_lat) ||
+      num(record.driver_lng) !== num(old.driver_lng);
+    if (
+      gpsChanged &&
+      status === "out_for_delivery" &&
+      !record.arriving_soon_notified &&
+      userId
+    ) {
+      const dLat = num(record.driver_lat);
+      const dLng = num(record.driver_lng);
+      const cLat = num(record.delivery_latitude);
+      const cLng = num(record.delivery_longitude);
+      if (
+        dLat != null && dLng != null && cLat != null && cLng != null &&
+        haversineMeters(dLat, dLng, cLat, cLng) <= ARRIVING_SOON_METERS
+      ) {
+        if (!(await claimArrivingSoon(id))) return null;
+        return {
+          push: {
+            title: "استعد، طلبك على وشك الوصول! 📍",
+            body: "مندوب التوصيل على بُعد 3 دقائق تقريباً من عنوانك.",
+            type: "order",
+            routes: { default: `/orders/${id}/track` },
+            data: {
+              order_id: id,
+              status,
+              stage: "arriving_soon",
+            },
+            channel: "orders",
+          },
+          tokens: await tokensForUser(userId),
+        };
+      }
+      return null;
+    }
+
+    if (status === oldStatus || !userId) return null;
+    const driver = await resolveDriverContact(record);
+    const push = customerLifecyclePush(record, status, driver);
+    if (!push) return null;
+    return { push, tokens: await tokensForUser(userId) };
   }
 
   if (event.table === "app_notifications" && event.type === "INSERT") {
@@ -205,8 +364,10 @@ async function plan(
 
 function buildMessage(push: Push, row: TokenRow): Record<string, unknown> {
   const route = push.routes[row.role] ?? push.routes.default ?? "/notifications";
-  const tag = push.data?.notification_id || push.data?.order_id || push.type;
+  const tag = push.data?.notification_id ||
+    `${push.data?.order_id ?? ""}:${push.data?.stage ?? push.type}`;
   const image = push.data?.image;
+  const useOrdersChannel = push.urgent || push.channel === "orders";
   const data: Record<string, string> = {
     ...push.data,
     type: push.type,
@@ -214,6 +375,10 @@ function buildMessage(push: Push, row: TokenRow): Record<string, unknown> {
     title: push.title,
     body: push.body,
   };
+  // FCM data values must be strings.
+  for (const key of Object.keys(data)) {
+    data[key] = String(data[key] ?? "");
+  }
   return {
     token: row.token,
     notification: {
@@ -222,26 +387,16 @@ function buildMessage(push: Push, row: TokenRow): Record<string, unknown> {
       ...(image ? { image } : {}),
     },
     data,
-    android: {
-      priority: "high",
-      ttl: push.urgent ? "1800s" : "86400s",
-      notification: {
-        channel_id: push.urgent ? ORDERS_CHANNEL : ALERTS_CHANNEL,
-        sound: push.urgent ? "order_chime" : "default",
-        tag,
-        notification_priority: push.urgent ? "PRIORITY_MAX" : "PRIORITY_HIGH",
-        default_vibrate_timings: true,
-      },
-    },
-    apns: {
-      headers: { "apns-priority": "10", "apns-push-type": "alert" },
-      payload: {
-        aps: {
-          // Falls back to the default sound if order_chime.caf isn't bundled.
-          sound: push.urgent ? "order_chime.caf" : "default",
-        },
-      },
-    },
+    android: androidPushConfig({
+      channelId: useOrdersChannel ? ORDERS_CHANNEL : ALERTS_CHANNEL,
+      sound: useOrdersChannel && push.urgent ? "order_chime" : "default",
+      tag,
+      urgent: push.urgent,
+    }),
+    apns: apnsPushConfig({
+      sound: push.urgent ? "order_chime.caf" : "default",
+      urgent: push.urgent,
+    }),
     webpush: {
       headers: { Urgency: "high", TTL: push.urgent ? "1800" : "86400" },
       notification: {

@@ -96,6 +96,11 @@ class SystemAlertsService {
     // FCM displays background / terminated pushes on these channels, so they
     // must exist before the first push arrives.
     await PushChannels.createAll(_local);
+    // Android 13+: POST_NOTIFICATIONS is declared in the manifest; ask at
+    // runtime so terminated-state FCM banners are allowed.
+    final androidPlugin = _local.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.requestNotificationsPermission();
   }
 
   void _openPayload(String payload) {
@@ -177,6 +182,22 @@ class SystemAlertsService {
   static String routeFromData(Map<String, dynamic> data) {
     final explicit = data[SystemAlertPayload.route]?.toString();
     if (explicit != null && explicit.isNotEmpty) return explicit;
+
+    final orderId = data['order_id']?.toString().trim();
+    final action = data['action']?.toString();
+    final stage = data['stage']?.toString();
+    if (action == 'rate_order' && orderId != null && orderId.isNotEmpty) {
+      return AppRoutes.orderRating(orderId);
+    }
+    if (orderId != null &&
+        orderId.isNotEmpty &&
+        (stage == 'out_for_delivery' || stage == 'arriving_soon')) {
+      return AppRoutes.orderTracking(
+        orderId,
+        driverPhone: data['driver_phone']?.toString(),
+      );
+    }
+
     final type = data['type']?.toString();
     if (type == 'support_chat') return AppRoutes.supportChat;
     if (type == 'order') return AppRoutes.orders;

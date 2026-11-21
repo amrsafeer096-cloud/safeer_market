@@ -34,18 +34,27 @@ abstract final class AppRoutes {
   static String product(String id) => '/product/$id';
 
   static const orderTrackingPattern = '/orders/:id/track';
+  static const orderRatingPattern = '/orders/:id/rate';
 
   static String orderTracking(
     String id, {
     double? latitude,
     double? longitude,
+    String? driverPhone,
   }) =>
       Uri(
         path: '/orders/$id/track',
-        queryParameters: latitude == null || longitude == null
-            ? null
-            : {'lat': latitude.toString(), 'lng': longitude.toString()},
+        queryParameters: {
+          if (latitude != null && longitude != null) ...{
+            'lat': latitude.toString(),
+            'lng': longitude.toString(),
+          },
+          if (driverPhone != null && driverPhone.trim().isNotEmpty)
+            'driver_phone': driverPhone.trim(),
+        },
       ).toString();
+
+  static String orderRating(String id) => '/orders/$id/rate';
 
   static const warehouse = '/warehouse';
   static const goodsReceipt = '/warehouse/receipt';

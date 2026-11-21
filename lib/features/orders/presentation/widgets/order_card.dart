@@ -13,6 +13,7 @@ import '../../../cart/domain/weight_options.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/orders_providers.dart';
 import 'cancel_order_dialog.dart';
+import 'rate_order_dialog.dart';
 
 class OrderStatusStyle {
   const OrderStatusStyle(
@@ -376,12 +377,41 @@ class _OrderDetailsState extends ConsumerState<_OrderDetails> {
                   order.id,
                   latitude: order.deliveryLatitude,
                   longitude: order.deliveryLongitude,
+                  driverPhone: order.driverPhone,
                 ),
               ),
               icon: const Icon(Icons.map_rounded),
               label: Text(l10n.orderCardTrackOnMap),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.secondary,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
+        if (order.isDelivered) ...[
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 50,
+            child: OutlinedButton.icon(
+              key: Key('rate-order-${order.id}'),
+              onPressed: () =>
+                  showRateOrderDialog(context, orderId: order.id),
+              icon: const Icon(Icons.star_rounded),
+              label: Text(
+                Localizations.localeOf(context).languageCode == 'ar'
+                    ? 'تقييم الطلب'
+                    : 'Rate order',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.secondary,
+                side: const BorderSide(color: AppColors.secondary),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),

@@ -59,10 +59,15 @@
             android:name="flutterEmbedding"
             android:value="2" />
             <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyBDdWen3FJroDEGEtDcObZcPtakCDPzQfQ"/>
-        <!-- FCM pushes without a channel_id (lib/core/notifications/push_channels.dart). -->
+        <!-- Default FCM channel when the payload omits channel_id. Matches
+             safeer_orders in lib/core/notifications/push_channels.dart so
+             terminated-state order alerts still ring the chime. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="safeer_alerts" />
+            android:value="safeer_orders" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
         <!-- pasteboard: copy receipt images to the system clipboard on Android. -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -92,6 +97,11 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
+        </intent>
+        <!-- Lets url_launcher open the dialer from the tracking call button. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
         </intent>
     </queries>
 </manifest>

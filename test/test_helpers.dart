@@ -649,6 +649,23 @@ class FakeOrdersRepository implements OrdersRepository {
     );
     _changes.add(null);
   }
+
+  final ratings = <({String orderId, int delivery, int product, String? comment})>[];
+
+  @override
+  Future<void> submitRating({
+    required String orderId,
+    required int deliveryRating,
+    required int productRating,
+    String? comment,
+  }) async {
+    ratings.add((
+      orderId: orderId,
+      delivery: deliveryRating,
+      product: productRating,
+      comment: comment,
+    ));
+  }
 }
 
 class FakeFavoritesRepository implements FavoritesRepository {

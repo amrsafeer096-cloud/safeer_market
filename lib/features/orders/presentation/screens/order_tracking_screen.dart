@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/config/store_location.dart';
 import '../../../../core/network/realtime_session.dart';
@@ -14,6 +15,7 @@ import '../../../../core/widgets/mobile_frame.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/orders_providers.dart';
+import '../widgets/rate_order_dialog.dart';
 
 /// Live tracking for an order that is out for delivery: follows the order's
 /// row in realtime and puts the driver marker at the latest position.
@@ -23,6 +25,7 @@ class OrderTrackingScreen extends ConsumerStatefulWidget {
     required this.orderId,
     this.latitude,
     this.longitude,
+    this.driverPhone,
   });
 
   final String orderId;
@@ -30,6 +33,9 @@ class OrderTrackingScreen extends ConsumerStatefulWidget {
   /// Delivery pin from the orders list, shown until the live row arrives.
   final double? latitude;
   final double? longitude;
+
+  /// From the out-for-delivery push payload, until the live row loads.
+  final String? driverPhone;
 
   @override
   ConsumerState<OrderTrackingScreen> createState() =>
@@ -240,6 +246,9 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
                     _ when driver != null => _TrackingState.live,
                     _ => _TrackingState.locating,
                   },
+                  orderId: widget.orderId,
+                  driverName: order?.driverName,
+                  driverPhone: order?.driverPhone ?? widget.driverPhone,
                 ),
               ],
             );
@@ -253,14 +262,41 @@ class _OrderTrackingScreenState extends ConsumerState<OrderTrackingScreen> {
 enum _TrackingState { locating, live, delivered }
 
 class _TrackingPanel extends StatelessWidget {
-  const _TrackingPanel({required this.state});
+  const _TrackingPanel({
+    required this.state,
+    required this.orderId,
+    this.driverName,
+    this.driverPhone,
+  });
 
   final _TrackingState state;
+  final String orderId;
+  final String? driverName;
+  final String? driverPhone;
+
+  Future<void> _callDriver(BuildContext context) async {
+    final raw = driverPhone?.replaceAll(RegExp(r'[^\d+]'), '') ?? '';
+    if (raw.isEmpty) return;
+    final uri = Uri(scheme: 'tel', path: raw);
+    if (!await launchUrl(uri)) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            Localizations.localeOf(context).languageCode == 'ar'
+                ? 'تعذر فتح تطبيق الاتصال'
+                : 'Could not open the phone dialer',
+          ),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final palette = context.palette;
+    final arabic = Localizations.localeOf(context).languageCode == 'ar';
     final (title, icon, color) = switch (state) {
       _TrackingState.delivered => (
           l10n.trackingOrderDelivered,
@@ -273,6 +309,7 @@ class _TrackingPanel extends StatelessWidget {
           const Color(0xFF1565C0),
         ),
     };
+    final phone = driverPhone?.trim();
 
     return Container(
       decoration: BoxDecoration(
@@ -310,6 +347,18 @@ class _TrackingPanel extends StatelessWidget {
                 ),
               ],
             ),
+            if (driverName != null && driverName!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                arabic
+                    ? 'المندوب: $driverName'
+                    : 'Driver: $driverName',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: palette.muted,
+                ),
+              ),
+            ],
             if (state != _TrackingState.delivered) ...[
               const SizedBox(height: 12),
               state == _TrackingState.live
@@ -325,6 +374,32 @@ class _TrackingPanel extends StatelessWidget {
                       color: palette.muted,
                       text: l10n.trackingDriverLocating,
                     ),
+              if (phone != null && phone.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  key: const Key('call-driver'),
+                  onPressed: () => _callDriver(context),
+                  icon: const Icon(Icons.phone_rounded),
+                  label: Text(arabic ? 'اتصال بالمندوب' : 'Call driver'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.secondary,
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                ),
+              ],
+            ] else ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                key: const Key('rate-order-from-tracking'),
+                onPressed: () =>
+                    showRateOrderDialog(context, orderId: orderId),
+                icon: const Icon(Icons.star_rounded),
+                label: Text(arabic ? 'تقييم الطلب' : 'Rate order'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.secondary,
+                  minimumSize: const Size.fromHeight(48),
+                ),
+              ),
             ],
           ],
         ),

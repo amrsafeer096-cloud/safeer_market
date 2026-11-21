@@ -65,6 +65,8 @@ class CustomerOrder {
     this.deliveryLongitude,
     this.driverLatitude,
     this.driverLongitude,
+    this.driverName,
+    this.driverPhone,
   });
 
   factory CustomerOrder.fromRow(Map<String, dynamic> row) {
@@ -72,6 +74,8 @@ class CustomerOrder {
     final created = row['created_at'];
     final address = row['address_details']?.toString().trim();
     final reason = row['cancellation_reason']?.toString().trim();
+    final driverName = row['driver_name']?.toString().trim();
+    final driverPhone = row['driver_phone']?.toString().trim();
     return CustomerOrder(
       id: row['id'].toString(),
       createdAt: created is DateTime
@@ -86,6 +90,9 @@ class CustomerOrder {
       deliveryLongitude: _toDouble(row['delivery_longitude']),
       driverLatitude: _toDouble(row['driver_lat']),
       driverLongitude: _toDouble(row['driver_lng']),
+      driverName: driverName == null || driverName.isEmpty ? null : driverName,
+      driverPhone:
+          driverPhone == null || driverPhone.isEmpty ? null : driverPhone,
     );
   }
 
@@ -103,6 +110,8 @@ class CustomerOrder {
   /// Last position the driver shared; null until their GPS reports in.
   final double? driverLatitude;
   final double? driverLongitude;
+  final String? driverName;
+  final String? driverPhone;
 
   String get shortId => id.length > 8 ? id.substring(0, 8) : id;
 
@@ -146,6 +155,8 @@ class CustomerOrder {
         deliveryLongitude: deliveryLongitude,
         driverLatitude: driverLatitude,
         driverLongitude: driverLongitude,
+        driverName: driverName,
+        driverPhone: driverPhone,
       );
 
   static double? _toDouble(Object? value) => switch (value) {

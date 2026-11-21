@@ -21,6 +21,7 @@ import '../../features/home/domain/entities/product.dart';
 import '../../features/favorites/presentation/screens/favorites_screen.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
 import '../../features/orders/presentation/screens/my_orders_screen.dart';
+import '../../features/orders/presentation/screens/order_rating_screen.dart';
 import '../../features/orders/presentation/screens/order_tracking_screen.dart';
 import '../../features/profile/presentation/screens/edit_profile_screen.dart';
 import '../../features/rewards/presentation/screens/cashier_scan_screen.dart';
@@ -186,7 +187,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 double.tryParse(state.uri.queryParameters['lat'] ?? ''),
             longitude:
                 double.tryParse(state.uri.queryParameters['lng'] ?? ''),
+            driverPhone: state.uri.queryParameters['driver_phone'],
           ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.orderRatingPattern,
+        name: 'order-rating',
+        pageBuilder: (context, state) => _smoothPage(
+          state,
+          OrderRatingScreen(orderId: state.pathParameters['id']!),
         ),
       ),
       GoRoute(

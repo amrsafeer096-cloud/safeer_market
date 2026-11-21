@@ -13,4 +13,12 @@ abstract class OrdersRepository {
     String orderId,
     OrderCancellationReason reason,
   );
+
+  /// Saves the post-delivery rating (1–5 for delivery and products).
+  Future<void> submitRating({
+    required String orderId,
+    required int deliveryRating,
+    required int productRating,
+    String? comment,
+  });
 }

@@ -44,11 +44,23 @@ class SupabaseDriverOrdersRepository implements DriverOrdersRepository {
   @override
   Future<void> acceptOrder(String orderId) async {
     try {
+      // Copy the driver's contact onto the order so the customer's
+      // out-for-delivery push and tracking "call" button have a number.
+      final profile = await _client
+          .from('profiles')
+          .select('full_name, phone')
+          .eq('id', _driverId)
+          .maybeSingle();
+      final name = profile?['full_name']?.toString().trim();
+      final phone = profile?['phone']?.toString().trim();
+
       final updated = await _client
           .from('orders')
           .update({
             'status': 'out_for_delivery',
             'driver_id': _driverId,
+            if (name != null && name.isNotEmpty) 'driver_name': name,
+            if (phone != null && phone.isNotEmpty) 'driver_phone': phone,
           })
           .eq('id', orderId)
           .eq('status', 'ready_for_delivery')
