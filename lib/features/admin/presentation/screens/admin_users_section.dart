@@ -4,11 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_palette.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/system_admin_service.dart';
 import '../../domain/admin_permissions.dart';
 import '../providers/system_admin_providers.dart';
 import '../widgets/admin_section_widgets.dart';
+
+String _staffRoleForDashboard(String profileRole) {
+  final role = DashboardUserRole.fromValue(profileRole);
+  return switch (role) {
+    DashboardUserRole.admin => 'admin',
+    DashboardUserRole.cashier => 'taker',
+    DashboardUserRole.warehouse => 'preparer',
+    null => 'taker',
+  };
+}
 
 /// «المستخدمين»: the accounts that use the dashboard. Adding one gives an
 /// existing app account a staff role; «تعطيل» switches it off until it is
@@ -68,11 +79,22 @@ class AdminUsersSection extends ConsumerWidget {
                   await _run(
                     context,
                     ref,
-                    () => service.setUserRole(
-                      userId: result.userId,
-                      role: result.role,
-                      fullName: result.name,
-                    ),
+                    () async {
+                      await service.setUserRole(
+                        userId: result.userId,
+                        role: result.role,
+                        fullName: result.name,
+                      );
+                      await service.addStaff(
+                        name: (result.name?.isNotEmpty ?? false)
+                            ? result.name!
+                            : 'مستخدم',
+                        role: _staffRoleForDashboard(result.role),
+                        phone: result.phone!,
+                        username: result.username!,
+                        password: result.password!,
+                      );
+                    },
                     'تمت إضافة المستخدم',
                   );
                 },
@@ -180,12 +202,47 @@ class AdminUsersSection extends ConsumerWidget {
                                 await _run(
                                   context,
                                   ref,
-                                  () => service.setUserRole(
-                                    userId: user.id,
-                                    role: result.role,
-                                    fullName: result.name,
-                                    disabled: user.disabled,
-                                  ),
+                                  () async {
+                                    await service.setUserRole(
+                                      userId: user.id,
+                                      role: result.role,
+                                      fullName: result.name,
+                                      disabled: user.disabled,
+                                    );
+                                    // Reset / set dashboard login credentials.
+                                    final staff = await service.staff(roles: [
+                                      'admin',
+                                      'taker',
+                                      'preparer',
+                                    ]);
+                                    final match = staff
+                                        .where((s) =>
+                                            s.username == result.username ||
+                                            s.phone == result.phone)
+                                        .toList();
+                                    if (match.isNotEmpty) {
+                                      await service.updateStaff(
+                                        id: match.first.id,
+                                        name: result.name,
+                                        phone: result.phone,
+                                        username: result.username,
+                                        password: result.password,
+                                      );
+                                    } else if (result.phone != null &&
+                                        result.username != null &&
+                                        result.password != null) {
+                                      await service.addStaff(
+                                        name: (result.name?.isNotEmpty ?? false)
+                                            ? result.name!
+                                            : user.title,
+                                        role: _staffRoleForDashboard(
+                                            result.role),
+                                        phone: result.phone!,
+                                        username: result.username!,
+                                        password: result.password!,
+                                      );
+                                    }
+                                  },
                                   'تم حفظ التعديل',
                                 );
                               },
@@ -241,11 +298,21 @@ class AdminUsersSection extends ConsumerWidget {
 }
 
 class _UserChange {
-  const _UserChange({required this.userId, required this.role, this.name});
+  const _UserChange({
+    required this.userId,
+    required this.role,
+    this.name,
+    this.phone,
+    this.username,
+    this.password,
+  });
 
   final String userId;
   final String role;
   final String? name;
+  final String? phone;
+  final String? username;
+  final String? password;
 }
 
 /// Add (find an account, pick a role) or edit (name, role) a dashboard user.
@@ -260,8 +327,13 @@ class _UserDialog extends ConsumerStatefulWidget {
 }
 
 class _UserDialogState extends ConsumerState<_UserDialog> {
+  final _form = GlobalKey<FormState>();
   final _search = TextEditingController();
   late final _name = TextEditingController(text: widget.existing?.name ?? '');
+  late final _phone = TextEditingController(text: widget.existing?.phone ?? '');
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  var _obscure = true;
   Timer? _debounce;
   List<AccountMatch> _matches = const [];
   bool _searching = false;
@@ -276,6 +348,9 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
     _debounce?.cancel();
     _search.dispose();
     _name.dispose();
+    _phone.dispose();
+    _username.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -313,11 +388,20 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
   }
 
   void _submit() {
+    if (!(_form.currentState?.validate() ?? false)) return;
     final userId = widget.existing?.id ?? _picked?.id;
     if (userId == null) return;
+    final password = _password.text;
     Navigator.pop(
       context,
-      _UserChange(userId: userId, role: _role, name: _name.text.trim()),
+      _UserChange(
+        userId: userId,
+        role: _role,
+        name: _name.text.trim(),
+        phone: _phone.text.trim(),
+        username: _username.text.trim(),
+        password: password.isEmpty ? null : password,
+      ),
     );
   }
 
@@ -335,76 +419,147 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
           style: const TextStyle(fontWeight: FontWeight.w900)),
       content: SizedBox(
         width: 420,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (!_editing) ...[
-                const Text(
-                  'ابحث عن حساب مسجّل في التطبيق (بالاسم أو الهاتف أو البريد) '
-                  'لمنحه دوراً في لوحة التحكم.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  key: const Key('user-find'),
-                  controller: _search,
-                  onChanged: _onSearch,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search_rounded),
-                    hintText: 'بحث عن حساب',
-                    isDense: true,
-                    border: OutlineInputBorder(),
+        child: Form(
+          key: _form,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (!_editing) ...[
+                  const Text(
+                    'ابحث عن حساب مسجّل في التطبيق (بالاسم أو الهاتف أو البريد) '
+                    'لمنحه دوراً في لوحة التحكم.',
+                    style: TextStyle(fontSize: 13),
                   ),
-                ),
-                if (_searching)
-                  const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: LinearProgressIndicator(),
-                  ),
-                if (_searchError != null)
-                  Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Text(_searchError!,
-                        style: const TextStyle(color: Colors.red)),
-                  ),
-                for (final match in _matches)
-                  ListTile(
-                    key: Key('user-match-${match.id}'),
-                    dense: true,
-                    selected: _picked?.id == match.id,
-                    title: Text(match.title),
-                    subtitle: Text(
-                      [
-                        if (match.phone != null) match.phone!,
-                        if (match.email != null) match.email!,
-                      ].join(' • '),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('user-find'),
+                    controller: _search,
+                    onChanged: _onSearch,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'بحث عن حساب',
+                      isDense: true,
+                      border: OutlineInputBorder(),
                     ),
-                    onTap: () => setState(() {
-                      _picked = match;
-                      _name.text = match.name ?? '';
-                    }),
                   ),
-                const SizedBox(height: 8),
-              ],
-              TextField(
-                key: const Key('user-name'),
-                controller: _name,
-                decoration: const InputDecoration(labelText: 'الاسم'),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                key: const Key('user-role'),
-                initialValue: _role,
-                decoration: const InputDecoration(labelText: 'الدور'),
-                items: [
-                  for (final role in roles)
-                    DropdownMenuItem(value: role.value, child: Text(role.label)),
+                  if (_searching)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: LinearProgressIndicator(),
+                    ),
+                  if (_searchError != null)
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(_searchError!,
+                          style: const TextStyle(color: Colors.red)),
+                    ),
+                  for (final match in _matches)
+                    ListTile(
+                      key: Key('user-match-${match.id}'),
+                      dense: true,
+                      selected: _picked?.id == match.id,
+                      title: Text(match.title),
+                      subtitle: Text(
+                        [
+                          if (match.phone != null) match.phone!,
+                          if (match.email != null) match.email!,
+                        ].join(' • '),
+                      ),
+                      onTap: () => setState(() {
+                        _picked = match;
+                        _name.text = match.name ?? '';
+                        if ((match.phone ?? '').isNotEmpty) {
+                          _phone.text = match.phone!;
+                        }
+                      }),
+                    ),
+                  const SizedBox(height: 8),
                 ],
-                onChanged: (v) => setState(() => _role = v ?? _role),
-              ),
-            ],
+                TextFormField(
+                  key: const Key('user-name'),
+                  controller: _name,
+                  decoration: const InputDecoration(labelText: 'الاسم'),
+                  validator: (v) =>
+                      (v ?? '').trim().isEmpty ? 'اكتب الاسم' : null,
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const Key('user-phone'),
+                  controller: _phone,
+                  keyboardType: TextInputType.phone,
+                  textDirection: TextDirection.ltr,
+                  decoration: const InputDecoration(
+                    labelText: 'رقم الهاتف',
+                    hintText: '01XXXXXXXXX',
+                  ),
+                  validator: (v) {
+                    final phone = (v ?? '').trim();
+                    if (phone.isEmpty) return 'رقم الهاتف مطلوب';
+                    if (!EgyptianPhone.isValid(phone)) {
+                      return 'اكتب رقم موبايل مصري صحيح (01XXXXXXXXX)';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const Key('user-username'),
+                  controller: _username,
+                  textDirection: TextDirection.ltr,
+                  decoration:
+                      const InputDecoration(labelText: 'اسم المستخدم'),
+                  validator: (v) {
+                    final u = (v ?? '').trim();
+                    if (u.length < 3) {
+                      return 'اسم المستخدم مطلوب (٣ أحرف على الأقل)';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const Key('user-password'),
+                  controller: _password,
+                  obscureText: _obscure,
+                  textDirection: TextDirection.ltr,
+                  decoration: InputDecoration(
+                    labelText: _editing
+                        ? 'كلمة المرور (اتركها فارغة للإبقاء)'
+                        : 'كلمة المرور',
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                      icon: Icon(_obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined),
+                    ),
+                  ),
+                  validator: (v) {
+                    final p = v ?? '';
+                    if (!_editing && p.length < 4) {
+                      return 'كلمة المرور مطلوبة (٤ أحرف على الأقل)';
+                    }
+                    if (p.isNotEmpty && p.length < 4) {
+                      return 'كلمة المرور قصيرة جداً (٤ أحرف على الأقل)';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  key: const Key('user-role'),
+                  initialValue: _role,
+                  decoration: const InputDecoration(labelText: 'الدور'),
+                  items: [
+                    for (final role in roles)
+                      DropdownMenuItem(
+                          value: role.value, child: Text(role.label)),
+                  ],
+                  onChanged: (v) => setState(() => _role = v ?? _role),
+                ),
+              ],
+            ),
           ),
         ),
       ),

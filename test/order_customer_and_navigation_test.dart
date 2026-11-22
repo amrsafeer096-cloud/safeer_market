@@ -22,8 +22,10 @@ import 'package:safeer_market/features/addresses/presentation/widgets/location_p
 import 'package:safeer_market/features/addresses/presentation/widgets/place_search_bar.dart';
 import 'package:safeer_market/features/admin/data/repositories/supabase_admin_orders_repository.dart';
 import 'package:safeer_market/features/admin/domain/entities/admin_order.dart';
+import 'package:safeer_market/features/admin/domain/staff_session.dart';
 import 'package:safeer_market/features/admin/presentation/providers/admin_providers.dart';
 import 'package:safeer_market/features/admin/presentation/screens/unified_dashboard_screen.dart';
+import 'test_helpers.dart';
 import 'package:safeer_market/features/driver/domain/entities/driver_order.dart';
 import 'package:safeer_market/features/driver/presentation/screens/driver_dashboard_screen.dart';
 import 'package:safeer_market/features/driver/presentation/screens/order_map_screen.dart';
@@ -87,6 +89,7 @@ void main() {
       addTearDown(tester.view.reset);
       final launched = <Uri>[];
       await tester.pumpWidget(_app([
+        overrideStaffSession(),
         userRoleProvider.overrideWith((ref) async => UserRole.admin),
         liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier([order])),
         adminOrdersRepositoryProvider.overrideWithValue(
@@ -175,6 +178,12 @@ void main() {
       addTearDown(tester.view.reset);
       final launched = <Uri>[];
       await tester.pumpWidget(_app([
+        overrideStaffSession(const StaffSession(
+          id: 'staff-driver-1',
+          name: 'طيار الاختبار',
+          role: 'driver',
+          username: 'driver',
+        )),
         userRoleProvider.overrideWith((ref) async => UserRole.driver),
         liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier([
               {

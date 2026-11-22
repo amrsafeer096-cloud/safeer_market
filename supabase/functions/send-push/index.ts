@@ -5,6 +5,7 @@
 // 1. Flutter  →  supabase.functions.invoke('send-push', body: {
 //                  order_id, trigger: 'insert'|'status'|'location',
 //                  previous_status? })
+//    or broadcast: { trigger: 'broadcast', title, body, target?, … }
 //    Auth: the signed-in user's JWT (Authorization: Bearer …).
 //
 // 2. DB webhook / pg_net  →  POST with header x-push-secret and body
@@ -63,10 +64,17 @@ const CONCURRENCY = 25;
 /** ~3 minutes at typical city delivery speed (~12–20 km/h). */
 const ARRIVING_SOON_METERS = 600;
 
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-push-secret",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
 const text = (value: unknown) =>
@@ -422,11 +430,18 @@ function buildMessage(push: Push, row: TokenRow): Record<string, unknown> {
   };
 }
 
-/** Flutter invoke body: { order_id, trigger, previous_status? }. */
+/** Flutter invoke body: order lifecycle or admin broadcast. */
 interface AppInvokeBody {
   order_id?: string;
   trigger?: string;
   previous_status?: string;
+  // Broadcast (إرسال الإشعارات): title/body + optional target customer.
+  title?: string;
+  body?: string;
+  notification_type?: string;
+  image_url?: string;
+  target_user_id?: string | null;
+  target?: string; // "all_customers" | user uuid
   // Legacy / webhook fields may also be present.
   type?: string;
   table?: string;
@@ -469,12 +484,42 @@ async function authorize(
   return { ok: true };
 }
 
-/** Turns a Flutter { order_id, trigger } call into a webhook-shaped event. */
+/** Turns a Flutter invoke into a webhook-shaped event. */
 async function eventFromAppInvoke(
   body: AppInvokeBody,
 ): Promise<WebhookBody | null> {
-  const orderId = text(body.order_id);
   const trigger = text(body.trigger).toLowerCase();
+
+  // Admin «إرسال الإشعارات» broadcast → all customers (or one user).
+  if (
+    trigger === "broadcast" ||
+    trigger === "notification" ||
+    trigger === "app_notification"
+  ) {
+    const title = text(body.title);
+    const bodyText = text(body.body);
+    if (!title || !bodyText) return null;
+    const targetRaw = text(body.target_user_id) || text(body.target);
+    const targetUserId =
+      !targetRaw || targetRaw === "all_customers" || targetRaw === "all"
+        ? null
+        : targetRaw;
+    return {
+      type: "INSERT",
+      table: "app_notifications",
+      record: {
+        id: crypto.randomUUID(),
+        title,
+        body: bodyText,
+        type: text(body.notification_type) || text(body.type) || "general",
+        image_url: text(body.image_url) || null,
+        target_user_id: targetUserId,
+      },
+      old_record: null,
+    };
+  }
+
+  const orderId = text(body.order_id);
   if (!orderId || !trigger) return null;
 
   const { data: record, error } = await admin
@@ -526,6 +571,9 @@ async function eventFromAppInvoke(
 }
 
 Deno.serve(async (request) => {
+  if (request.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   if (request.method !== "POST") return json({ error: "POST only" }, 405);
 
   const auth = await authorize(request);
@@ -548,7 +596,7 @@ Deno.serve(async (request) => {
   if (!event?.table || !event.type) {
     return json({
       error:
-        "Expected { type, table, record } or { order_id, trigger: insert|status|location }",
+        "Expected { type, table, record }, { order_id, trigger }, or { trigger: broadcast, title, body }",
     }, 400);
   }
 

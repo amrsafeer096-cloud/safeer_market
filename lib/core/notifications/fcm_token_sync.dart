@@ -31,10 +31,15 @@ final driverTopicSyncProvider = Provider<void>((ref) {
 
 /// Keeps the signed-in user's device token registered in `user_fcm_tokens`
 /// (with their role and platform) and `profiles.fcm_token`: on app start with
-/// a saved session, on every sign-in, whenever FCM rotates the token, and
-/// again when a sleeping tab / app wakes up. Watch it once at the app root.
+/// a saved session, on every sign-in / account switch, whenever FCM rotates
+/// the token, and again when a sleeping tab / app wakes up. Watch it once at
+/// the app root.
 final fcmTokenSyncProvider = Provider<void>((ref) {
+  // Re-run the whole provider when the signed-in user changes so the new
+  // account's user_id + role overwrite the previous device token row.
   final userId = ref.watch(currentUserProvider.select((user) => user?.id));
+  // Role changes (promotions) must refresh the push audience immediately.
+  ref.watch(userRoleProvider.select((role) => role.valueOrNull));
   if (userId == null) return;
 
   final push = ref.watch(pushNotificationServiceProvider);

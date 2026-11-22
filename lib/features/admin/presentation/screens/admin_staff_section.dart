@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_palette.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../data/report_service.dart';
 import '../../data/system_admin_service.dart';
 import '../../domain/admin_permissions.dart';
@@ -11,7 +12,7 @@ import '../providers/system_admin_providers.dart';
 import '../widgets/admin_section_widgets.dart';
 import 'admin_reports_view.dart';
 
-/// «المحضرين» / «الطيارين»: search, add and delete, and open a member's
+/// «المحضرين» / «الطيارين»: search, add, edit and delete, and open a member's
 /// productivity report.
 class AdminStaffSection extends ConsumerStatefulWidget {
   const AdminStaffSection({super.key, required this.role});
@@ -40,20 +41,41 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
     super.dispose();
   }
 
-  Future<void> _add() async {
-    final result = await showDialog<({String name, String? phone})>(
+  Future<void> _openEditor({StaffMember? existing}) async {
+    final result = await showDialog<_StaffFormResult>(
       context: context,
-      builder: (_) => _AddStaffDialog(title: 'إضافة $_single'),
+      builder: (_) => _StaffCredentialsDialog(
+        title: existing == null ? 'إضافة $_single' : 'تعديل $_single',
+        existing: existing,
+      ),
     );
     if (result == null || !mounted) return;
     try {
-      await ref.read(systemAdminServiceProvider).addStaff(
-            name: result.name,
-            role: widget.role,
-            phone: result.phone,
-          );
+      final service = ref.read(systemAdminServiceProvider);
+      if (existing == null) {
+        await service.addStaff(
+          name: result.name,
+          role: widget.role,
+          phone: result.phone,
+          username: result.username,
+          password: result.password!,
+        );
+      } else {
+        await service.updateStaff(
+          id: existing.id,
+          name: result.name,
+          phone: result.phone,
+          username: result.username,
+          password: result.password,
+        );
+      }
       ref.invalidate(adminStaffMembersProvider);
-      if (mounted) showAdminSnack(context, 'تمت إضافة $_single');
+      if (mounted) {
+        showAdminSnack(
+          context,
+          existing == null ? 'تمت إضافة $_single' : 'تم حفظ التعديل',
+        );
+      }
     } catch (error) {
       if (mounted) {
         showAdminSnack(context, describeAdminError(error), error: true);
@@ -97,7 +119,7 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
               if (canManage)
                 FilledButton.icon(
                   key: const Key('staff-add'),
-                  onPressed: _add,
+                  onPressed: () => _openEditor(),
                   icon: const Icon(Icons.add),
                   label: Text('إضافة $_single'),
                 ),
@@ -108,7 +130,7 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
             controller: _search,
             onChanged: (text) => setState(() => _query = text.trim()),
             decoration: InputDecoration(
-              hintText: 'ابحث باسم $_single أو رقم هاتفه',
+              hintText: 'ابحث باسم $_single أو رقم هاتفه أو اسم المستخدم',
               prefixIcon: const Icon(Icons.search_rounded),
               border: const OutlineInputBorder(),
               isDense: true,
@@ -127,7 +149,10 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                     if (member.role == widget.role &&
                         (needle.isEmpty ||
                             member.name.toLowerCase().contains(needle) ||
-                            (member.phone ?? '').contains(needle)))
+                            (member.phone ?? '').contains(needle) ||
+                            (member.username ?? '')
+                                .toLowerCase()
+                                .contains(needle)))
                       member,
                 ];
                 if (list.isEmpty) {
@@ -140,7 +165,7 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                   key: const Key('staff-list'),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 420,
-                    mainAxisExtent: 128,
+                    mainAxisExtent: 148,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
                   ),
@@ -186,6 +211,11 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                                         style: TextStyle(
                                             fontSize: 12,
                                             color: palette.muted)),
+                                    if (member.username != null)
+                                      Text('@${member.username}',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: palette.muted)),
                                   ],
                                 ),
                               ),
@@ -210,7 +240,14 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                                   ),
                                 ),
                               const Spacer(),
-                              if (canManage)
+                              if (canManage) ...[
+                                IconButton(
+                                  key: Key('staff-edit-${member.id}'),
+                                  tooltip: 'تعديل',
+                                  onPressed: () =>
+                                      _openEditor(existing: member),
+                                  icon: const Icon(Icons.edit_outlined),
+                                ),
                                 IconButton(
                                   key: Key('staff-delete-${member.id}'),
                                   tooltip: 'حذف',
@@ -218,6 +255,7 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                                   icon: const Icon(Icons.delete_outline,
                                       color: Colors.red),
                                 ),
+                              ],
                             ],
                           ),
                         ],
@@ -234,34 +272,65 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
   }
 }
 
-class _AddStaffDialog extends StatefulWidget {
-  const _AddStaffDialog({required this.title});
+class _StaffFormResult {
+  const _StaffFormResult({
+    required this.name,
+    required this.phone,
+    required this.username,
+    this.password,
+  });
 
-  final String title;
+  final String name;
+  final String phone;
+  final String username;
 
-  @override
-  State<_AddStaffDialog> createState() => _AddStaffDialogState();
+  /// Null on edit when the password field is left blank (keep current).
+  final String? password;
 }
 
-class _AddStaffDialogState extends State<_AddStaffDialog> {
+class _StaffCredentialsDialog extends StatefulWidget {
+  const _StaffCredentialsDialog({required this.title, this.existing});
+
+  final String title;
+  final StaffMember? existing;
+
+  @override
+  State<_StaffCredentialsDialog> createState() =>
+      _StaffCredentialsDialogState();
+}
+
+class _StaffCredentialsDialogState extends State<_StaffCredentialsDialog> {
   final _form = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _phone = TextEditingController();
+  late final _name = TextEditingController(text: widget.existing?.name ?? '');
+  late final _phone = TextEditingController(text: widget.existing?.phone ?? '');
+  late final _username =
+      TextEditingController(text: widget.existing?.username ?? '');
+  final _password = TextEditingController();
+  var _obscure = true;
+
+  bool get _editing => widget.existing != null;
 
   @override
   void dispose() {
     _name.dispose();
     _phone.dispose();
+    _username.dispose();
+    _password.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_form.currentState!.validate()) return;
-    final phone = _phone.text.trim();
-    Navigator.pop(context, (
-      name: _name.text.trim(),
-      phone: phone.isEmpty ? null : phone,
-    ));
+    final password = _password.text;
+    Navigator.pop(
+      context,
+      _StaffFormResult(
+        name: _name.text.trim(),
+        phone: _phone.text.trim(),
+        username: _username.text.trim(),
+        password: password.isEmpty ? null : password,
+      ),
+    );
   }
 
   @override
@@ -271,26 +340,79 @@ class _AddStaffDialogState extends State<_AddStaffDialog> {
           style: const TextStyle(fontWeight: FontWeight.w900)),
       content: Form(
         key: _form,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              key: const Key('staff-name'),
-              controller: _name,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'الاسم'),
-              validator: (v) =>
-                  (v ?? '').trim().isEmpty ? 'اكتب الاسم' : null,
-            ),
-            TextFormField(
-              key: const Key('staff-phone'),
-              controller: _phone,
-              keyboardType: TextInputType.phone,
-              textDirection: TextDirection.ltr,
-              decoration:
-                  const InputDecoration(labelText: 'رقم الهاتف (اختياري)'),
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const Key('staff-name'),
+                controller: _name,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'الاسم'),
+                validator: (v) =>
+                    (v ?? '').trim().isEmpty ? 'اكتب الاسم' : null,
+              ),
+              TextFormField(
+                key: const Key('staff-phone'),
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(
+                  labelText: 'رقم الهاتف',
+                  hintText: '01XXXXXXXXX',
+                ),
+                validator: (v) {
+                  final phone = (v ?? '').trim();
+                  if (phone.isEmpty) return 'رقم الهاتف مطلوب';
+                  if (!EgyptianPhone.isValid(phone)) {
+                    return 'اكتب رقم موبايل مصري صحيح (01XXXXXXXXX)';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                key: const Key('staff-username'),
+                controller: _username,
+                textDirection: TextDirection.ltr,
+                decoration:
+                    const InputDecoration(labelText: 'اسم المستخدم'),
+                validator: (v) {
+                  final u = (v ?? '').trim();
+                  if (u.length < 3) {
+                    return 'اسم المستخدم مطلوب (٣ أحرف على الأقل)';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                key: const Key('staff-password'),
+                controller: _password,
+                obscureText: _obscure,
+                textDirection: TextDirection.ltr,
+                decoration: InputDecoration(
+                  labelText: _editing
+                      ? 'كلمة المرور (اتركها فارغة للإبقاء)'
+                      : 'كلمة المرور',
+                  suffixIcon: IconButton(
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                    icon: Icon(_obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined),
+                  ),
+                ),
+                validator: (v) {
+                  final p = v ?? '';
+                  if (!_editing && p.length < 4) {
+                    return 'كلمة المرور مطلوبة (٤ أحرف على الأقل)';
+                  }
+                  if (p.isNotEmpty && p.length < 4) {
+                    return 'كلمة المرور قصيرة جداً (٤ أحرف على الأقل)';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
         ),
       ),
       actions: [

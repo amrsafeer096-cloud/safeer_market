@@ -163,6 +163,7 @@ void main() {
 
       await tester.pumpWidget(ProviderScope(
         overrides: [
+          overrideStaffSession(),
           authRepositoryProvider
               .overrideWithValue(FakeAuthRepository(user: testUser)),
           userRoleProvider.overrideWith((ref) async => UserRole.admin),

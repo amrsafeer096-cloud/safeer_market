@@ -26,6 +26,7 @@ import '../../domain/order_prep_timer.dart';
 import '../../../profile/presentation/providers/profile_providers.dart';
 import '../../../profile/domain/entities/user_role.dart';
 import '../providers/admin_providers.dart';
+import '../providers/staff_session_providers.dart';
 import '../../../support/domain/entities/support_chat.dart';
 import '../../../support/presentation/providers/support_providers.dart';
 import '../providers/phone_order_providers.dart';
@@ -35,6 +36,7 @@ import '../widgets/phone_order_column.dart';
 import 'admin_order_search_view.dart';
 import 'admin_reports_view.dart';
 import 'admin_system_view.dart';
+import 'staff_login_screen.dart';
 
 export '../widgets/order_detail_panels.dart' show DashboardStatusBadge;
 import 'admin_magazines_view.dart';
@@ -418,6 +420,11 @@ class _UnifiedDashboardScreenState
 
   @override
   Widget build(BuildContext context) {
+    final staffSession = ref.watch(staffSessionProvider);
+    if (staffSession == null) {
+      return const StaffLoginScreen();
+    }
+
     final l10n = AppLocalizations.of(context)!;
     final isAdmin = ref.watch(localAdminModeProvider);
     final activeMenu = ref.watch(adminMenuProvider);
@@ -426,8 +433,21 @@ class _UnifiedDashboardScreenState
     final selectedId = ref.watch(selectedOrderIdProvider);
 
     final bool isSuperAdmin = userRole == UserRole.admin;
-    final bool showAdminFeatures = isAdmin || isSuperAdmin;
+    // Staff session drives tabs; profile admin / PIN still unlocks sidebar tools.
+    final bool showAdminFeatures =
+        isAdmin || isSuperAdmin || staffSession.isAdmin || staffSession.isTaker;
+    // System sidebar (products / magazines / notifications / …) is admin-only.
+    final bool showSystemSidebar = staffSession.isAdmin;
     final palette = context.palette;
+
+    // Keep the active tab inside what this staff role may open.
+    final allowed = staffSession.allowedTabs;
+    if (!allowed.contains(activeMenu)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(adminMenuProvider.notifier).state = allowed.first;
+      });
+    }
 
     var supportUnread = 0;
     if (showAdminFeatures) {
@@ -458,7 +478,7 @@ class _UnifiedDashboardScreenState
 
       // At the start edge (the right, in Arabic): ☰ first, then back.
       final leading = <Widget>[
-        if (showAdminFeatures)
+        if (showSystemSidebar)
           Builder(
             builder: (c) => IconButton(
               key: const Key('admin-menu-toggle'),
@@ -513,7 +533,11 @@ class _UnifiedDashboardScreenState
               ResizableColumn(
                 flex: 3,
                 minWidth: 240,
-                child: _OrdersList(orders: orders, userRole: userRole),
+                child: _OrdersList(
+                  orders: orders,
+                  userRole: userRole,
+                  deliveryOnly: staffSession.deliveryOrdersOnly,
+                ),
               ),
               ResizableColumn(
                 flex: 7,
@@ -528,7 +552,11 @@ class _UnifiedDashboardScreenState
           );
         }
         if (selectedId == null) {
-          return _OrdersList(orders: orders, userRole: userRole);
+          return _OrdersList(
+            orders: orders,
+            userRole: userRole,
+            deliveryOnly: staffSession.deliveryOrdersOnly,
+          );
         }
         return _OrderDetailsView(
             orders: orders,
@@ -537,21 +565,29 @@ class _UnifiedDashboardScreenState
             isDesktop: false);
       }
 
+      final canReceive =
+          allowed.contains(AdminMenu.receiveOrders) && showAdminFeatures;
+      final canSearch = allowed.contains(AdminMenu.search);
+      final canReports = allowed.contains(AdminMenu.reports);
+      final canSystem = allowed.contains(AdminMenu.staff);
+
       final Widget menuBody = switch (activeMenu) {
-        AdminMenu.receiveOrders when showAdminFeatures => PhoneOrderColumn(
+        AdminMenu.receiveOrders when canReceive => PhoneOrderColumn(
             key: const Key('admin-receive-orders'),
             splitLayout: splitReceiveOrders,
             onPlaced: _selectPlacedOrder,
           ),
         AdminMenu.orderStatus => orderStatusBody(),
-        AdminMenu.products => const _ProductsGridView(),
-        AdminMenu.staff => const AdminSystemView(),
-        AdminMenu.search => const AdminOrderSearchView(),
-        AdminMenu.reports => const AdminReportsView(),
-        AdminMenu.magazines => const AdminMagazinesView(),
-        AdminMenu.support => const AdminSupportView(),
-        AdminMenu.notifications => const AdminNotificationsView(),
-        AdminMenu.pendingSubscriptions =>
+        AdminMenu.products when showSystemSidebar => const _ProductsGridView(),
+        AdminMenu.staff when canSystem => const AdminSystemView(),
+        AdminMenu.search when canSearch => const AdminOrderSearchView(),
+        AdminMenu.reports when canReports => const AdminReportsView(),
+        AdminMenu.magazines when showSystemSidebar =>
+          const AdminMagazinesView(),
+        AdminMenu.support when showSystemSidebar => const AdminSupportView(),
+        AdminMenu.notifications when showSystemSidebar =>
+          const AdminNotificationsView(),
+        AdminMenu.pendingSubscriptions when showSystemSidebar =>
           const AdminPendingSubscriptionsView(),
         _ => orderStatusBody(),
       };
@@ -559,22 +595,32 @@ class _UnifiedDashboardScreenState
       return Scaffold(
         backgroundColor:
             palette.isDark ? palette.background : const Color(0xFFF4F6F8),
-        drawer: (!isDesktop && showAdminFeatures)
+        drawer: (!isDesktop && showSystemSidebar)
             ? Drawer(child: SafeArea(child: _SidebarMenu(isDesktop: false)))
             : null,
         appBar: AppBar(
-          title: Text(
-              showAdminFeatures
-                  ? l10n.adminAppBarTitleManagement(l10n.appTitle)
-                  : l10n.adminAppBarTitleWorkspace(l10n.appTitle),
-              style:
-                  const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                showAdminFeatures
+                    ? l10n.adminAppBarTitleManagement(l10n.appTitle)
+                    : l10n.adminAppBarTitleWorkspace(l10n.appTitle),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+              ),
+              Text(
+                '${staffSession.name} • ${staffSession.roleLabel}',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
           backgroundColor:
               showAdminFeatures ? Colors.blue.shade900 : AppColors.primaryDark,
           foregroundColor: Colors.white,
           elevation: 0,
           automaticallyImplyLeading: false,
-          bottom: showAdminFeatures ? const _AdminTopTabs() : null,
+          bottom: _AdminTopTabs(allowedMenus: allowed),
           leadingWidth: leading.length * 48.0 + 8,
           leading: leading.isEmpty
               ? null
@@ -600,26 +646,38 @@ class _UnifiedDashboardScreenState
                   },
                 );
               }),
-              IconButton(
-                key: const Key('support-inbox'),
-                tooltip: l10n.supportCenterTitle,
-                onPressed: _openSupportCenter,
-                icon: Badge(
-                  isLabelVisible: supportUnread > 0,
-                  backgroundColor: Colors.red,
-                  label: Text(
-                    unreadLabel(supportUnread),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
+              if (showSystemSidebar)
+                IconButton(
+                  key: const Key('support-inbox'),
+                  tooltip: l10n.supportCenterTitle,
+                  onPressed: _openSupportCenter,
+                  icon: Badge(
+                    isLabelVisible: supportUnread > 0,
+                    backgroundColor: Colors.red,
+                    label: Text(
+                      unreadLabel(supportUnread),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
                     ),
+                    child: const Icon(Icons.forum_rounded),
                   ),
-                  child: const Icon(Icons.forum_rounded),
                 ),
-              ),
             ],
-            if (!isSuperAdmin)
+            IconButton(
+              key: const Key('staff-logout'),
+              tooltip: 'تبديل الموظف / تسجيل الخروج',
+              icon: const Icon(Icons.switch_account_rounded),
+              onPressed: () async {
+                await ref.read(staffSessionProvider.notifier).logout();
+                ref.read(adminMenuProvider.notifier).state =
+                    AdminMenu.orderStatus;
+                ref.read(localAdminModeProvider.notifier).state = false;
+              },
+            ),
+            if (!isSuperAdmin && staffSession.isAdmin)
               IconButton(
                 tooltip: isAdmin
                     ? l10n.adminCloseManagement
@@ -646,7 +704,7 @@ class _UnifiedDashboardScreenState
         body: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (isDesktop && showAdminFeatures)
+            if (isDesktop && showSystemSidebar)
               AnimatedContainer(
                 key: const Key('admin-sidebar'),
                 duration: const Duration(milliseconds: 250),
@@ -771,7 +829,9 @@ class _SidebarMenu extends ConsumerWidget {
 // 3b. شريط التبويبات العلوي (الأقسام الخمسة الرئيسية)
 // ==========================================
 class _AdminTopTabs extends ConsumerWidget implements PreferredSizeWidget {
-  const _AdminTopTabs();
+  const _AdminTopTabs({required this.allowedMenus});
+
+  final List<int> allowedMenus;
 
   static const height = 46.0;
 
@@ -783,7 +843,7 @@ class _AdminTopTabs extends ConsumerWidget implements PreferredSizeWidget {
     final l10n = AppLocalizations.of(context)!;
     final palette = context.palette;
     final active = ref.watch(adminMenuProvider);
-    final tabs = <({int menu, String label, IconData icon})>[
+    final allTabs = <({int menu, String label, IconData icon})>[
       (
         menu: AdminMenu.receiveOrders,
         label: l10n.adminMenuReceiveOrders,
@@ -805,6 +865,10 @@ class _AdminTopTabs extends ConsumerWidget implements PreferredSizeWidget {
         label: 'إدارة النظام',
         icon: Icons.settings_rounded
       ),
+    ];
+    final tabs = [
+      for (final tab in allTabs)
+        if (allowedMenus.contains(tab.menu)) tab,
     ];
 
     return Container(
@@ -899,7 +963,12 @@ class _AdminTab extends StatelessWidget {
 class _OrdersList extends ConsumerWidget {
   final List<Map<String, dynamic>> orders;
   final UserRole? userRole;
-  const _OrdersList({required this.orders, required this.userRole});
+  final bool deliveryOnly;
+  const _OrdersList({
+    required this.orders,
+    required this.userRole,
+    this.deliveryOnly = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -909,7 +978,7 @@ class _OrdersList extends ConsumerWidget {
     final palette = context.palette;
 
     var roleOrders = orders;
-    if (userRole == UserRole.driver) {
+    if (deliveryOnly || userRole == UserRole.driver) {
       roleOrders = orders.where((o) {
         final status = OrderStatus.normalize('${o['status'] ?? ''}');
         return status == OrderStatus.readyForDelivery.value ||

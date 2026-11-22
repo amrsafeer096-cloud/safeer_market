@@ -35,7 +35,9 @@ import 'package:safeer_market/features/warehouse/presentation/providers/warehous
 import 'package:safeer_market/features/admin/domain/entities/admin_order.dart';
 import 'package:safeer_market/features/admin/domain/entities/order_status.dart';
 import 'package:safeer_market/features/admin/domain/repositories/admin_orders_repository.dart';
+import 'package:safeer_market/features/admin/domain/staff_session.dart';
 import 'package:safeer_market/features/admin/presentation/providers/admin_providers.dart';
+import 'package:safeer_market/features/admin/presentation/providers/staff_session_providers.dart';
 import 'package:safeer_market/features/auth/domain/egyptian_phone.dart';
 import 'package:safeer_market/features/auth/domain/entities/app_user.dart';
 import 'package:safeer_market/features/auth/domain/repositories/auth_repository.dart';
@@ -82,6 +84,21 @@ const testDairy = 'جبن تترباك و مثلثات و كوب';
 const testSweets = 'شيكولاتة';
 
 const testUser = AppUser(id: 'user-1', email: 'amr@example.com');
+
+/// Default staff session for widget tests that open [UnifiedDashboardScreen].
+const testAdminStaffSession = StaffSession(
+  id: 'staff-admin-1',
+  name: 'مدير الاختبار',
+  role: 'admin',
+  username: 'admin',
+  phone: '01000000000',
+);
+
+/// Skips the staff login gate with an admin (or custom) session.
+Override overrideStaffSession([StaffSession session = testAdminStaffSession]) =>
+    staffSessionProvider.overrideWith(
+      (ref) => StaffSessionController(ref, initial: session),
+    );
 
 class FakeAuthRepository implements AuthRepository {
   FakeAuthRepository({
@@ -1198,6 +1215,7 @@ class FakeNotificationsRepository implements NotificationsRepository {
     required String body,
     required AppNotificationType type,
     String? imageUrl,
+    String? targetUserId,
   }) async {
     final image = imageUrl?.trim();
     broadcasts.add((

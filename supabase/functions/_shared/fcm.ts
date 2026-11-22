@@ -105,7 +105,13 @@ export function androidPushConfig(options: {
     notification: {
       channel_id: options.channelId,
       sound: options.sound ?? (options.urgent ? "order_chime" : "default"),
-      default_vibrate_timings: true,
+      default_vibrate_timings: !options.urgent,
+      ...(options.urgent
+        ? {
+          // Strong pattern so locked phones still buzz for new orders.
+          vibrate_timings: ["0s", "0.25s", "0.1s", "0.25s", "0.1s", "0.4s"],
+        }
+        : {}),
       visibility: "PUBLIC",
       ...(options.tag ? { tag: options.tag } : {}),
       notification_priority: options.urgent

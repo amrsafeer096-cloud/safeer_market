@@ -48,21 +48,23 @@ class AdminCustomer {
   bool get hasPin => latitude != null && longitude != null;
 }
 
-/// A preparer or driver (`staff` row).
+/// A preparer, driver, taker or admin (`staff` row with login credentials).
 class StaffMember {
   const StaffMember({
     required this.id,
     required this.name,
     required this.role,
     this.phone,
+    this.username,
   });
 
   final String id;
   final String name;
 
-  /// `preparer` or `driver`.
+  /// `preparer` | `driver` | `taker` | `admin`.
   final String role;
   final String? phone;
+  final String? username;
 }
 
 /// An account that can use the dashboard (`profiles.role` admin, warehouse,
@@ -134,11 +136,20 @@ abstract class SystemAdminService {
   /// Fails for customers that have orders.
   Future<void> deleteCustomer(int id);
 
-  Future<List<StaffMember>> staff();
+  Future<List<StaffMember>> staff({List<String>? roles});
   Future<void> addStaff({
     required String name,
     required String role,
+    required String phone,
+    required String username,
+    required String password,
+  });
+  Future<void> updateStaff({
+    required String id,
+    String? name,
     String? phone,
+    String? username,
+    String? password,
   });
   Future<void> deleteStaff(String id);
 
@@ -192,6 +203,18 @@ String describeAdminError(Object error) {
   }
   if (text.contains('23505') || text.contains('duplicate key')) {
     return 'هذا السجل موجود بالفعل';
+  }
+  if (text.contains('invalid_phone')) {
+    return 'اكتب رقم موبايل مصري صحيح (01XXXXXXXXX)';
+  }
+  if (text.contains('username_required')) {
+    return 'اسم المستخدم مطلوب (٣ أحرف على الأقل)';
+  }
+  if (text.contains('password_required')) {
+    return 'كلمة المرور مطلوبة (٤ أحرف على الأقل)';
+  }
+  if (text.contains('invalid_credentials')) {
+    return 'اسم المستخدم أو كلمة المرور غير صحيحة';
   }
   return error is PostgrestException ? error.message : text;
 }
@@ -261,11 +284,13 @@ class SupabaseSystemAdminService implements SystemAdminService {
   // ---------------------------------------------------------------- staff
 
   @override
-  Future<List<StaffMember>> staff() => _guard(() async {
+  Future<List<StaffMember>> staff({List<String>? roles}) => _guard(() async {
+        final filter = roles ?? const ['preparer', 'driver'];
         final rows = await _client
             .from('staff')
-            .select('id, name, role, phone')
-            .inFilter('role', ['preparer', 'driver']).order('name');
+            .select('id, name, role, phone, username')
+            .inFilter('role', filter)
+            .order('name');
         return [
           for (final row in rows)
             StaffMember(
@@ -273,6 +298,7 @@ class SupabaseSystemAdminService implements SystemAdminService {
               name: _text(row['name']) ?? '—',
               role: '${row['role']}',
               phone: _text(row['phone']),
+              username: _text(row['username']),
             ),
         ];
       });
@@ -281,13 +307,35 @@ class SupabaseSystemAdminService implements SystemAdminService {
   Future<void> addStaff({
     required String name,
     required String role,
-    String? phone,
+    required String phone,
+    required String username,
+    required String password,
   }) =>
       _guard(() async {
         await _client.rpc('admin_add_staff', params: {
           'p_name': name.trim(),
           'p_role': role,
+          'p_phone': phone.trim(),
+          'p_username': username.trim(),
+          'p_password': password,
+        });
+      });
+
+  @override
+  Future<void> updateStaff({
+    required String id,
+    String? name,
+    String? phone,
+    String? username,
+    String? password,
+  }) =>
+      _guard(() async {
+        await _client.rpc('admin_update_staff', params: {
+          'p_id': id,
+          'p_name': name?.trim(),
           'p_phone': phone?.trim(),
+          'p_username': username?.trim(),
+          'p_password': password == null || password.isEmpty ? null : password,
         });
       });
 

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// Android notification channels shared by the app and the FCM background
@@ -8,13 +10,15 @@ abstract final class PushChannels {
   /// order chime (android/app/src/main/res/raw/order_chime.ogg). Android
   /// fixes a channel's sound when it is first created, so a new sound needs
   /// a new channel id.
-  static const orders = AndroidNotificationChannel(
+  static final orders = AndroidNotificationChannel(
     'safeer_orders',
     'طلبات جديدة',
     description: 'تنبيه بصوت مميز عند وصول طلب جديد',
     importance: Importance.max,
-    sound: RawResourceAndroidNotificationSound('order_chime'),
+    playSound: true,
+    sound: const RawResourceAndroidNotificationSound('order_chime'),
     enableVibration: true,
+    vibrationPattern: Int64List.fromList([0, 250, 100, 250, 100, 400]),
   );
 
   /// Order updates, offers and support replies with the default sound.

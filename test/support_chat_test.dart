@@ -172,6 +172,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(ProviderScope(
         overrides: [
+          overrideStaffSession(),
           userRoleProvider.overrideWith((ref) async => UserRole.admin),
           liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier([
                 {

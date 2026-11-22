@@ -5,12 +5,13 @@ abstract interface class NotificationsRepository {
   /// broadcasts and their own for customers, all of them for admins.
   Stream<List<AppNotification>> watchNotifications();
 
-  /// Admins only: a notification for every customer.
+  /// Admins only: a notification for every customer (or [targetUserId]).
   Future<void> broadcast({
     required String title,
     required String body,
     required AppNotificationType type,
     String? imageUrl,
+    String? targetUserId,
   });
 
   /// Admins only.

@@ -71,13 +71,50 @@ class _FakeService implements SystemAdminService {
   }
 
   @override
-  Future<List<StaffMember>> staff() async => staffRows;
+  Future<List<StaffMember>> staff({List<String>? roles}) async {
+    final filter = roles;
+    if (filter == null) return staffRows;
+    return [
+      for (final s in staffRows)
+        if (filter.contains(s.role)) s,
+    ];
+  }
 
   @override
-  Future<void> addStaff(
-      {required String name, required String role, String? phone}) async {
+  Future<void> addStaff({
+    required String name,
+    required String role,
+    required String phone,
+    required String username,
+    required String password,
+  }) async {
     staffRows.add(StaffMember(
-        id: '${staffRows.length + 1}', name: name, role: role, phone: phone));
+      id: '${staffRows.length + 1}',
+      name: name,
+      role: role,
+      phone: phone,
+      username: username,
+    ));
+  }
+
+  @override
+  Future<void> updateStaff({
+    required String id,
+    String? name,
+    String? phone,
+    String? username,
+    String? password,
+  }) async {
+    final index = staffRows.indexWhere((s) => s.id == id);
+    if (index < 0) return;
+    final current = staffRows[index];
+    staffRows[index] = StaffMember(
+      id: current.id,
+      name: name ?? current.name,
+      role: current.role,
+      phone: phone ?? current.phone,
+      username: username ?? current.username,
+    );
   }
 
   @override
@@ -565,6 +602,9 @@ void main() {
       await tester.tap(find.byKey(const Key('staff-add')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('staff-name')), 'أحمد');
+      await tester.enterText(find.byKey(const Key('staff-phone')), '01012345678');
+      await tester.enterText(find.byKey(const Key('staff-username')), 'ahmed');
+      await tester.enterText(find.byKey(const Key('staff-password')), '1234');
       await tester.tap(find.byKey(const Key('staff-save')));
       await tester.pumpAndSettle();
 

@@ -43,7 +43,8 @@ class MoreScreen extends ConsumerWidget {
     final userRole = ref.watch(userRoleProvider).value;
     final isStaff = userRole == UserRole.admin ||
         userRole == UserRole.warehouse ||
-        userRole == UserRole.driver;
+        userRole == UserRole.driver ||
+        userRole == UserRole.cashier;
 
     return Column(
       children: [

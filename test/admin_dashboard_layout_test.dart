@@ -11,6 +11,8 @@ import 'package:safeer_market/features/profile/domain/entities/user_role.dart';
 import 'package:safeer_market/features/profile/presentation/providers/profile_providers.dart';
 import 'package:safeer_market/l10n/app_localizations.dart';
 
+import 'test_helpers.dart';
+
 Future<void> _pumpDashboard(WidgetTester tester,
     {required double width}) async {
   tester.view.physicalSize = Size(width, 900);
@@ -18,6 +20,7 @@ Future<void> _pumpDashboard(WidgetTester tester,
   addTearDown(tester.view.reset);
   await tester.pumpWidget(ProviderScope(
     overrides: [
+      overrideStaffSession(),
       userRoleProvider.overrideWith((ref) async => UserRole.admin),
       liveOrdersProvider.overrideWith(() => FixedLiveOrdersNotifier(const <Map<String, dynamic>>[]),
       ),

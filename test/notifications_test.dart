@@ -212,6 +212,7 @@ void main() {
       final repository = FakeNotificationsRepository(sent);
       await tester.pumpWidget(ProviderScope(
         overrides: [
+          overrideStaffSession(),
           authRepositoryProvider
               .overrideWithValue(FakeAuthRepository(user: testUser)),
           userRoleProvider.overrideWith((ref) async => UserRole.admin),

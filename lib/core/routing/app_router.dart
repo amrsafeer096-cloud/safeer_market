@@ -368,7 +368,8 @@ CustomTransitionPage<void> _smoothPage(GoRouterState state, Widget child) {
 String homeRouteFor(UserRole? role) {
   if (role == UserRole.driver ||
       role == UserRole.warehouse ||
-      role == UserRole.admin) {
+      role == UserRole.admin ||
+      role == UserRole.cashier) {
     return AppRoutes.adminOrders;
   }
   return AppRoutes.home;
@@ -398,7 +399,8 @@ String? roleRedirect(String location, UserRole? role) {
 
   final isStaffRole = role == UserRole.driver ||
       role == UserRole.warehouse ||
-      role == UserRole.admin;
+      role == UserRole.admin ||
+      role == UserRole.cashier;
   final isStaffArea = location.startsWith(AppRoutes.adminOrders);
 
   if (isStaffRole) {

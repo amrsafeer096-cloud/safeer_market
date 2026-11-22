@@ -31,18 +31,51 @@ class SupabaseNotificationsRepository implements NotificationsRepository {
     required String body,
     required AppNotificationType type,
     String? imageUrl,
+    String? targetUserId,
   }) async {
     final image = imageUrl?.trim();
+    final trimmedTitle = title.trim();
+    final trimmedBody = body.trim();
+    final target = targetUserId?.trim();
     try {
       await _client.from(_table).insert({
-        'title': title.trim(),
-        'body': body.trim(),
+        'title': trimmedTitle,
+        'body': trimmedBody,
         'type': type.value,
         'image_url': image == null || image.isEmpty ? null : image,
-        'target_user_id': null,
+        'target_user_id':
+            target == null || target.isEmpty || target == 'all_customers'
+                ? null
+                : target,
       });
     } on PostgrestException catch (error) {
       throw NotificationsFailure(_message(error));
+    }
+    // Guarantee an FCM fan-out even when the DB webhook/Vault is unset.
+    try {
+      final response = await _client.functions.invoke(
+        'send-push',
+        body: {
+          'trigger': 'broadcast',
+          'title': trimmedTitle,
+          'body': trimmedBody,
+          'notification_type': type.value,
+          if (image != null && image.isNotEmpty) 'image_url': image,
+          'target': target == null || target.isEmpty
+              ? 'all_customers'
+              : target,
+        },
+      );
+      debugPrint(
+        'send-push [broadcast] → HTTP ${response.status} ${response.data}',
+      );
+    } on FunctionException catch (error) {
+      debugPrint(
+        'send-push broadcast FunctionException: '
+        'status=${error.status} details=${error.details}',
+      );
+    } catch (error) {
+      debugPrint('send-push broadcast invoke error: $error');
     }
   }
 
