@@ -177,14 +177,26 @@ def sync_active_with_categories():
                 unit_map[str(row[0]).strip()] = str(row[1]).strip()
         except: pass
 
-        # أضفنا استدعاء u.unit للتعرف على وحدة كل باركود
+        # استعلام الرصيد الفعلي لفرع 101 (رصيد أول الشهر + صافي الحركات المرحلة والغير مرحلة)
         sql_query = """
+        SET NOCOUNT ON;
+
+        DECLARE @branchId INT = 101;
+        DECLARE @companyId INT = 1;
+        DECLARE @sectionId INT = 0;
+        DECLARE @expiryDate SMALLDATETIME = '1900-01-01';
+        DECLARE @toDate DATETIME = GETDATE();
+        DECLARE @transYear INT, @transMonth INT;
+
+        EXEC sp_get_max_closing_mnoth_year @branchId, @toDate, @transYear OUT, @transMonth OUT;
+        DECLARE @fromDate DATETIME = DATEFROMPARTS(@transYear, @transMonth, 1);
+
         SELECT 
             LTRIM(RTRIM(CAST(u.barcode AS NVARCHAR(50)))) AS barcode,
             i.a_name AS base_name,
             u.flavour AS unit_flavour,
             u.retailprice AS price,
-            (ISNULL(s.total_qty, 0) + ISNULL(unp.unposted_qty, 0)) AS stock_quantity,
+            (ISNULL(op.opening_qty, 0) + ISNULL(mv.net_qty, 0)) AS stock_quantity,
             p.prom_price AS offer_price,
             CAST(i.section AS NVARCHAR(100)) AS section_id,
             CAST(i.itemgroup AS NVARCHAR(100)) AS group_id,
@@ -192,17 +204,45 @@ def sync_active_with_categories():
         FROM sys_item_units u
         JOIN sys_item i ON u.itemean = i.itemean 
         LEFT JOIN (
-            SELECT itemean, SUM(inventory_qty) AS total_qty 
-            FROM stk_inventory_items 
+            SELECT itemean, SUM(item_qtyin) AS opening_qty
+            FROM stk_mtod
+            WHERE doctype = 0
+              AND transyear = @transYear
+              AND transmonth = @transMonth
+              AND company = @companyId
+              AND branch = @branchId
+              AND section = @sectionId
+              AND expirydate = @expiryDate
             GROUP BY itemean
-        ) s ON u.itemean = s.itemean
+        ) op ON u.itemean = op.itemean
         LEFT JOIN (
-            SELECT itemean, SUM(actual_qty) AS unposted_qty 
-            FROM stk_order_items 
-            WHERE posting = 0 AND doctype = 2010 
-              AND orderdate >= DATEADD(day, -15, GETDATE())
-            GROUP BY itemean
-        ) unp ON u.itemean = unp.itemean
+            SELECT
+                oi.itemean,
+                SUM(
+                    CASE
+                        WHEN o.doctype < 2050 THEN (oi.actual_qty + oi.free_qty) * oi.peices
+                        ELSE -1 * (oi.actual_qty + oi.free_qty) * oi.peices
+                    END
+                ) AS net_qty
+            FROM stk_order o
+            JOIN stk_order_items oi
+              ON o.company = oi.company
+             AND o.sector = oi.sector
+             AND o.region = oi.region
+             AND o.branch = oi.branch
+             AND o.section = oi.section
+             AND o.transtype = oi.transtype
+             AND o.doctype = oi.doctype
+             AND o.orderno = oi.orderno
+             AND o.orderdate = oi.orderdate
+            WHERE o.posting IN (0, 1)
+              AND o.orderdate BETWEEN @fromDate AND @toDate
+              AND o.company = @companyId
+              AND o.branch = @branchId
+              AND o.section = @sectionId
+              AND oi.expirydate = @expiryDate
+            GROUP BY oi.itemean
+        ) mv ON u.itemean = mv.itemean
         LEFT JOIN (
             SELECT 
                 LTRIM(RTRIM(CAST(pi.barcode AS NVARCHAR(50)))) AS clean_barcode,
@@ -224,7 +264,7 @@ def sync_active_with_categories():
           AND u.retailprice > 0
           AND i.status = 1
           AND u.transid = 1
-          AND (ISNULL(s.total_qty, 0) + ISNULL(unp.unposted_qty, 0)) > 0
+          AND (ISNULL(op.opening_qty, 0) + ISNULL(mv.net_qty, 0)) > 0
         """
         
         cursor.execute(sql_query)
@@ -252,7 +292,7 @@ def sync_active_with_categories():
             if db_unit and db_unit != "None" and db_unit != "":
                 final_unit = db_unit.strip()
             else:
-                final_unit = "قطعة" # حالة افتراضية لو الحقل كان فاضي تماماً
+                final_unit = "قطعة"
             # ---------------------------------------------
 
             raw_promo = float(row.offer_price) if row.offer_price else 0
@@ -279,7 +319,7 @@ def sync_active_with_categories():
                 "discount_price": promo_price,
                 "category": exact_app_cat,      
                 "subcategory": exact_app_cat,
-                "unit": final_unit # تخزين الوحدة الموثوقة من السيستم
+                "unit": final_unit
             }
             data_to_upsert_dict[barcode_val] = item_data
 

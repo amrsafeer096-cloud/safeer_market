@@ -25,7 +25,9 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release
+        # --pwa-strategy=none: do not emit flutter_service_worker.js (stale
+        # Chrome cache). firebase-messaging-sw.js is untouched for web push.
+        run: flutter build web --release --pwa-strategy=none
 
       - name: Deploy to Firebase Hosting
         env:
