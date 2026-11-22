@@ -18,7 +18,6 @@ import '../../../../core/providers/settings_providers.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/widgets/resizable_columns.dart';
 import '../../../../l10n/app_localizations.dart';
-import '../../../cart/domain/weight_options.dart';
 import '../../../home/presentation/widgets/product_image.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
@@ -26,13 +25,16 @@ import '../../domain/order_prep_timer.dart';
 import '../../../profile/presentation/providers/profile_providers.dart';
 import '../../../profile/domain/entities/user_role.dart';
 import '../providers/admin_providers.dart';
+import '../providers/order_alternatives_providers.dart';
 import '../providers/staff_session_providers.dart';
 import '../../../support/domain/entities/support_chat.dart';
 import '../../../support/presentation/providers/support_providers.dart';
 import '../providers/phone_order_providers.dart';
+import '../widgets/order_alternatives_panel.dart';
 import '../widgets/order_detail_panels.dart';
 import '../widgets/order_status_widgets.dart';
 import '../widgets/phone_order_column.dart';
+import '../widgets/send_alternatives_sheet.dart';
 import 'admin_order_search_view.dart';
 import 'admin_reports_view.dart';
 import 'admin_system_view.dart';
@@ -576,6 +578,10 @@ class _UnifiedDashboardScreenState
             key: const Key('admin-receive-orders'),
             splitLayout: splitReceiveOrders,
             onPlaced: _selectPlacedOrder,
+            onOpenPendingAlternatives: () {
+              ref.read(adminMenuProvider.notifier).state =
+                  AdminMenu.orderStatus;
+            },
           ),
         AdminMenu.orderStatus => orderStatusBody(),
         AdminMenu.products when showSystemSidebar => const _ProductsGridView(),
@@ -1152,6 +1158,42 @@ class _OrderCard extends ConsumerWidget {
                         ),
                       ]),
                     ],
+                    Builder(builder: (_) {
+                      final pendingIds = ref
+                              .watch(pendingAlternativeOrderIdsProvider)
+                              .valueOrNull ??
+                          const {};
+                      if (!pendingIds.contains(id)) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.deepOrange.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.swap_horiz_rounded,
+                                  size: 14, color: Colors.deepOrange),
+                              SizedBox(width: 4),
+                              Text(
+                                'بدائل بانتظار الرد',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.deepOrange,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 8),
                     // Bottom row: total · countdown (centered) · payment.
                     if (countdown == null)
@@ -1243,13 +1285,18 @@ class _OrderDetailsView extends ConsumerWidget {
       customerPhone: customer.phone,
     );
 
+    final orderId = '${order['id']}';
+    final isPhoneOrder = order['order_source'] == 'phone';
+    final customerUserId = order['user_id']?.toString();
+    final customerPhone = customer.phone;
+
     // أسفل (وسط): المنتجات المطلوبة للتجهيز.
     final productsPanel = OrderPanel(
       key: const Key('order-products-panel'),
       title: 'المنتجات المطلوبة للتجهيز',
       icon: Icons.shopping_basket_outlined,
       child: Consumer(builder: (context, ref, child) {
-        final itemsAsync = ref.watch(adminOrderItemsProvider(order['id']));
+        final itemsAsync = ref.watch(adminOrderItemsProvider(orderId));
         return itemsAsync.when(
           loading: () => const Center(
               child: Padding(
@@ -1258,9 +1305,25 @@ class _OrderDetailsView extends ConsumerWidget {
           error: (e, _) => Text(l10n.failedToLoadProducts),
           data: (items) {
             if (items.isEmpty) return Text(l10n.adminNoItemsInOrder);
-            if (canCheck) return _CheckableProductsList(items: items);
             return Column(
-                children: [for (final item in items) OrderProductTile(item: item)]);
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                OrderAlternativesPanel(
+                  orderId: orderId,
+                  forStaff: isPhoneOrder,
+                  customerPhone: customerPhone,
+                ),
+                if (canCheck)
+                  _CheckableProductsList(
+                    items: items,
+                    orderId: orderId,
+                    notifyCustomer: !isPhoneOrder,
+                    customerUserId: customerUserId,
+                  )
+                else
+                  for (final item in items) OrderProductTile(item: item),
+              ],
+            );
           },
         );
       }),
@@ -1753,77 +1816,162 @@ class _AdminDriverAssignerState extends ConsumerState<_AdminDriverAssigner> {
 }
 
 class _CheckableProductsList extends ConsumerWidget {
-  final List<dynamic> items;
-  const _CheckableProductsList({required this.items});
+  const _CheckableProductsList({
+    required this.items,
+    required this.orderId,
+    required this.notifyCustomer,
+    this.customerUserId,
+  });
+
+  final List<AdminOrderItem> items;
+  final String orderId;
+  final bool notifyCustomer;
+  final String? customerUserId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final checkedItemIds = ref.watch(orderPrepChecklistProvider);
     final palette = context.palette;
+    final pendingAlts =
+        ref.watch(pendingOrderAlternativesProvider(orderId)).valueOrNull ??
+            const [];
+    final pendingItemIds = {
+      for (final a in pendingAlts) a.originalOrderItemId,
+    };
 
     return Column(
-      children: items.map((item) {
-        final isChecked = checkedItemIds.contains(item.id);
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-              color: isChecked
-                  ? (palette.isDark
-                      ? Colors.green.withValues(alpha: 0.15)
-                      : Colors.green.shade50)
-                  : palette.card,
-              border: Border.all(
-                  color: isChecked ? Colors.green : palette.border,
-                  width: isChecked ? 2 : 1),
-              borderRadius: BorderRadius.circular(12)),
-          child: Row(
+      children: [
+        for (final item in items)
+          _PrepItemCard(
+            item: item,
+            isChecked: checkedItemIds.contains(item.id),
+            hasPendingAlternatives: pendingItemIds.contains(item.id),
+            onToggle: (checked) {
+              if (checked) {
+                ref
+                    .read(orderPrepChecklistProvider.notifier)
+                    .update((state) => {...state, item.id});
+              } else {
+                ref
+                    .read(orderPrepChecklistProvider.notifier)
+                    .update((state) => {...state}..remove(item.id));
+              }
+            },
+            onSendAlternatives: () async {
+              final sent = await showSendAlternativesSheet(
+                context,
+                orderId: orderId,
+                item: item,
+                notifyCustomer: notifyCustomer,
+                customerUserId: customerUserId,
+              );
+              if (!sent) return;
+              ref.invalidate(orderAlternativesProvider(orderId));
+              ref.invalidate(pendingOrderAlternativesProvider(orderId));
+              ref.invalidate(pendingAlternativeOrderIdsProvider);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(
+                    notifyCustomer
+                        ? 'تم إرسال البدائل للعميل'
+                        : 'تم إرسال البدائل للمتلقي',
+                  ),
+                  backgroundColor: AppColors.success,
+                ));
+              }
+            },
+            palette: palette,
+          ),
+      ],
+    );
+  }
+}
+
+class _PrepItemCard extends StatelessWidget {
+  const _PrepItemCard({
+    required this.item,
+    required this.isChecked,
+    required this.hasPendingAlternatives,
+    required this.onToggle,
+    required this.onSendAlternatives,
+    required this.palette,
+  });
+
+  final AdminOrderItem item;
+  final bool isChecked;
+  final bool hasPendingAlternatives;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback onSendAlternatives;
+  final AppPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    final barcode = item.barcode?.trim();
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isChecked
+            ? (palette.isDark
+                ? Colors.green.withValues(alpha: 0.15)
+                : Colors.green.shade50)
+            : palette.card,
+        border: Border.all(
+          color: hasPendingAlternatives
+              ? Colors.deepOrange
+              : isChecked
+                  ? Colors.green
+                  : palette.border,
+          width: isChecked || hasPendingAlternatives ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Transform.scale(
-                  scale: 1.3,
-                  child: Checkbox(
-                      value: isChecked,
-                      activeColor: AppColors.success,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4)),
-                      onChanged: (val) {
-                        if (val == true) {
-                          ref
-                              .read(orderPrepChecklistProvider.notifier)
-                              .update((state) => {...state, item.id});
-                        } else {
-                          ref
-                              .read(orderPrepChecklistProvider.notifier)
-                              .update((state) => {...state}..remove(item.id));
-                        }
-                      })),
+                scale: 1.3,
+                child: Checkbox(
+                  value: isChecked,
+                  activeColor: AppColors.success,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4)),
+                  onChanged: (val) => onToggle(val == true),
+                ),
+              ),
               const SizedBox(width: 8),
               ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                      width: 50,
-                      height: 50,
-                      child:
-                          ProductImage(imageUrl: item.imageUrl, iconSize: 20))),
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 50,
+                  height: 50,
+                  child: ProductImage(imageUrl: item.imageUrl, iconSize: 20),
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Text(item.productName,
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            decoration:
-                                isChecked ? TextDecoration.lineThrough : null,
-                            color:
-                                isChecked ? palette.muted : palette.onSurface)),
-                    if (item is AdminOrderItem && item.weightInGrams != null)
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.productName,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        decoration:
+                            isChecked ? TextDecoration.lineThrough : null,
+                        color: isChecked ? palette.muted : palette.onSurface,
+                      ),
+                    ),
+                    if (item.isWeighted)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
-                          WeightOptions.phoneOrderLabel(item.weightInGrams!),
+                          item.quantityLabel,
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
@@ -1831,31 +1979,100 @@ class _CheckableProductsList extends ConsumerWidget {
                           ),
                         ),
                       ),
+                    if (barcode != null && barcode.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: InkWell(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: barcode));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('تم نسخ الباركود'),
+                                behavior: SnackBarBehavior.floating,
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.qr_code_2_rounded,
+                                  size: 15, color: palette.muted),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  barcode,
+                                  textDirection: TextDirection.ltr,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w800,
+                                    color: palette.onSurface,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.copy_rounded,
+                                  size: 13, color: palette.muted),
+                            ],
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 4),
-                    Text(AppCurrency.of(item.price),
-                        style: TextStyle(
-                            color: palette.accent,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold))
-                  ])),
-              Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                      color: Colors.orange.shade100,
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text(
-                      item is AdminOrderItem && item.weightInGrams != null
-                          ? WeightOptions.phoneOrderLabel(item.weightInGrams!)
-                          : 'x${item.quantity}',
+                    Text(
+                      AppCurrency.of(item.price),
                       style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                          color: Colors.orange.shade900))),
+                        color: palette.accent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  item.quantityLabel,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                    color: Colors.orange.shade900,
+                  ),
+                ),
+              ),
             ],
           ),
-        );
-      }).toList(),
+          const SizedBox(height: 8),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: hasPendingAlternatives ? null : onSendAlternatives,
+              icon: Icon(
+                hasPendingAlternatives
+                    ? Icons.hourglass_top_rounded
+                    : Icons.swap_horiz_rounded,
+                size: 18,
+              ),
+              label: Text(
+                hasPendingAlternatives ? 'بدائل بانتظار الرد' : 'إرسال بدائل',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.deepOrange,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

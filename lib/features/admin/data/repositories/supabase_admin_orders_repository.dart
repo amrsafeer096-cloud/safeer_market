@@ -38,31 +38,39 @@ class SupabaseAdminOrdersRepository implements AdminOrdersRepository {
   Future<List<AdminOrderItem>> fetchOrderItems(String orderId) async {
     final rows = await _client
         .from('order_items')
-        // التعديل هنا: طلبنا منه يسحب عمود الباركود من جدول المنتجات
-        .select('*, products(name, image_url, barcode)')
+        .select(
+          'id, product_id, quantity, price_at_time, weight_in_grams, '
+          'products(name, image_url, barcode, unit, is_weight_based)',
+        )
         .eq('order_id', orderId);
 
     return rows.map((row) {
       final product = _single(row['products']);
       final imageUrl = (product?['image_url'] as String?)?.trim();
-
-      // هنا بياخد الباركود الحقيقي، ولو ملقاهوش بياخد الـ ID كبديل مؤقت
-      final realBarcode =
-          product?['barcode']?.toString() ?? row['product_id'].toString();
-
-      final weight = row['weight_in_grams'];
+      final barcode = _text(product?['barcode']);
+      final weight = switch (row['weight_in_grams']) {
+        final num grams when grams > 0 => grams.toInt(),
+        final String text => int.tryParse(text),
+        _ => null,
+      };
+      final positiveWeight = weight != null && weight > 0 ? weight : null;
+      final unit = _text(product?['unit']);
+      final weightBased = product?['is_weight_based'] == true ||
+          positiveWeight != null ||
+          _unitLooksWeighted(unit);
       return AdminOrderItem(
-        id: realBarcode,
+        id: row['id'].toString(),
+        productId: _text(row['product_id']),
         productName: (product?['name'] as String?)?.trim() ??
             L10n.current.deletedProduct,
+        barcode: barcode,
         imageUrl: imageUrl == null || imageUrl.isEmpty ? null : imageUrl,
+        unit: unit,
         quantity: _toNum(row['quantity']).toInt(),
         price: _toNum(row['price_at_time']).toDouble(),
-        weightInGrams: switch (weight) {
-          final num grams => grams.toInt(),
-          final String text => int.tryParse(text),
-          _ => null,
-        },
+        // Never keep 0 grams — non-weighted lines show quantity + unit.
+        weightInGrams: positiveWeight,
+        isWeightBased: weightBased && positiveWeight != null,
       );
     }).toList();
   }
@@ -147,5 +155,16 @@ class SupabaseAdminOrdersRepository implements AdminOrdersRepository {
   static String? _text(Object? value) {
     final text = value?.toString().trim();
     return text == null || text.isEmpty ? null : text;
+  }
+
+  static bool _unitLooksWeighted(String? unit) {
+    if (unit == null || unit.isEmpty) return false;
+    final u = unit.toLowerCase();
+    return u.contains('كجم') ||
+        u.contains('كيلو') ||
+        u.contains('جرام') ||
+        u.contains('وزن') ||
+        u.contains('kg') ||
+        u.contains('gram');
   }
 }

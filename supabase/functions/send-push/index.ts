@@ -350,6 +350,28 @@ async function plan(
     const target = text(record.target_user_id);
     const type = text(record.type) || "general";
     const id = text(record.id);
+    const staffRoles = record._staff_roles;
+    if (type === "staff_alert" || Array.isArray(staffRoles)) {
+      const roles = (Array.isArray(staffRoles) ? staffRoles : ["admin", "taker"])
+        .map((r) => text(r))
+        .filter(Boolean) as PushRole[];
+      return {
+        push: {
+          title: text(record.title) || APP_NAME,
+          body: text(record.body),
+          type: "new_order",
+          routes: { admin: "/admin/orders", taker: "/admin/orders" },
+          data: {
+            notification_id: id,
+            ...(text(record.order_id) ? { order_id: text(record.order_id) } : {}),
+            stage: "item_alternatives",
+          },
+          urgent: true,
+          channel: "orders",
+        },
+        tokens: await tokensForRoles(roles.length ? roles : ["admin", "taker"]),
+      };
+    }
     const routes: Push["routes"] = type === "support_chat"
       ? { default: "/support/chat" }
       : type === "order"
@@ -514,6 +536,28 @@ async function eventFromAppInvoke(
         type: text(body.notification_type) || text(body.type) || "general",
         image_url: text(body.image_url) || null,
         target_user_id: targetUserId,
+      },
+      old_record: null,
+    };
+  }
+
+  // Staff-only alert (e.g. phone-order alternatives awaiting the taker).
+  if (trigger === "staff_alert" || trigger === "item_alternatives_staff") {
+    const title = text(body.title) || "تنبيه للإدارة";
+    const bodyText = text(body.body);
+    if (!bodyText) return null;
+    return {
+      type: "INSERT",
+      table: "app_notifications",
+      record: {
+        id: crypto.randomUUID(),
+        title,
+        body: bodyText,
+        type: "staff_alert",
+        image_url: null,
+        target_user_id: null,
+        _staff_roles: ["admin", "taker"],
+        order_id: text(body.order_id) || null,
       },
       old_record: null,
     };

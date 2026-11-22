@@ -16,6 +16,7 @@ import '../../../home/domain/entities/product.dart';
 import '../../../home/presentation/widgets/product_image.dart';
 import '../../domain/phone_order.dart';
 import '../../domain/repositories/phone_orders_repository.dart';
+import '../providers/order_alternatives_providers.dart';
 import '../providers/phone_order_providers.dart';
 import 'customer_purchase_history_dialog.dart';
 import 'new_customer_dialogs.dart';
@@ -31,6 +32,7 @@ class PhoneOrderColumn extends ConsumerWidget {
     super.key,
     this.onPlaced,
     this.splitLayout = false,
+    this.onOpenPendingAlternatives,
   });
 
   /// How long typing pauses before a search runs.
@@ -38,6 +40,9 @@ class PhoneOrderColumn extends ConsumerWidget {
 
   final ValueChanged<String>? onPlaced;
   final bool splitLayout;
+
+  /// Opens «حالة الطلب» when the taker taps the pending-alternatives banner.
+  final VoidCallback? onOpenPendingAlternatives;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -93,6 +98,41 @@ class PhoneOrderColumn extends ConsumerWidget {
           ]),
         );
 
+    Widget pendingBanner() {
+      final pending = ref.watch(pendingAlternativeOrderIdsProvider);
+      final count = pending.valueOrNull?.length ?? 0;
+      if (count == 0) return const SizedBox.shrink();
+      return Material(
+        color: Colors.deepOrange.withValues(alpha: 0.1),
+        child: InkWell(
+          onTap: onOpenPendingAlternatives,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.swap_horiz_rounded,
+                    color: Colors.deepOrange, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'بدائل بانتظار المتلقي ($count) — افتح حالة الطلب',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: Colors.deepOrange,
+                    ),
+                  ),
+                ),
+                if (onOpenPendingAlternatives != null)
+                  const Icon(Icons.chevron_left_rounded,
+                      color: Colors.deepOrange),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (!splitLayout) {
       return Material(
         color: palette.card,
@@ -101,6 +141,7 @@ class PhoneOrderColumn extends ConsumerWidget {
           children: [
             header(),
             const Divider(height: 1),
+            pendingBanner(),
             if (hasParked) const _OpenOrdersStrip(),
             Expanded(
               child: hasCustomer
@@ -160,6 +201,7 @@ class PhoneOrderColumn extends ConsumerWidget {
         children: [
           Material(color: palette.card, child: header()),
           const Divider(height: 1),
+          pendingBanner(),
           Expanded(
             // RTL: the open-orders list is the far-right column, next to
             // the products.

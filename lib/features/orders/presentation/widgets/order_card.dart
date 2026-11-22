@@ -9,6 +9,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../admin/domain/entities/order_status.dart';
+import '../../../admin/presentation/widgets/order_alternatives_panel.dart';
 import '../../../cart/domain/weight_options.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/orders_providers.dart';
@@ -448,6 +449,7 @@ class _OrderDetailsState extends ConsumerState<_OrderDetails> {
           ),
         ],
         const SizedBox(height: 14),
+        OrderAlternativesPanel(orderId: order.id),
         Text(
           l10n.orderCardItemsTitle,
           style: TextStyle(

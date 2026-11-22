@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -6,7 +7,6 @@ import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../l10n/app_localizations.dart';
-import '../../../cart/domain/weight_options.dart';
 import '../../../driver/presentation/screens/order_map_screen.dart';
 import '../../../home/presentation/widgets/product_image.dart';
 import '../../../orders/presentation/widgets/cancel_order_dialog.dart';
@@ -222,7 +222,7 @@ class OrderProductTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final weight = item.weightInGrams;
+    final barcode = item.barcode?.trim();
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(10),
@@ -250,15 +250,54 @@ class OrderProductTile extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 15, fontWeight: FontWeight.w800),
                 ),
-                if (weight != null)
+                if (item.isWeighted)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
-                      WeightOptions.phoneOrderLabel(weight),
+                      item.quantityLabel,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                         color: palette.accent,
+                      ),
+                    ),
+                  ),
+                if (barcode != null && barcode.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: barcode));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('تم نسخ الباركود'),
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Row(
+                        children: [
+                          Icon(Icons.qr_code_2_rounded,
+                              size: 14, color: palette.muted),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              barcode,
+                              textDirection: TextDirection.ltr,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w700,
+                                color: palette.muted,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.copy_rounded,
+                              size: 12, color: palette.muted),
+                        ],
                       ),
                     ),
                   ),
@@ -281,9 +320,7 @@ class OrderProductTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              weight != null
-                  ? WeightOptions.phoneOrderLabel(weight)
-                  : 'x${item.quantity}',
+              item.quantityLabel,
               style:
                   const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
             ),

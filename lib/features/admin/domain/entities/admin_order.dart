@@ -64,21 +64,61 @@ class AdminOrderItem {
     required this.productName,
     required this.quantity,
     required this.price,
+    this.productId,
+    this.barcode,
     this.imageUrl,
+    this.unit,
     this.weightInGrams,
+    this.isWeightBased = false,
   });
 
+  /// `order_items.id`.
   final String id;
+  final String? productId;
   final String productName;
+  final String? barcode;
   final String? imageUrl;
+
+  /// Product unit label from `products.unit` (قطعة / علبة / …).
+  final String? unit;
   final int quantity;
 
   /// Unit price at the time of the order (price of the chosen weight when
   /// [weightInGrams] is set).
   final double price;
 
-  /// Grams for a weight-based line; null for unit products.
+  /// Grams for a weight-based line; null / ≤0 for unit products.
   final int? weightInGrams;
+  final bool isWeightBased;
+
+  /// True only when this line has a positive gram amount (never «0 جرام»).
+  bool get isWeighted => weightInGrams != null && weightInGrams! > 0;
 
   double get total => price * quantity;
+
+  /// Badge / subtitle for preparers: weight label or «1 قطعة».
+  String get quantityLabel {
+    if (isWeighted) {
+      final grams = weightInGrams!;
+      if (grams < 1000) return '$grams جرام';
+      final kilos = grams / 1000;
+      final text = kilos == kilos.truncateToDouble()
+          ? '${kilos.toInt()}'
+          : '$kilos';
+      return '$text كجم';
+    }
+    final u = (unit ?? '').trim();
+    if (u.isEmpty || _looksLikeWeightUnit(u)) return '$quantity قطعة';
+    return '$quantity $u';
+  }
+
+  static bool _looksLikeWeightUnit(String unit) {
+    final u = unit.toLowerCase();
+    return u.contains('كجم') ||
+        u.contains('كيلو') ||
+        u.contains('جرام') ||
+        u.contains('وزن') ||
+        u.contains('kg') ||
+        u.contains('gram');
+  }
 }
