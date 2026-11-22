@@ -56,6 +56,8 @@ class StaffMember {
     required this.role,
     this.phone,
     this.username,
+    this.profileId,
+    this.isActive = true,
   });
 
   final String id;
@@ -65,6 +67,8 @@ class StaffMember {
   final String role;
   final String? phone;
   final String? username;
+  final String? profileId;
+  final bool isActive;
 }
 
 /// An account that can use the dashboard (`profiles.role` admin, warehouse,
@@ -77,6 +81,8 @@ class DashboardUser {
     this.phone,
     this.email,
     this.disabled = false,
+    this.staffId,
+    this.staffUsername,
   });
 
   final String id;
@@ -87,6 +93,10 @@ class DashboardUser {
   /// The dashboard role; for a disabled user, the role it will return to.
   final String role;
   final bool disabled;
+
+  /// Linked `staff` row used by Staff Login (may be the seeded `admin`).
+  final String? staffId;
+  final String? staffUsername;
 
   bool get isAdmin => role == DashboardUserRole.admin.value;
 
@@ -143,6 +153,7 @@ abstract class SystemAdminService {
     required String phone,
     required String username,
     required String password,
+    String? profileId,
   });
   Future<void> updateStaff({
     required String id,
@@ -151,6 +162,7 @@ abstract class SystemAdminService {
     String? username,
     String? password,
   });
+  Future<void> setStaffActive({required String id, required bool active});
   Future<void> deleteStaff(String id);
 
   Future<List<DashboardUser>> dashboardUsers();
@@ -215,6 +227,9 @@ String describeAdminError(Object error) {
   }
   if (text.contains('invalid_credentials')) {
     return 'اسم المستخدم أو كلمة المرور غير صحيحة';
+  }
+  if (text.contains('account_disabled')) {
+    return 'هذا الحساب معطّل، تواصل مع الإدارة';
   }
   return error is PostgrestException ? error.message : text;
 }
@@ -288,7 +303,7 @@ class SupabaseSystemAdminService implements SystemAdminService {
         final filter = roles ?? const ['preparer', 'driver'];
         final rows = await _client
             .from('staff')
-            .select('id, name, role, phone, username')
+            .select('id, name, role, phone, username, profile_id, is_active')
             .inFilter('role', filter)
             .order('name');
         return [
@@ -299,6 +314,8 @@ class SupabaseSystemAdminService implements SystemAdminService {
               role: '${row['role']}',
               phone: _text(row['phone']),
               username: _text(row['username']),
+              profileId: _text(row['profile_id']),
+              isActive: row['is_active'] != false,
             ),
         ];
       });
@@ -310,6 +327,7 @@ class SupabaseSystemAdminService implements SystemAdminService {
     required String phone,
     required String username,
     required String password,
+    String? profileId,
   }) =>
       _guard(() async {
         await _client.rpc('admin_add_staff', params: {
@@ -318,6 +336,7 @@ class SupabaseSystemAdminService implements SystemAdminService {
           'p_phone': phone.trim(),
           'p_username': username.trim(),
           'p_password': password,
+          'p_profile_id': profileId,
         });
       });
 
@@ -340,6 +359,15 @@ class SupabaseSystemAdminService implements SystemAdminService {
       });
 
   @override
+  Future<void> setStaffActive({required String id, required bool active}) =>
+      _guard(() async {
+        await _client.rpc('admin_set_staff_active', params: {
+          'p_id': id,
+          'p_active': active,
+        });
+      });
+
+  @override
   Future<void> deleteStaff(String id) => _guard(() async {
         await _client.rpc('admin_delete_staff', params: {'p_id': id});
       });
@@ -358,6 +386,8 @@ class SupabaseSystemAdminService implements SystemAdminService {
               email: _text(row['email']),
               role: '${row['role']}',
               disabled: row['is_disabled'] == true,
+              staffId: _text(row['staff_id']),
+              staffUsername: _text(row['staff_username']),
             ),
         ];
       });

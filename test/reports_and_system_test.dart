@@ -87,6 +87,7 @@ class _FakeService implements SystemAdminService {
     required String phone,
     required String username,
     required String password,
+    String? profileId,
   }) async {
     staffRows.add(StaffMember(
       id: '${staffRows.length + 1}',
@@ -94,6 +95,7 @@ class _FakeService implements SystemAdminService {
       role: role,
       phone: phone,
       username: username,
+      profileId: profileId,
     ));
   }
 
@@ -114,6 +116,27 @@ class _FakeService implements SystemAdminService {
       role: current.role,
       phone: phone ?? current.phone,
       username: username ?? current.username,
+      profileId: current.profileId,
+      isActive: current.isActive,
+    );
+  }
+
+  @override
+  Future<void> setStaffActive({
+    required String id,
+    required bool active,
+  }) async {
+    final index = staffRows.indexWhere((s) => s.id == id);
+    if (index < 0) return;
+    final current = staffRows[index];
+    staffRows[index] = StaffMember(
+      id: current.id,
+      name: current.name,
+      role: current.role,
+      phone: current.phone,
+      username: current.username,
+      profileId: current.profileId,
+      isActive: active,
     );
   }
 

@@ -101,6 +101,37 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
     }
   }
 
+  Future<void> _toggleActive(StaffMember member) async {
+    final enable = !member.isActive;
+    if (!enable) {
+      final ok = await confirmAdminAction(
+        context,
+        title: 'تعطيل $_single',
+        message:
+            'لن يتمكن «${member.name}» من دخول لوحة التحكم حتى يُعاد تفعيله.',
+        confirmLabel: 'تعطيل',
+      );
+      if (!ok || !mounted) return;
+    }
+    try {
+      await ref.read(systemAdminServiceProvider).setStaffActive(
+            id: member.id,
+            active: enable,
+          );
+      ref.invalidate(adminStaffMembersProvider);
+      if (mounted) {
+        showAdminSnack(
+          context,
+          enable ? 'تم تفعيل $_single' : 'تم تعطيل $_single',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        showAdminSnack(context, describeAdminError(error), error: true);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -165,7 +196,7 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                   key: const Key('staff-list'),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 420,
-                    mainAxisExtent: 148,
+                    mainAxisExtent: 160,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
                   ),
@@ -186,13 +217,17 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                           Row(
                             children: [
                               CircleAvatar(
-                                backgroundColor:
-                                    palette.accent.withValues(alpha: 0.12),
+                                backgroundColor: (member.isActive
+                                        ? palette.accent
+                                        : Colors.grey)
+                                    .withValues(alpha: 0.12),
                                 child: Icon(
                                   _isPreparer
                                       ? Icons.inventory_2_rounded
                                       : Icons.motorcycle_rounded,
-                                  color: palette.accent,
+                                  color: member.isActive
+                                      ? palette.accent
+                                      : Colors.grey,
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -203,9 +238,12 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                                     Text(member.name,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 16,
-                                            fontWeight: FontWeight.w900)),
+                                            fontWeight: FontWeight.w900,
+                                            color: member.isActive
+                                                ? null
+                                                : palette.muted)),
                                     Text(member.phone ?? 'بدون رقم',
                                         textDirection: TextDirection.ltr,
                                         style: TextStyle(
@@ -219,6 +257,20 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                                   ],
                                 ),
                               ),
+                              if (!member.isActive)
+                                Container(
+                                  key: Key('staff-disabled-${member.id}'),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
+                                  child: const Text('معطّل',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold)),
+                                ),
                             ],
                           ),
                           const Spacer(),
@@ -241,6 +293,20 @@ class _AdminStaffSectionState extends ConsumerState<AdminStaffSection> {
                                 ),
                               const Spacer(),
                               if (canManage) ...[
+                                IconButton(
+                                  key: Key('staff-toggle-${member.id}'),
+                                  tooltip:
+                                      member.isActive ? 'تعطيل' : 'تفعيل',
+                                  onPressed: () => _toggleActive(member),
+                                  icon: Icon(
+                                    member.isActive
+                                        ? Icons.block_rounded
+                                        : Icons.check_circle_outline,
+                                    color: member.isActive
+                                        ? Colors.red
+                                        : Colors.green,
+                                  ),
+                                ),
                                 IconButton(
                                   key: Key('staff-edit-${member.id}'),
                                   tooltip: 'تعديل',

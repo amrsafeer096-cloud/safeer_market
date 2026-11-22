@@ -8,6 +8,7 @@ import '../../../auth/domain/egyptian_phone.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/system_admin_service.dart';
 import '../../domain/admin_permissions.dart';
+import '../../domain/repositories/admin_orders_repository.dart';
 import '../providers/system_admin_providers.dart';
 import '../widgets/admin_section_widgets.dart';
 
@@ -19,6 +20,60 @@ String _staffRoleForDashboard(String profileRole) {
     DashboardUserRole.warehouse => 'preparer',
     null => 'taker',
   };
+}
+
+Future<void> _upsertUserStaffCredentials(
+  SystemAdminService service, {
+  required DashboardUser user,
+  required _UserChange result,
+}) async {
+  final phone = result.phone;
+  final username = result.username;
+  if (phone == null || username == null) return;
+
+  String? staffId = user.staffId;
+  if (staffId == null) {
+    final staff = await service.staff(roles: const [
+      'admin',
+      'taker',
+      'preparer',
+    ]);
+    final match = staff.where((s) {
+      if (s.profileId == user.id) return true;
+      if (user.staffUsername != null && s.username == user.staffUsername) {
+        return true;
+      }
+      if (user.isAdmin && s.username == 'admin') return true;
+      if (s.username == username || s.phone == phone) return true;
+      return false;
+    }).toList();
+    if (match.isNotEmpty) staffId = match.first.id;
+  }
+
+  if (staffId != null) {
+    await service.updateStaff(
+      id: staffId,
+      name: result.name,
+      phone: phone,
+      username: username,
+      password: result.password,
+    );
+    return;
+  }
+
+  if (result.password == null) {
+    throw const AdminFailure(
+      'أدخل كلمة مرور لإنشاء بيانات دخول لوحة التحكم',
+    );
+  }
+  await service.addStaff(
+    name: (result.name?.isNotEmpty ?? false) ? result.name! : user.title,
+    role: _staffRoleForDashboard(result.role),
+    phone: phone,
+    username: username,
+    password: result.password!,
+    profileId: user.id,
+  );
 }
 
 /// «المستخدمين»: the accounts that use the dashboard. Adding one gives an
@@ -93,6 +148,7 @@ class AdminUsersSection extends ConsumerWidget {
                         phone: result.phone!,
                         username: result.username!,
                         password: result.password!,
+                        profileId: result.userId,
                       );
                     },
                     'تمت إضافة المستخدم',
@@ -120,8 +176,10 @@ class AdminUsersSection extends ConsumerWidget {
                   itemBuilder: (context, index) {
                     final user = list[index];
                     final self = user.id == myId;
-                    // Only administrators touch administrators.
-                    final locked = self || (user.isAdmin && !isAdmin);
+                    // Non-admins cannot edit other admins; everyone can edit self.
+                    final canEdit = self || isAdmin || !user.isAdmin;
+                    // Never allow disabling yourself.
+                    final canDisable = !self && (isAdmin || !user.isAdmin);
                     final role = DashboardUserRole.fromValue(user.role);
                     return Container(
                       key: Key('user-${user.id}'),
@@ -162,6 +220,8 @@ class AdminUsersSection extends ConsumerWidget {
                                 Text(
                                   [
                                     role?.label ?? user.role,
+                                    if (user.staffUsername != null)
+                                      '@${user.staffUsername}',
                                     if (user.phone != null) user.phone!,
                                     if (user.email != null) user.email!,
                                   ].join(' • '),
@@ -185,7 +245,7 @@ class AdminUsersSection extends ConsumerWidget {
                                   style:
                                       TextStyle(fontWeight: FontWeight.bold)),
                             ),
-                          if (!locked) ...[
+                          if (canEdit)
                             IconButton(
                               key: Key('user-edit-${user.id}'),
                               tooltip: 'تعديل',
@@ -196,6 +256,7 @@ class AdminUsersSection extends ConsumerWidget {
                                   builder: (_) => _UserDialog(
                                     existing: user,
                                     allowAdminRole: isAdmin,
+                                    lockRole: self,
                                   ),
                                 );
                                 if (result == null || !context.mounted) return;
@@ -203,50 +264,27 @@ class AdminUsersSection extends ConsumerWidget {
                                   context,
                                   ref,
                                   () async {
-                                    await service.setUserRole(
-                                      userId: user.id,
-                                      role: result.role,
-                                      fullName: result.name,
-                                      disabled: user.disabled,
-                                    );
-                                    // Reset / set dashboard login credentials.
-                                    final staff = await service.staff(roles: [
-                                      'admin',
-                                      'taker',
-                                      'preparer',
-                                    ]);
-                                    final match = staff
-                                        .where((s) =>
-                                            s.username == result.username ||
-                                            s.phone == result.phone)
-                                        .toList();
-                                    if (match.isNotEmpty) {
-                                      await service.updateStaff(
-                                        id: match.first.id,
-                                        name: result.name,
-                                        phone: result.phone,
-                                        username: result.username,
-                                        password: result.password,
-                                      );
-                                    } else if (result.phone != null &&
-                                        result.username != null &&
-                                        result.password != null) {
-                                      await service.addStaff(
-                                        name: (result.name?.isNotEmpty ?? false)
-                                            ? result.name!
-                                            : user.title,
-                                        role: _staffRoleForDashboard(
-                                            result.role),
-                                        phone: result.phone!,
-                                        username: result.username!,
-                                        password: result.password!,
+                                    // Self: credentials only (RPC forbids
+                                    // changing your own profile role).
+                                    if (!self) {
+                                      await service.setUserRole(
+                                        userId: user.id,
+                                        role: result.role,
+                                        fullName: result.name,
+                                        disabled: user.disabled,
                                       );
                                     }
+                                    await _upsertUserStaffCredentials(
+                                      service,
+                                      user: user,
+                                      result: result,
+                                    );
                                   },
                                   'تم حفظ التعديل',
                                 );
                               },
                             ),
+                          if (canDisable)
                             IconButton(
                               key: Key('user-toggle-${user.id}'),
                               tooltip: user.disabled ? 'تفعيل' : 'تعطيل',
@@ -282,7 +320,6 @@ class AdminUsersSection extends ConsumerWidget {
                                 );
                               },
                             ),
-                          ],
                         ],
                       ),
                     );
@@ -317,10 +354,17 @@ class _UserChange {
 
 /// Add (find an account, pick a role) or edit (name, role) a dashboard user.
 class _UserDialog extends ConsumerStatefulWidget {
-  const _UserDialog({this.existing, required this.allowAdminRole});
+  const _UserDialog({
+    this.existing,
+    required this.allowAdminRole,
+    this.lockRole = false,
+  });
 
   final DashboardUser? existing;
   final bool allowAdminRole;
+
+  /// When editing yourself, role stays fixed (RPC forbids self role changes).
+  final bool lockRole;
 
   @override
   ConsumerState<_UserDialog> createState() => _UserDialogState();
@@ -331,7 +375,8 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
   final _search = TextEditingController();
   late final _name = TextEditingController(text: widget.existing?.name ?? '');
   late final _phone = TextEditingController(text: widget.existing?.phone ?? '');
-  final _username = TextEditingController();
+  late final _username =
+      TextEditingController(text: widget.existing?.staffUsername ?? '');
   final _password = TextEditingController();
   var _obscure = true;
   Timer? _debounce;
@@ -550,13 +595,20 @@ class _UserDialogState extends ConsumerState<_UserDialog> {
                 DropdownButtonFormField<String>(
                   key: const Key('user-role'),
                   initialValue: _role,
-                  decoration: const InputDecoration(labelText: 'الدور'),
+                  decoration: InputDecoration(
+                    labelText: 'الدور',
+                    helperText: widget.lockRole
+                        ? 'لا يمكن تغيير دور حسابك أنت'
+                        : null,
+                  ),
                   items: [
                     for (final role in roles)
                       DropdownMenuItem(
                           value: role.value, child: Text(role.label)),
                   ],
-                  onChanged: (v) => setState(() => _role = v ?? _role),
+                  onChanged: widget.lockRole
+                      ? null
+                      : (v) => setState(() => _role = v ?? _role),
                 ),
               ],
             ),

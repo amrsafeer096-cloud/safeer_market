@@ -81,7 +81,12 @@ class StaffSessionController extends StateNotifier<StaffSession?> {
       unawaited(_syncPushRole(session));
       return session;
     } on PostgrestException catch (error) {
-      final text = '${error.message} ${error.details ?? ''}';
+      final text = '${error.message} ${error.details ?? ''} ${error.code ?? ''}';
+      if (text.contains('account_disabled')) {
+        throw const StaffLoginFailure(
+          'هذا الحساب معطّل، تواصل مع الإدارة',
+        );
+      }
       if (text.contains('invalid_credentials')) {
         throw const StaffLoginFailure('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
