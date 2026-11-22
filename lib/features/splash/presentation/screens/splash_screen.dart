@@ -32,13 +32,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   Future<void> _leave() async {
-    // The saved session's role loads during the animation so drivers land
-    // straight on their dashboard instead of flashing the store first.
+    // Wait briefly for role resolution, then always open the storefront.
+    // Staff reach the dashboard only via «لوحة تحكم الإدارة».
     final role = ref
         .read(userRoleProvider.future)
         .timeout(const Duration(seconds: 5))
         .then<UserRole?>((role) => role)
-        // The router redirect still catches a late answer.
         .catchError((_) => null);
     await Future<void>.delayed(SplashScreen.duration);
     final resolved = await role;

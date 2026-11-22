@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/routing/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../providers/staff_session_providers.dart';
@@ -178,7 +180,7 @@ class _StaffLoginScreenState extends ConsumerState<StaffLoginScreen> {
                         ),
                         const SizedBox(height: 8),
                         TextButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
+                          onPressed: () => context.go(AppRoutes.home),
                           child: const Text('العودة للمتجر'),
                         ),
                       ],

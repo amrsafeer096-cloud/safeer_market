@@ -362,18 +362,9 @@ CustomTransitionPage<void> _smoothPage(GoRouterState state, Widget child) {
   );
 }
 
-// ==========================================
-// اللوجيك الجديد: السماح للموظفين بالتجول بحرية
-// ==========================================
-String homeRouteFor(UserRole? role) {
-  if (role == UserRole.driver ||
-      role == UserRole.warehouse ||
-      role == UserRole.admin ||
-      role == UserRole.cashier) {
-    return AppRoutes.adminOrders;
-  }
-  return AppRoutes.home;
-}
+/// Post-splash / post-onboarding destination. Always the storefront — staff
+/// open the dashboard explicitly from «المزيد» → «لوحة تحكم الإدارة».
+String homeRouteFor(UserRole? role) => AppRoutes.home;
 
 /// A first launch goes through onboarding (signing in from there is allowed);
 /// once it is done or skipped, onboarding hands over to the user's home —
@@ -401,14 +392,10 @@ String? roleRedirect(String location, UserRole? role) {
       role == UserRole.warehouse ||
       role == UserRole.admin ||
       role == UserRole.cashier;
-  final isStaffArea = location.startsWith(AppRoutes.adminOrders);
+  final isStaffArea = location.startsWith('/admin');
 
-  if (isStaffRole) {
-    // يمكن للموظف تصفح الداشبورد والعودة للمتجر متى شاء
-    return null;
-  } else {
-    // العميل العادي يُمنع من دخول الداشبورد
-    if (isStaffArea) return AppRoutes.home;
-    return null;
-  }
+  // Customers cannot open the admin area. Staff may visit the store freely
+  // and only reach `/admin/...` when they choose to (staff login gate).
+  if (!isStaffRole && isStaffArea) return AppRoutes.home;
+  return null;
 }
