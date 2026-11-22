@@ -18,7 +18,9 @@ import '../../../../core/providers/settings_providers.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/widgets/resizable_columns.dart';
 import '../../../../l10n/app_localizations.dart';
+import '../../../../core/widgets/barcode_scan_icon.dart';
 import '../../../home/presentation/widgets/product_image.dart';
+import '../../../home/presentation/widgets/product_thumb.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
 import '../../domain/order_prep_timer.dart';
@@ -1944,14 +1946,7 @@ class _PrepItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: 50,
-                  height: 50,
-                  child: ProductImage(imageUrl: item.imageUrl, iconSize: 20),
-                ),
-              ),
+              ProductThumb(imageUrl: item.imageUrl, size: 50, iconSize: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1997,8 +1992,7 @@ class _PrepItemCard extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.qr_code_2_rounded,
-                                  size: 15, color: palette.muted),
+                              BarcodeIcon(size: 15, color: palette.muted),
                               const SizedBox(width: 4),
                               Flexible(
                                 child: Text(

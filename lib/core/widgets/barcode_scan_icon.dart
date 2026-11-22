@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// 1D product-barcode glyph (vertical bars), for scan actions that used to
-/// show a QR icon.
+/// Alias for the linear supermarket barcode glyph.
+typedef BarcodeIcon = BarcodeScanIcon;
+
+/// 1D product-barcode glyph (vertical bars), for scan actions and barcode
+/// labels that used to show a QR icon.
 class BarcodeScanIcon extends StatelessWidget {
   const BarcodeScanIcon({
     super.key,

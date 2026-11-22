@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
-import '../../../home/presentation/widgets/product_image.dart';
+import '../../../../core/widgets/barcode_scan_icon.dart';
+import '../../../home/presentation/widgets/product_thumb.dart';
 import '../../data/order_alternatives_service.dart';
 import '../../domain/order_item_alternative.dart';
 import '../../../orders/presentation/providers/orders_providers.dart';
@@ -248,14 +249,8 @@ class _SuggestionTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 44,
-                height: 44,
-                child: ProductImage(imageUrl: product.imageUrl, iconSize: 18),
-              ),
-            ),
+            ProductThumb(
+                imageUrl: product.imageUrl, size: 44, iconSize: 18),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -269,15 +264,23 @@ class _SuggestionTile extends StatelessWidget {
                         fontWeight: FontWeight.w800, fontSize: 13),
                   ),
                   if (product.barcode != null && product.barcode!.isNotEmpty)
-                    Text(
-                      product.barcode!,
-                      textDirection: TextDirection.ltr,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: palette.muted,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        BarcodeIcon(size: 12, color: palette.muted),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            product.barcode!,
+                            textDirection: TextDirection.ltr,
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              color: palette.muted,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   Text(
                     AppCurrency.of(product.price),

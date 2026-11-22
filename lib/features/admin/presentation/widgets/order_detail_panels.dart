@@ -6,9 +6,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
+import '../../../../core/widgets/barcode_scan_icon.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../driver/presentation/screens/order_map_screen.dart';
-import '../../../home/presentation/widgets/product_image.dart';
+import '../../../home/presentation/widgets/product_thumb.dart';
 import '../../../orders/presentation/widgets/cancel_order_dialog.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
@@ -232,14 +233,7 @@ class OrderProductTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              width: 46,
-              height: 46,
-              child: ProductImage(imageUrl: item.imageUrl, iconSize: 20),
-            ),
-          ),
+          ProductThumb(imageUrl: item.imageUrl, size: 46, iconSize: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -279,8 +273,7 @@ class OrderProductTile extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                       child: Row(
                         children: [
-                          Icon(Icons.qr_code_2_rounded,
-                              size: 14, color: palette.muted),
+                          BarcodeIcon(size: 14, color: palette.muted),
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(

@@ -5,7 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
-import '../../../home/presentation/widgets/product_image.dart';
+import '../../../../core/widgets/barcode_scan_icon.dart';
+import '../../../home/presentation/widgets/product_thumb.dart';
 import '../../../search/presentation/providers/barcode_scanner_provider.dart';
 import '../../data/order_alternatives_service.dart';
 import '../../domain/entities/admin_order.dart';
@@ -214,7 +215,7 @@ class _SendAlternativesSheetState extends ConsumerState<_SendAlternativesSheet> 
               const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _scan,
-                icon: const Icon(Icons.qr_code_scanner_rounded),
+                icon: const BarcodeIcon(size: 20, color: Colors.white),
                 label: const Text('مسح'),
               ),
             ],
@@ -236,11 +237,8 @@ class _SendAlternativesSheetState extends ConsumerState<_SendAlternativesSheet> 
                   final p = _matches[index];
                   return ListTile(
                     dense: true,
-                    leading: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: ProductImage(imageUrl: p.imageUrl, iconSize: 18),
-                    ),
+                    leading: ProductThumb(
+                        imageUrl: p.imageUrl, size: 40, iconSize: 16),
                     title: Text(p.name,
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(
@@ -269,11 +267,8 @@ class _SendAlternativesSheetState extends ConsumerState<_SendAlternativesSheet> 
             for (final p in _picked)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: ProductImage(imageUrl: p.imageUrl, iconSize: 18),
-                ),
+                leading: ProductThumb(
+                    imageUrl: p.imageUrl, size: 44, iconSize: 18),
                 title: Text(p.name,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
