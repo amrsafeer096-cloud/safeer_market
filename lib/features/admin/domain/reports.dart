@@ -1,7 +1,8 @@
 import 'entities/order_status.dart';
 import 'order_prep_timer.dart';
+import 'order_rating.dart';
 
-/// The seven reports of «التقارير واليومية».
+/// The reports of «التقارير واليومية».
 enum ReportKind {
   deliveryOrders('طلبات التوصيل'),
   deliveryItems('أصناف طلبات التوصيل'),
@@ -9,7 +10,8 @@ enum ReportKind {
   preparers('إنتاجية المحضرين'),
   drivers('إنتاجية الطيارين'),
   followUp('متابعة الطلبات'),
-  customers('طلبات العملاء');
+  customers('طلبات العملاء'),
+  customerRatings('تقييمات العملاء');
 
   const ReportKind(this.label);
 
@@ -42,6 +44,7 @@ enum ReportKind {
             ReportFilter.receiver,
             ReportFilter.status,
           },
+        customerRatings => {ReportFilter.date},
       };
 }
 
@@ -234,7 +237,59 @@ ReportTable buildReport(
     ReportKind.drivers => _drivers(orders, fmt),
     ReportKind.followUp => _followUp(orders, clock),
     ReportKind.customers => _customers(orders, fmt),
+    // Built via [buildCustomerRatingsReport] from order_ratings rows.
+    ReportKind.customerRatings => const ReportTable(
+        title: 'تقييمات العملاء',
+        summary: [],
+        columns: [],
+        rows: [],
+      ),
   };
+}
+
+/// Summary + recent ratings table for «تقييمات العملاء».
+ReportTable buildCustomerRatingsReport(
+  List<OrderRating> ratings, {
+  bool lowOnly = false,
+}) {
+  final summary = OrderRatingsSummary.from(ratings);
+  final rows = lowOnly ? ratings.where((r) => r.isLow).toList() : ratings;
+
+  String stars(int n) => '$n ★';
+  String avg(double v) =>
+      ratings.isEmpty ? '—' : '${v.toStringAsFixed(2)} / 5';
+
+  return ReportTable(
+    title: ReportKind.customerRatings.label,
+    summary: [
+      ReportStat('متوسط خدمة التوصيل', avg(summary.avgDelivery)),
+      ReportStat('متوسط جودة المنتجات', avg(summary.avgProduct)),
+      ReportStat('عدد التقييمات', '${summary.total}'),
+      if (lowOnly)
+        ReportStat('تقييمات منخفضة', '${rows.length}'),
+    ],
+    columns: const [
+      ReportColumn('رقم الطلب', width: 90),
+      ReportColumn('العميل', width: 140),
+      ReportColumn('الطيار', width: 120),
+      ReportColumn('التوصيل', width: 80),
+      ReportColumn('المنتجات', width: 80),
+      ReportColumn('التعليق', width: 260),
+      ReportColumn('التاريخ', width: 140),
+    ],
+    rows: [
+      for (final r in rows)
+        [
+          r.shortOrderId,
+          r.customerName ?? '—',
+          r.driverName ?? '—',
+          stars(r.deliveryRating),
+          stars(r.productRating),
+          r.comment ?? '—',
+          _dateTime(r.createdAt),
+        ],
+    ],
+  );
 }
 
 ReportTable _deliveryOrders(List<Map<String, dynamic>> orders, Money fmt) {

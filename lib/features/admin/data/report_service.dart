@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../domain/order_rating.dart';
 import '../domain/reports.dart';
 import 'order_search_service.dart';
 
@@ -11,6 +12,9 @@ abstract class ReportDataSource {
 
   /// `order_items` rows (with their product) of [orderIds].
   Future<List<Map<String, dynamic>>> orderItems(List<String> orderIds);
+
+  /// Customer ratings in the date window, newest first (joined to orders).
+  Future<List<OrderRating>> orderRatings(ReportFilters filters);
 }
 
 class SupabaseReportDataSource implements ReportDataSource {
@@ -64,6 +68,24 @@ class SupabaseReportDataSource implements ReportDataSource {
     }
     return result;
   }
+
+  @override
+  Future<List<OrderRating>> orderRatings(ReportFilters filters) async {
+    final rows = await _client
+        .from('order_ratings')
+        .select(
+          'id, order_id, delivery_rating, product_rating, comment, created_at, '
+          'orders(id, customer_name, driver_name)',
+        )
+        .gte('created_at', filters.start.toUtc().toIso8601String())
+        .lt('created_at', filters.endExclusive.toUtc().toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(maxOrders);
+    return [
+      for (final row in List<Map<String, dynamic>>.from(rows))
+        if (OrderRating.fromRow(row) case final rating?) rating,
+    ];
+  }
 }
 
 /// Runs [kind] over [filters]: reads the orders (and, for the items report,
@@ -74,7 +96,13 @@ Future<ReportTable> generateReport(
   ReportFilters filters, {
   Money? money,
   DateTime? now,
+  bool lowRatingsOnly = false,
 }) async {
+  if (kind == ReportKind.customerRatings) {
+    final ratings =
+        await source.orderRatings(filters.limitedTo(kind.filters));
+    return buildCustomerRatingsReport(ratings, lowOnly: lowRatingsOnly);
+  }
   final orders = await source.orders(filters.limitedTo(kind.filters));
   final items = kind == ReportKind.deliveryItems
       ? await source.orderItems([for (final o in orders) '${o['id']}'])

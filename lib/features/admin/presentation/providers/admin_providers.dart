@@ -5,6 +5,7 @@ import '../../../orders/presentation/providers/orders_providers.dart';
 import '../../data/repositories/supabase_admin_orders_repository.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
+import '../../domain/order_rating.dart';
 import '../../domain/repositories/admin_orders_repository.dart';
 
 final adminOrdersRepositoryProvider = Provider<AdminOrdersRepository>((ref) {
@@ -23,6 +24,22 @@ final adminOrderProvider =
 final adminOrderItemsProvider = FutureProvider.autoDispose
     .family<List<AdminOrderItem>, String>((ref, orderId) {
   return ref.watch(adminOrdersRepositoryProvider).fetchOrderItems(orderId);
+});
+
+/// Customer rating for one order, if submitted. Null when not rated yet.
+final adminOrderRatingProvider =
+    FutureProvider.autoDispose.family<OrderRating?, String>((ref, orderId) async {
+  final client = ref.watch(supabaseClientProvider);
+  final rows = await client
+      .from('order_ratings')
+      .select(
+        'id, order_id, delivery_rating, product_rating, comment, created_at',
+      )
+      .eq('order_id', orderId)
+      .limit(1);
+  final list = List<Map<String, dynamic>>.from(rows);
+  if (list.isEmpty) return null;
+  return OrderRating.fromRow(list.first);
 });
 
 /// Null on the list screen's "all" filter.

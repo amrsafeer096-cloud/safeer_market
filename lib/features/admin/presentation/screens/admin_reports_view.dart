@@ -18,6 +18,7 @@ const _reportIcons = {
   ReportKind.drivers: Icons.motorcycle_rounded,
   ReportKind.followUp: Icons.track_changes_rounded,
   ReportKind.customers: Icons.people_alt_rounded,
+  ReportKind.customerRatings: Icons.star_rate_rounded,
 };
 
 const _statusChoices = {
@@ -50,6 +51,9 @@ class _AdminReportsViewState extends ConsumerState<AdminReportsView> {
   bool _loading = false;
   Object? _error;
 
+  /// Ratings report: only show delivery/product scores ≤ 3.
+  bool _lowRatingsOnly = false;
+
   /// Bumped when the sub-menu changes so the dropdowns start fresh.
   int _generation = 0;
 
@@ -65,6 +69,7 @@ class _AdminReportsViewState extends ConsumerState<AdminReportsView> {
         _selected = index;
         _table = null;
         _error = null;
+        _lowRatingsOnly = false;
         _generation++;
       });
 
@@ -81,6 +86,7 @@ class _AdminReportsViewState extends ConsumerState<AdminReportsView> {
         kind,
         filters,
         money: AppCurrency.of,
+        lowRatingsOnly: _lowRatingsOnly,
       );
       if (!mounted || kind != _kind) return;
       setState(() {
@@ -244,6 +250,27 @@ class _AdminReportsViewState extends ConsumerState<AdminReportsView> {
               onChanged: (v) => setState(() => _filters = v == null
                   ? _filters.copyWith(clearStatus: true)
                   : _filters.copyWith(status: v)),
+            ),
+          if (_kind == ReportKind.customerRatings)
+            FilterChip(
+              key: const Key('report-low-ratings'),
+              avatar: Icon(
+                Icons.warning_amber_rounded,
+                size: 18,
+                color: _lowRatingsOnly ? Colors.white : Colors.orange.shade800,
+              ),
+              label: const Text('تقييمات منخفضة (≤ 3)'),
+              selected: _lowRatingsOnly,
+              selectedColor: Colors.orange.shade700,
+              checkmarkColor: Colors.white,
+              labelStyle: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: _lowRatingsOnly ? Colors.white : null,
+              ),
+              onSelected: (selected) {
+                setState(() => _lowRatingsOnly = selected);
+                if (_table != null) _run();
+              },
             ),
           SizedBox(
             height: 44,

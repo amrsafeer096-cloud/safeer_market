@@ -7,6 +7,7 @@ import 'package:safeer_market/core/theme/app_theme.dart';
 import 'package:safeer_market/features/admin/data/report_service.dart';
 import 'package:safeer_market/features/admin/data/system_admin_service.dart';
 import 'package:safeer_market/features/admin/domain/admin_permissions.dart';
+import 'package:safeer_market/features/admin/domain/order_rating.dart';
 import 'package:safeer_market/features/admin/domain/reports.dart';
 import 'package:safeer_market/features/admin/presentation/providers/phone_order_providers.dart';
 import 'package:safeer_market/features/admin/presentation/providers/system_admin_providers.dart';
@@ -19,10 +20,11 @@ import 'package:safeer_market/l10n/app_localizations.dart';
 // ------------------------------------------------------------------ fakes
 
 class _FakeReports implements ReportDataSource {
-  _FakeReports(this.orderRows);
+  _FakeReports(this.orderRows, {this.ratingRows = const []});
 
   final List<Map<String, dynamic>> orderRows;
   final List<Map<String, dynamic>> itemRows = const [];
+  final List<OrderRating> ratingRows;
   final requested = <ReportFilters>[];
 
   @override
@@ -34,6 +36,12 @@ class _FakeReports implements ReportDataSource {
   @override
   Future<List<Map<String, dynamic>>> orderItems(List<String> orderIds) async =>
       itemRows;
+
+  @override
+  Future<List<OrderRating>> orderRatings(ReportFilters filters) async {
+    requested.add(filters);
+    return ratingRows;
+  }
 }
 
 class _FakeService implements SystemAdminService {
@@ -285,7 +293,7 @@ void main() {
         expect(kind.filters, contains(ReportFilter.date));
         expect(kind.filters, contains(ReportFilter.status));
       }
-      expect(ReportKind.values.length, 7);
+      expect(ReportKind.values.length, 8);
     });
   });
 

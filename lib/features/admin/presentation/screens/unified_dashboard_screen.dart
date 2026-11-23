@@ -33,6 +33,7 @@ import '../../../support/domain/entities/support_chat.dart';
 import '../../../support/presentation/providers/support_providers.dart';
 import '../providers/phone_order_providers.dart';
 import '../widgets/order_alternatives_panel.dart';
+import '../widgets/customer_order_rating_card.dart';
 import '../widgets/order_detail_panels.dart';
 import '../widgets/order_status_widgets.dart';
 import '../widgets/phone_order_column.dart';
@@ -1346,6 +1347,7 @@ class _OrderDetailsView extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           infoCard,
+          CustomerOrderRatingCard(orderId: orderId),
           const SizedBox(height: 16),
           LayoutBuilder(builder: (context, constraints) {
             if (constraints.maxWidth >= 640) {
