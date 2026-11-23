@@ -1435,7 +1435,7 @@ class _OrderDetailsView extends ConsumerWidget {
             desc: l10n.adminOrderAwaitingPreparer,
             icon: Icons.play_circle_fill,
             color: Colors.orange,
-            onTap: () => _showPreparerDialog(context, order['id']),
+            onTap: () => _showPreparerDialog(context, ref, order['id']),
           ),
         if (status == OrderStatus.preparing.value) ...[
           Text(l10n.adminPreparerName('${order['preparer_name']}'),
@@ -1571,7 +1571,11 @@ class _OrderDetailsView extends ConsumerWidget {
     );
   }
 
-  void _showPreparerDialog(BuildContext context, String orderId) {
+  void _showPreparerDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String orderId,
+  ) {
     final l10n = AppLocalizations.of(context)!;
     showDialog(
       context: context,
