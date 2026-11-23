@@ -23,6 +23,10 @@ class StaffSession {
   bool get isDriver => role == 'driver';
 
   /// Main top tabs this role may open.
+  ///
+  /// Values match `AdminMenu` in `unified_dashboard_screen.dart`:
+  /// receive=0, status=1, products=2, staff=3, reports=4, magazines=5,
+  /// support=6, notifications=7, pendingSubscriptions=8, search=9.
   List<int> get allowedTabs {
     if (isAdmin) {
       return const [0, 1, 9, 4, 3]; // receive, status, search, reports, system
@@ -37,8 +41,19 @@ class StaffSession {
     return const [1]; // status only
   }
 
-  /// Secondary sidebar entries (products, magazines, …) — admin only.
+  /// Secondary sidebar entries — must match `AdminMenu.secondary`
+  /// (products=2, magazines=5, support=6, notifications=7, pending=8).
+  static const systemSidebarMenus = <int>[2, 5, 6, 7, 8];
+
   bool get canOpenSystemMenu => isAdmin;
+
+  /// Top tabs plus (for admin) the system sidebar sections.
+  /// Without this, tapping sidebar items was immediately reset because
+  /// only [allowedTabs] were treated as valid.
+  bool canOpenMenu(int menu) {
+    if (allowedTabs.contains(menu)) return true;
+    return canOpenSystemMenu && systemSidebarMenus.contains(menu);
+  }
 
   /// Delivery-stage orders only (ready / out for delivery).
   bool get deliveryOrdersOnly => isDriver;

@@ -44,11 +44,13 @@ import '../providers/settings_providers.dart';
 // ==========================================
 // استيراد الداشبورد المركزي الذكي الجديد فقط
 // ==========================================
+import '../../features/admin/presentation/providers/staff_session_providers.dart';
 import '../../features/admin/presentation/screens/unified_dashboard_screen.dart';
 import 'app_routes.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final role = ValueNotifier<UserRole?>(null);
+  final staffLoggedIn = ValueNotifier<bool>(false);
   // Onboarding is only for a first launch with no session: a signed-in user
   // (e.g. back from the web Google OAuth redirect) goes straight in.
   bool needsOnboarding() =>
@@ -61,6 +63,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       fireImmediately: true,
     )
     ..listen(
+      staffSessionProvider,
+      (_, next) => staffLoggedIn.value = next != null,
+      fireImmediately: true,
+    )
+    ..listen(
       isFirstLaunchProvider,
       (_, __) => firstLaunch.value = needsOnboarding(),
     )
@@ -69,18 +76,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       (_, __) => firstLaunch.value = needsOnboarding(),
     )
     ..onDispose(role.dispose)
-    ..onDispose(firstLaunch.dispose);
+    ..onDispose(firstLaunch.dispose)
+    ..onDispose(staffLoggedIn.dispose);
 
   return GoRouter(
     initialLocation: AppRoutes.splash,
-    refreshListenable: Listenable.merge([role, firstLaunch]),
+    refreshListenable: Listenable.merge([role, firstLaunch, staffLoggedIn]),
     redirect: (context, state) =>
         onboardingRedirect(
           state.matchedLocation,
           firstLaunch: firstLaunch.value,
           role: role.value,
         ) ??
-        roleRedirect(state.matchedLocation, role.value),
+        roleRedirect(
+          state.matchedLocation,
+          role.value,
+          hasStaffSession: staffLoggedIn.value,
+        ),
     routes: [
       GoRoute(
         path: AppRoutes.onboarding,
@@ -381,7 +393,11 @@ String? onboardingRedirect(
   return location == AppRoutes.onboarding ? homeRouteFor(role) : null;
 }
 
-String? roleRedirect(String location, UserRole? role) {
+String? roleRedirect(
+  String location,
+  UserRole? role, {
+  bool hasStaffSession = false,
+}) {
   if (location == AppRoutes.splash || location == AppRoutes.auth) return null;
   if (location.startsWith(AppRoutes.cashierScan) &&
       !(role?.canRedeemLoyalty ?? false)) {
@@ -394,8 +410,9 @@ String? roleRedirect(String location, UserRole? role) {
       role == UserRole.cashier;
   final isStaffArea = location.startsWith('/admin');
 
-  // Customers cannot open the admin area. Staff may visit the store freely
-  // and only reach `/admin/...` when they choose to (staff login gate).
-  if (!isStaffRole && isStaffArea) return AppRoutes.home;
+  // Customers cannot open the admin area. Profile staff roles OR an active
+  // dashboard staff session may stay on `/admin/...` (staff login gate).
+  // Never auto-send staff/admins to the dashboard — they open it themselves.
+  if (!isStaffRole && !hasStaffSession && isStaffArea) return AppRoutes.home;
   return null;
 }

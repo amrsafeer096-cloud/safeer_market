@@ -444,9 +444,10 @@ class _UnifiedDashboardScreenState
     final bool showSystemSidebar = staffSession.isAdmin;
     final palette = context.palette;
 
-    // Keep the active tab inside what this staff role may open.
+    // Keep the active tab inside what this staff role may open (top tabs
+    // and, for admin, the system sidebar: products / magazines / …).
     final allowed = staffSession.allowedTabs;
-    if (!allowed.contains(activeMenu)) {
+    if (!staffSession.canOpenMenu(activeMenu)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(adminMenuProvider.notifier).state = allowed.first;

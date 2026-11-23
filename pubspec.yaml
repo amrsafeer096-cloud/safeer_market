@@ -66,8 +66,16 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  # Keep this list explicit and small. Do NOT add scraped product dumps
+  # (talabat_images/, seoudi_images/, amazon_images/, …) — those folders
+  # are multi‑hundred‑MB / GB and must never ship in the APK.
   assets:
-    - assets/images/
+    - assets/images/logo_source.png
+    - assets/images/logo.png
+    - assets/images/logo1.png
+    - assets/images/app_icon.png
+    - assets/images/motorcycle.png
+    - assets/images/instapay_logo.webp
     - assets/images/categories/
     - assets/sounds/
 
