@@ -32,16 +32,16 @@ set search_path = public
 as $$
 declare
   o public.orders%rowtype;
-  day_key text;
-  next_seq integer;
-  receipt text;
-  zone_code text;
-  customer_code text;
-  branch text;
-  fee text;
-  phone2 text;
-  qr text;
-  items jsonb;
+  v_day_key text;
+  v_next_seq integer;
+  v_receipt text;
+  v_zone_code text;
+  v_customer_code text;
+  v_branch text;
+  v_fee text;
+  v_phone2 text;
+  v_qr text;
+  v_items jsonb;
 begin
   if auth.uid() is null then
     raise exception 'Not signed in' using errcode = '28000';
@@ -54,73 +54,73 @@ begin
 
   -- Allocate receipt number once: YYMMDD + 6-digit daily sequence.
   if o.pos_receipt_number is null or btrim(o.pos_receipt_number) = '' then
-    day_key := to_char(
+    v_day_key := to_char(
       timezone('Africa/Cairo', coalesce(o.created_at, now())),
       'YYMMDD'
     );
     insert into public.pos_receipt_counters (day_key, last_seq)
-    values (day_key, 1)
+    values (v_day_key, 1)
     on conflict (day_key) do update
-      set last_seq = public.pos_receipt_counters.last_seq + 1
-    returning last_seq into next_seq;
+      set last_seq = pos_receipt_counters.last_seq + 1
+    returning pos_receipt_counters.last_seq into v_next_seq;
 
-    receipt := day_key || lpad(next_seq::text, 6, '0');
+    v_receipt := v_day_key || lpad(v_next_seq::text, 6, '0');
     update public.orders
-    set pos_receipt_number = receipt
+    set pos_receipt_number = v_receipt
     where id = o.id
       and (pos_receipt_number is null or btrim(pos_receipt_number) = '')
-    returning pos_receipt_number into receipt;
+    returning pos_receipt_number into v_receipt;
 
     -- Race: another session won — re-read.
-    if receipt is null then
-      select pos_receipt_number into receipt
+    if v_receipt is null then
+      select pos_receipt_number into v_receipt
       from public.orders where id = o.id;
     end if;
-    o.pos_receipt_number := receipt;
+    o.pos_receipt_number := v_receipt;
   end if;
 
-  branch := coalesce(nullif(btrim(o.pos_branch_code), ''), '001');
+  v_branch := coalesce(nullif(btrim(o.pos_branch_code), ''), '001');
 
   -- Zone: order column → pos_customers → match delivery_area name.
-  zone_code := nullif(btrim(coalesce(o.fujitsu_zone_id, '')), '');
-  if zone_code is null and o.pos_customer_id is not null then
+  v_zone_code := nullif(btrim(coalesce(o.fujitsu_zone_id, '')), '');
+  if v_zone_code is null and o.pos_customer_id is not null then
     select nullif(btrim(c.fujitsu_zone_id), '')
-      into zone_code
+      into v_zone_code
     from public.pos_customers c
     where c.id = o.pos_customer_id;
   end if;
-  if zone_code is null and o.delivery_area is not null then
+  if v_zone_code is null and o.delivery_area is not null then
     select z.fujitsu_zone_id::text
-      into zone_code
+      into v_zone_code
     from public.delivery_zones z
     where z.name = o.delivery_area
        or z.fujitsu_zone_id::text = o.delivery_area
     limit 1;
   end if;
-  zone_code := coalesce(zone_code, '0');
+  v_zone_code := coalesce(v_zone_code, '0');
 
-  customer_code := coalesce(o.pos_customer_id::text, '0');
+  v_customer_code := coalesce(o.pos_customer_id::text, '0');
 
   if o.pos_customer_id is not null then
-    select nullif(btrim(c.phone2), '') into phone2
+    select nullif(btrim(c.phone2), '') into v_phone2
     from public.pos_customers c where c.id = o.pos_customer_id;
   end if;
 
-  fee := trim(to_char(coalesce(o.delivery_fee, 0), 'FM999999990.00'));
+  v_fee := trim(to_char(coalesce(o.delivery_fee, 0), 'FM999999990.00'));
 
   -- Exact cashier QR shape:
   -- DlvOrd,{branch},0,{receipt},0,0,{customerId},{zone},0,{fee}
-  qr := format(
+  v_qr := format(
     'DlvOrd,%s,0,%s,0,0,%s,%s,0,%s',
-    branch,
+    v_branch,
     o.pos_receipt_number,
-    customer_code,
-    zone_code,
-    fee
+    v_customer_code,
+    v_zone_code,
+    v_fee
   );
 
   select coalesce(jsonb_agg(row_to_json(x)::jsonb order by x.sort_name), '[]'::jsonb)
-    into items
+    into v_items
   from (
     select
       oi.id,
@@ -141,8 +141,8 @@ begin
   return jsonb_build_object(
     'order_id', o.id,
     'receipt_number', o.pos_receipt_number,
-    'qr_payload', qr,
-    'branch_code', branch,
+    'qr_payload', v_qr,
+    'branch_code', v_branch,
     'branch_name', 'حي الزهور',
     'store_name', 'سفير ماركت',
     'created_at', o.created_at,
@@ -150,15 +150,15 @@ begin
     'preparer_name', o.preparer_name,
     'customer_name', o.customer_name,
     'customer_phone', o.customer_phone,
-    'customer_phone2', phone2,
+    'customer_phone2', v_phone2,
     'address', o.address_details,
     'delivery_area', o.delivery_area,
     'payment_method', o.payment_method,
     'delivery_fee', coalesce(o.delivery_fee, 0),
     'total_amount', coalesce(o.total_amount, 0),
     'pos_customer_id', o.pos_customer_id,
-    'fujitsu_zone_id', zone_code,
-    'items', items
+    'fujitsu_zone_id', v_zone_code,
+    'items', v_items
   );
 end;
 $$;
