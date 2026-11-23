@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../../core/network/resilient_realtime_stream.dart';
 import '../../domain/repositories/loyalty_repository.dart';
 
 /// `profiles.loyalty_points`, which may be null on older rows: null (or a
@@ -26,6 +29,40 @@ class SupabaseLoyaltyRepository implements LoyaltyRepository {
         L10n.current.loyaltyPointsLoadFailed(error.message),
       );
     }
+  }
+
+  @override
+  Stream<int> watchPoints(String userId) {
+    return resilientRealtimeStream<int>(
+      fetch: () => fetchPoints(userId),
+      disconnectedPollInterval: const Duration(seconds: 15),
+      create: () {
+        late final RealtimeChannel channel;
+        final controller = StreamController<int>(
+          onCancel: () => _client.removeChannel(channel),
+        );
+        channel = _client
+            .channel('loyalty-points-$userId')
+            .onPostgresChanges(
+              event: PostgresChangeEvent.update,
+              schema: 'public',
+              table: 'profiles',
+              filter: PostgresChangeFilter(
+                type: PostgresChangeFilterType.eq,
+                column: 'id',
+                value: userId,
+              ),
+              callback: (payload) {
+                final row = payload.newRecord;
+                if (!controller.isClosed) {
+                  controller.add(pointsFrom(row['loyalty_points']));
+                }
+              },
+            )
+            .subscribe();
+        return controller.stream;
+      },
+    );
   }
 
   @override

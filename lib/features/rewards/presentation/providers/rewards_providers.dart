@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/widgets.dart';
@@ -35,18 +36,41 @@ final redemptionPollIntervalProvider =
     Provider<Duration>((ref) => const Duration(seconds: 4));
 
 /// Signed-in user's loyalty balance — single source of truth for Home,
-/// the loyalty hub, and every game header. Guests resolve to 0.
+/// the loyalty hub, Cashier QR, and every game header. Guests resolve to 0.
+/// Keeps a Realtime subscription on `profiles.loyalty_points`.
 final loyaltyPointsProvider =
     AsyncNotifierProvider<LoyaltyPointsNotifier, int>(
   LoyaltyPointsNotifier.new,
 );
 
 class LoyaltyPointsNotifier extends AsyncNotifier<int> {
+  StreamSubscription<int>? _live;
+
   @override
   Future<int> build() async {
+    ref.onDispose(() {
+      unawaited(_live?.cancel());
+      _live = null;
+    });
+
     final user = ref.watch(currentUserProvider);
     if (user == null) return 0;
-    return ref.read(loyaltyRepositoryProvider).fetchPoints(user.id);
+
+    final repo = ref.read(loyaltyRepositoryProvider);
+    final initial = await repo.fetchPoints(user.id);
+
+    // Live updates from DB triggers (order awards, campaigns, redemptions).
+    await _live?.cancel();
+    _live = repo.watchPoints(user.id).listen(
+      (points) {
+        state = AsyncData(points);
+      },
+      onError: (Object error, StackTrace stack) {
+        debugPrint('loyaltyPoints live stream error: $error\n$stack');
+      },
+    );
+
+    return initial;
   }
 
   /// Optimistically bumps the displayed balance, then persists to Supabase.

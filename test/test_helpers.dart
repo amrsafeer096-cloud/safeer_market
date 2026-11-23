@@ -454,6 +454,12 @@ class FakeLoyaltyRepository implements LoyaltyRepository {
   }
 
   @override
+  Stream<int> watchPoints(String userId) async* {
+    if (failure != null) throw failure!;
+    yield points;
+  }
+
+  @override
   Future<int> addPoints({required String userId, required int amount}) async {
     if (failure != null) throw failure!;
     added.add((userId: userId, amount: amount));

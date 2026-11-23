@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../domain/entities/customer_order.dart';
 import '../../domain/repositories/orders_repository.dart';
 
@@ -61,6 +64,13 @@ class SupabaseOrdersRepository implements OrdersRepository {
     try {
       // `select` returns the changed rows; without it an update that row
       // level security filters out "succeeds" while changing nothing.
+      final existing = await _client
+          .from('orders')
+          .select('id, status')
+          .eq('id', orderId)
+          .maybeSingle();
+      final previousStatus =
+          (existing?['status'] ?? 'pending').toString();
       final updated = await _client
           .from('orders')
           .update({
@@ -73,6 +83,12 @@ class SupabaseOrdersRepository implements OrdersRepository {
       if (updated.isEmpty) {
         throw OrdersFailure(L10n.current.orderCancelTooLate);
       }
+      unawaited(
+        OrderPushDispatcher(_client).notifyStatusChanged(
+          orderId,
+          previousStatus: previousStatus,
+        ),
+      );
     } on PostgrestException catch (error) {
       debugPrint('Cancel order: ${error.code} ${error.message}');
       if (error.code == 'PGRST205' ||

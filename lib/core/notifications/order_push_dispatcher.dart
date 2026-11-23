@@ -60,15 +60,17 @@ class OrderPushDispatcher {
     required String trigger,
     String? previousStatus,
   }) async {
+    final body = <String, dynamic>{
+      'order_id': orderId,
+      'trigger': trigger,
+      if (previousStatus != null && previousStatus.isNotEmpty)
+        'previous_status': previousStatus,
+    };
+    debugPrint('send-push invoke → $body');
     try {
       final response = await _client.functions.invoke(
         'send-push',
-        body: {
-          'order_id': orderId,
-          'trigger': trigger,
-          if (previousStatus != null && previousStatus.isNotEmpty)
-            'previous_status': previousStatus,
-        },
+        body: body,
       );
       final status = response.status;
       final data = response.data;

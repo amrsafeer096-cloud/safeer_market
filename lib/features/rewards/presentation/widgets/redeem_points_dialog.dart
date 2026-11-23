@@ -33,8 +33,8 @@ Future<void> showRedeemPointsDialog(BuildContext context, WidgetRef ref) async {
 }
 
 /// Closes itself with `true` once the balance drops below what it was when
-/// the code was shown: on the redemption's Realtime event, or on the next
-/// periodic re-read if that event doesn't arrive.
+/// the code was shown: on the live loyalty stream, a redemption Realtime
+/// event, or the periodic re-read if events don't arrive.
 class RedeemPointsDialog extends ConsumerStatefulWidget {
   const RedeemPointsDialog({super.key, required this.userId});
 
@@ -47,13 +47,13 @@ class RedeemPointsDialog extends ConsumerStatefulWidget {
 class _RedeemPointsDialogState extends ConsumerState<RedeemPointsDialog> {
   StreamSubscription<void>? _redemptions;
   Timer? _poll;
-  int? _shownPoints;
+  int? _baselinePoints;
   bool _closed = false;
 
   @override
   void initState() {
     super.initState();
-    _shownPoints = ref.read(loyaltyPointsProvider).valueOrNull;
+    _baselinePoints = ref.read(loyaltyPointsProvider).valueOrNull;
     _redemptions = ref
         .read(loyaltyRedemptionRepositoryProvider)
         .watchRedemptions(widget.userId)
@@ -70,14 +70,22 @@ class _RedeemPointsDialogState extends ConsumerState<RedeemPointsDialog> {
       final points =
           await ref.read(loyaltyRepositoryProvider).fetchPoints(widget.userId);
       if (!mounted || _closed) return;
-      final shown = _shownPoints;
-      if (shown != null && points < shown) {
+      final baseline = _baselinePoints;
+      if (baseline != null && points < baseline) {
         _close();
       } else {
-        setState(() => _shownPoints = points);
+        setState(() => _baselinePoints ??= points);
       }
     } catch (error) {
       debugPrint('Re-reading loyalty points failed: $error');
+    }
+  }
+
+  void _onLivePoints(int points) {
+    if (_closed || !mounted) return;
+    final baseline = _baselinePoints;
+    if (baseline != null && points < baseline) {
+      _close();
     }
   }
 
@@ -97,7 +105,12 @@ class _RedeemPointsDialogState extends ConsumerState<RedeemPointsDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final points = _shownPoints;
+    final livePoints = ref.watch(loyaltyPointsProvider).valueOrNull;
+    ref.listen<AsyncValue<int>>(loyaltyPointsProvider, (_, next) {
+      final value = next.valueOrNull;
+      if (value != null) _onLivePoints(value);
+    });
+    final points = livePoints ?? _baselinePoints;
     return AlertDialog(
       title: Text(l10n.redeemQrTitle, textAlign: TextAlign.center),
       content: Column(

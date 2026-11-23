@@ -205,7 +205,7 @@ function customerLifecyclePush(
   switch (status) {
     case "preparing":
       return {
-        title: "جاري تجهيز طلبك 🛒",
+        title: "طلبك قيد التجهيز 🛒",
         body: `تم استلام الأوردر من المحضر ${preparer} وجاري تجهيزه.`,
         type: "order",
         routes: { default: "/orders" },
@@ -233,9 +233,9 @@ function customerLifecyclePush(
     }
     case "delivered":
       return {
-        title: "تم تسليم الأوردر بنجاح ✅",
+        title: "تم توصيل طلبك بنجاح! ✅",
         body:
-          "نتمنى لك تجربة سعيدة! اضغط هنا لتقييم خدمة التوصيل وجودة المنتجات.",
+          "كسبت +10 نقاط ولاء. اضغط هنا لتقييم خدمة التوصيل وجودة المنتجات.",
         type: "order",
         routes: { default: `/orders/${id}/rate` },
         data: {
@@ -247,7 +247,7 @@ function customerLifecyclePush(
       };
     case "ready_for_delivery":
       return {
-        title: `تحديث طلبك #${shortId(id)}`,
+        title: "طلبك جاهز للتوصيل 📦",
         body: "طلبك جاهز وسيخرج للتوصيل قريبًا.",
         type: "order",
         routes: { default: "/orders" },
@@ -255,7 +255,7 @@ function customerLifecyclePush(
       };
     case "cancelled":
       return {
-        title: `تحديث طلبك #${shortId(id)}`,
+        title: "تم إلغاء طلبك",
         body: "تم إلغاء طلبك.",
         type: "order",
         routes: { default: "/orders" },
@@ -263,6 +263,26 @@ function customerLifecyclePush(
       };
     default:
       return null;
+  }
+}
+
+/** Persist a bell notification so the in-app badge updates with FCM. */
+async function insertCustomerOrderNotification(
+  userId: string,
+  push: Push,
+): Promise<void> {
+  const { error } = await admin.from("app_notifications").insert({
+    title: push.title,
+    body: push.body,
+    type: "order",
+    target_user_id: userId,
+  });
+  if (error) {
+    console.error(
+      `send-push: app_notifications insert failed for ${userId}: ${error.message}`,
+    );
+  } else {
+    console.log(`send-push: logged in-app order notification for ${userId}`);
   }
 }
 
@@ -339,10 +359,18 @@ async function plan(
       return null;
     }
 
-    if (status === oldStatus || !userId) return null;
+    if (status === oldStatus) return null;
+    // Phone-only orders have no app customer — skip push + bell silently.
+    if (!userId) {
+      console.log(`send-push: skip customer push (no user_id) order=${id}`);
+      return null;
+    }
     const driver = await resolveDriverContact(record);
     const push = customerLifecyclePush(record, status, driver);
     if (!push) return null;
+    // Bell badge: write the in-app row (FCM still sent below). Order-type
+    // INSERT webhooks are skipped to avoid a duplicate push.
+    await insertCustomerOrderNotification(userId, push);
     return { push, tokens: await tokensForUser(userId) };
   }
 
@@ -350,6 +378,13 @@ async function plan(
     const target = text(record.target_user_id);
     const type = text(record.type) || "general";
     const id = text(record.id);
+    // Order lifecycle already pushed via the orders UPDATE path.
+    if (type === "order") {
+      console.log(
+        `send-push: skip FCM for order app_notification ${id} (already sent)`,
+      );
+      return null;
+    }
     const staffRoles = record._staff_roles;
     if (type === "staff_alert" || Array.isArray(staffRoles)) {
       const roles = (Array.isArray(staffRoles) ? staffRoles : ["admin", "taker"])

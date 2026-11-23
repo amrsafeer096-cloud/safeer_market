@@ -1462,8 +1462,9 @@ class _OrderDetailsView extends ConsumerWidget {
                   final orderId = order['id'].toString();
                   final previous =
                       (order['status'] ?? 'ready_for_delivery').toString();
-                  await Supabase.instance.client.from('orders').update(
-                      {'status': 'outForDelivery'}).eq('id', orderId);
+                  await Supabase.instance.client.from('orders').update({
+                    'status': OrderStatus.outForDelivery.value,
+                  }).eq('id', orderId);
                   dispatchOrderPush(
                     Supabase.instance.client,
                     orderId: orderId,
@@ -1492,9 +1493,9 @@ class _OrderDetailsView extends ConsumerWidget {
                 final orderId = order['id'].toString();
                 final previous =
                     (order['status'] ?? 'out_for_delivery').toString();
-                await Supabase.instance.client
-                    .from('orders')
-                    .update({'status': 'delivered'}).eq('id', orderId);
+                await Supabase.instance.client.from('orders').update({
+                  'status': OrderStatus.delivered.value,
+                }).eq('id', orderId);
                 dispatchOrderPush(
                   Supabase.instance.client,
                   orderId: orderId,
@@ -1564,14 +1565,14 @@ class _OrderDetailsView extends ConsumerWidget {
                             await Supabase.instance.client
                                 .from('orders')
                                 .update({
-                              'status': 'preparing',
+                              'status': OrderStatus.preparing.value,
                               'preparer_name': p['name']
                             }).eq('id', orderId);
                             dispatchOrderPush(
                               Supabase.instance.client,
                               orderId: orderId,
                               trigger: 'status',
-                              previousStatus: 'pending',
+                              previousStatus: OrderStatus.pending.value,
                             );
                             AudioPlayer().play(UrlSource(
                                 'https://jugdxfhmjakmzjvfltjv.supabase.co/storage/v1/object/public/product_images/accept_order.mp3.mp3'));
@@ -1715,7 +1716,8 @@ class _AdminDriverAssignerState extends ConsumerState<_AdminDriverAssigner> {
       final previous = (widget.order['status'] ?? 'preparing').toString();
       await Supabase.instance.client.from('orders').update({
         'driver_name': selectedDriver,
-        if (widget.startDelivery) 'status': 'readyForDelivery',
+        if (widget.startDelivery)
+          'status': OrderStatus.readyForDelivery.value,
       }).eq('id', orderId);
       if (widget.startDelivery) {
         dispatchOrderPush(
