@@ -142,7 +142,10 @@ class SystemAlertsService {
       }
       if (!_mobileTray) return;
 
-      final payload = jsonEncode({SystemAlertPayload.route: route});
+      final payload = jsonEncode({
+        SystemAlertPayload.route: route,
+        if (type != null && type.isNotEmpty) 'type': type,
+      });
       await _local.show(
         id.hashCode & 0x7fffffff,
         'سفير ماركت',
@@ -180,9 +183,6 @@ class SystemAlertsService {
   }
 
   static String routeFromData(Map<String, dynamic> data) {
-    final explicit = data[SystemAlertPayload.route]?.toString();
-    if (explicit != null && explicit.isNotEmpty) return explicit;
-
     final orderId = data['order_id']?.toString().trim();
     final action = data['action']?.toString();
     final stage = data['stage']?.toString();
@@ -198,9 +198,27 @@ class SystemAlertsService {
       );
     }
 
-    final type = data['type']?.toString();
-    if (type == 'support_chat') return AppRoutes.supportChat;
-    if (type == 'order') return AppRoutes.orders;
+    // Customer deep-links follow [type]; staff `new_order` keeps the
+    // role-specific `route` from send-push (admin / taker / driver).
+    final type = (data['type']?.toString() ?? '').toLowerCase().trim();
+    switch (type) {
+      case 'order':
+        return AppRoutes.orders;
+      case 'magazine':
+        return AppRoutes.magazines;
+      case 'offers':
+      case 'promo':
+        return AppRoutes.offers;
+      case 'loyalty':
+        return AppRoutes.rewards;
+      case 'chat':
+      case 'support':
+      case 'support_chat':
+        return AppRoutes.supportChat;
+    }
+
+    final explicit = data[SystemAlertPayload.route]?.toString();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
     if (type == 'new_order') return AppRoutes.driver;
     return AppRoutes.notifications;
   }

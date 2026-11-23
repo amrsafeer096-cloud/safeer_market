@@ -24,6 +24,9 @@ abstract final class AppRoutes {
   static const cashierScan = '/cashier/scan';
   static const magazines = '/magazines';
 
+  /// «عروض وخصومات» — full offers grid (same as home «عرض الكل»).
+  static const offers = '/offers';
+
   /// The signed-in customer's live chat with customer service.
   static const supportChat = '/support/chat';
 

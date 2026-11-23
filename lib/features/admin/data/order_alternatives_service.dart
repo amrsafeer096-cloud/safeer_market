@@ -138,18 +138,37 @@ class OrderAlternativesService {
     required bool notifyCustomer,
     String? customerUserId,
   }) async {
+    const title = 'منتج غير متوفر — اختر بديلاً لطلبك';
+    const body =
+        'أحد منتجات طلبك غير متوفر. افتح تفاصيل الطلب لاختيار بديل أو حذف المنتج.';
     try {
       if (notifyCustomer && customerUserId != null) {
+        // Bell row via SECURITY DEFINER RPC (staff cannot insert for customers).
+        try {
+          await _client.rpc(
+            'log_customer_order_notification',
+            params: {
+              'p_user_id': customerUserId,
+              'p_title': title,
+              'p_body': body,
+              'p_order_id': orderId,
+              'p_type': 'order',
+              'p_source': 'order_lifecycle',
+            },
+          );
+        } catch (error) {
+          debugPrint('alternatives bell insert failed: $error');
+        }
         final response = await _client.functions.invoke(
           'send-push',
           body: {
             'trigger': 'broadcast',
-            'title': 'منتج غير متوفر — اختر بديلاً لطلبك',
-            'body':
-                'أحد منتجات طلبك غير متوفر. افتح تفاصيل الطلب لاختيار بديل أو حذف المنتج.',
+            'title': title,
+            'body': body,
             'notification_type': 'order',
             'target_user_id': customerUserId,
             'target': customerUserId,
+            'order_id': orderId,
           },
         );
         debugPrint(

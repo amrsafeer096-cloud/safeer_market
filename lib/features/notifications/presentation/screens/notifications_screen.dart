@@ -7,8 +7,6 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/widgets/mobile_frame.dart';
 import '../../../../l10n/app_localizations.dart';
-import '../../../home/presentation/providers/products_providers.dart';
-import '../../../home/presentation/screens/product_list_screen.dart';
 import '../../domain/entities/app_notification.dart';
 import '../providers/notifications_providers.dart';
 import '../widgets/notification_card.dart';
@@ -33,21 +31,18 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   }
 
   void _open(AppNotification notification) {
-    final l10n = AppLocalizations.of(context)!;
     switch (notification.type) {
       case AppNotificationType.magazine:
         context.push(AppRoutes.magazines);
       case AppNotificationType.promo:
-        ProductListScreen.open(
-          context,
-          title: l10n.quickActionOffers,
-          products: allOfferProductsProvider,
-        );
+        context.push(AppRoutes.offers);
       case AppNotificationType.supportChat:
         context.push(AppRoutes.supportChat);
       case AppNotificationType.loyalty:
         context.push(AppRoutes.rewards);
-      case AppNotificationType.general || AppNotificationType.order:
+      case AppNotificationType.order:
+        context.push(AppRoutes.orders);
+      case AppNotificationType.general:
         break;
     }
   }
@@ -56,7 +51,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       type == AppNotificationType.magazine ||
       type == AppNotificationType.promo ||
       type == AppNotificationType.supportChat ||
-      type == AppNotificationType.loyalty;
+      type == AppNotificationType.loyalty ||
+      type == AppNotificationType.order;
 
   @override
   Widget build(BuildContext context) {

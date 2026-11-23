@@ -116,6 +116,7 @@ class SupabaseNotificationsRepository implements NotificationsRepository {
       type: AppNotificationType.fromValue(row['type']),
       imageUrl: text('image_url'),
       targetUserId: text('target_user_id'),
+      orderId: text('order_id'),
       createdAt:
           DateTime.tryParse('${row['created_at']}')?.toLocal() ?? DateTime.now(),
     );

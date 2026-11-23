@@ -22,9 +22,95 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 const ICON = '/icons/Icon-192.png';
 
+function routeFromType(type) {
+  switch ((type || '').toLowerCase()) {
+    case 'order':
+      return '/orders';
+    case 'magazine':
+      return '/magazines';
+    case 'offers':
+    case 'promo':
+      return '/offers';
+    case 'loyalty':
+      return '/rewards';
+    case 'chat':
+    case 'support':
+    case 'support_chat':
+      return '/support/chat';
+    case 'new_order':
+      return '/driver';
+    default:
+      return '/notifications';
+  }
+}
+
+function resolveRoute(data) {
+  const d = data || {};
+  const action = (d.action || '').toString();
+  const stage = (d.stage || '').toString();
+  const orderId = (d.order_id || '').toString().trim();
+  if (action === 'rate_order' && orderId) {
+    return '/orders/' + orderId + '/rate';
+  }
+  if (
+    orderId &&
+    (stage === 'out_for_delivery' || stage === 'arriving_soon')
+  ) {
+    return '/orders/' + orderId + '/track';
+  }
+  const type = (d.type || '').toString().toLowerCase();
+  // Customer types: follow type. Staff new_order keeps role-specific route.
+  if (
+    type === 'order' ||
+    type === 'magazine' ||
+    type === 'offers' ||
+    type === 'promo' ||
+    type === 'loyalty' ||
+    type === 'chat' ||
+    type === 'support' ||
+    type === 'support_chat'
+  ) {
+    return routeFromType(type);
+  }
+  const explicit = (d.route || '').toString().trim();
+  if (explicit.startsWith('/')) return explicit;
+  return routeFromType(type);
+}
+
 function appUrl(route) {
   const path = route && route.startsWith('/') ? route : '/notifications';
   return new URL('/#' + path, self.location.origin).href;
+}
+
+function payloadData(notificationData) {
+  const raw = notificationData || {};
+  // Firebase SDK wraps its own notifications under FCM_MSG.
+  if (raw.FCM_MSG) {
+    const msg = raw.FCM_MSG;
+    return Object.assign({}, (msg.data || {}), {
+      title: (msg.notification && msg.notification.title) || undefined,
+      body: (msg.notification && msg.notification.body) || undefined,
+    });
+  }
+  return raw;
+}
+
+function openOrFocus(url) {
+  return self.clients
+    .matchAll({ type: 'window', includeUncontrolled: true })
+    .then((tabs) => {
+      for (const tab of tabs) {
+        if (new URL(tab.url).origin === self.location.origin && 'focus' in tab) {
+          return tab.focus().then((client) => {
+            if (client && 'navigate' in client) {
+              return client.navigate(url);
+            }
+            return self.clients.openWindow(url);
+          });
+        }
+      }
+      return self.clients.openWindow(url);
+    });
 }
 
 // Pushes with a `notification` block (everything send-push sends) are shown
@@ -34,6 +120,7 @@ messaging.onBackgroundMessage((payload) => {
   if (payload.notification) return;
   const data = payload.data || {};
   const urgent = data.type === 'new_order';
+  const route = resolveRoute(data);
   return self.registration.showNotification(data.title || 'سفير ماركت', {
     body: data.body || '',
     icon: ICON,
@@ -46,24 +133,17 @@ messaging.onBackgroundMessage((payload) => {
     vibrate: urgent ? [300, 100, 300, 100, 300] : [200],
     dir: 'rtl',
     lang: 'ar',
-    data: { url: appUrl(data.route) },
+    data: { url: appUrl(route), ...data },
   });
 });
 
-// Clicks on notifications shown above: focus an open Safeer Market tab, or
-// open one. The SDK handles clicks on its own notifications (FCM_MSG).
+// Clicks on data-only notifications above and on FCM_MSG trays from the SDK.
 self.addEventListener('notificationclick', (event) => {
-  const data = event.notification.data || {};
-  if (data.FCM_MSG || !data.url) return;
   event.notification.close();
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((tabs) => {
-      for (const tab of tabs) {
-        if (new URL(tab.url).origin === self.location.origin && 'focus' in tab) {
-          return tab.focus();
-        }
-      }
-      return self.clients.openWindow(data.url);
-    }),
-  );
+  const raw = event.notification.data || {};
+  let url = raw.url;
+  if (!url || raw.FCM_MSG) {
+    url = appUrl(resolveRoute(payloadData(raw)));
+  }
+  event.waitUntil(openOrFocus(url));
 });

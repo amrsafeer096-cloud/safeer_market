@@ -100,7 +100,9 @@ function normalizeStatus(value: unknown): string {
     new: "pending",
     processing: "preparing",
     preparing: "preparing",
+    ready: "ready_for_delivery",
     readyfordelivery: "ready_for_delivery",
+    delivering: "out_for_delivery",
     outfordelivery: "out_for_delivery",
     delivered: "delivered",
     completed: "delivered",
@@ -266,23 +268,54 @@ function customerLifecyclePush(
   }
 }
 
-/** Persist a bell notification so the in-app badge updates with FCM. */
+/**
+ * Persist a bell notification so the in-app badge updates with FCM.
+ * Uses SECURITY DEFINER RPC (bypasses RLS) and tags source=order_lifecycle
+ * so the INSERT webhook does not send a duplicate push.
+ */
 async function insertCustomerOrderNotification(
   userId: string,
   push: Push,
 ): Promise<void> {
-  const { error } = await admin.from("app_notifications").insert({
-    title: push.title,
-    body: push.body,
-    type: "order",
-    target_user_id: userId,
+  const orderId = text(push.data?.order_id) || null;
+  const { error } = await admin.rpc("log_customer_order_notification", {
+    p_user_id: userId,
+    p_title: push.title,
+    p_body: push.body,
+    p_order_id: orderId,
+    p_type: "order",
+    p_source: "order_lifecycle",
   });
   if (error) {
     console.error(
-      `send-push: app_notifications insert failed for ${userId}: ${error.message}`,
+      `send-push: app_notifications RPC failed for ${userId}: ${error.message}`,
     );
   } else {
-    console.log(`send-push: logged in-app order notification for ${userId}`);
+    console.log(
+      `send-push: logged in-app order notification for ${userId}` +
+        (orderId ? ` order=${orderId}` : ""),
+    );
+  }
+}
+
+/** Deep-link path for an app_notifications.type. */
+function routeForNotificationType(type: string): string {
+  switch (type) {
+    case "order":
+      return "/orders";
+    case "magazine":
+      return "/magazines";
+    case "promo":
+    case "offers":
+      return "/offers";
+    case "loyalty":
+      return "/rewards";
+    case "support_chat":
+    case "chat":
+    case "support":
+      return "/support/chat";
+    default:
+      return "/notifications";
   }
 }
 
@@ -378,10 +411,11 @@ async function plan(
     const target = text(record.target_user_id);
     const type = text(record.type) || "general";
     const id = text(record.id);
+    const source = text(record.source);
     // Order lifecycle already pushed via the orders UPDATE path.
-    if (type === "order") {
+    if (source === "order_lifecycle") {
       console.log(
-        `send-push: skip FCM for order app_notification ${id} (already sent)`,
+        `send-push: skip FCM for order_lifecycle app_notification ${id}`,
       );
       return null;
     }
@@ -407,19 +441,17 @@ async function plan(
         tokens: await tokensForRoles(roles.length ? roles : ["admin", "taker"]),
       };
     }
-    const routes: Push["routes"] = type === "support_chat"
-      ? { default: "/support/chat" }
-      : type === "order"
-      ? { default: "/orders" }
-      : { default: "/notifications" };
+    const route = routeForNotificationType(type);
+    const orderId = text(record.order_id);
     return {
       push: {
         title: text(record.title) || APP_NAME,
         body: text(record.body),
         type,
-        routes,
+        routes: { default: route },
         data: {
           notification_id: id,
+          ...(orderId ? { order_id: orderId } : {}),
           ...(text(record.image_url) ? { image: text(record.image_url) } : {}),
         },
       },
@@ -571,6 +603,7 @@ async function eventFromAppInvoke(
         type: text(body.notification_type) || text(body.type) || "general",
         image_url: text(body.image_url) || null,
         target_user_id: targetUserId,
+        order_id: text(body.order_id) || null,
       },
       old_record: null,
     };

@@ -12,6 +12,7 @@ import '../../../cart/presentation/widgets/cart_icon_button.dart';
 import '../../domain/entities/product.dart';
 import '../providers/product_visibility_provider.dart';
 import '../widgets/product_card.dart';
+import '../widgets/product_grid_layout.dart';
 
 /// «عرض الكل» for a home section: every product of [products] in a grid.
 class ProductListScreen extends ConsumerStatefulWidget {
@@ -81,24 +82,26 @@ class _ProductListScreenState extends ConsumerState<ProductListScreen> {
         body: switch (productsAsync.valueOrNull) {
           null when productsAsync.isLoading =>
             const Center(child: CircularProgressIndicator()),
-          final products? when products.isNotEmpty => GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.58,
-              ),
-              addAutomaticKeepAlives: false,
-              itemCount: products.length,
-              itemBuilder: (context, index) {
-                final product = products[index];
-                return RepaintBoundary(
-                  child: ProductCard(
-                    product: product,
-                    onAdd: () => addToCartWithFeedback(context, ref, product),
-                    onFlyToCart: _flyToCart,
+          final products? when products.isNotEmpty => LayoutBuilder(
+              builder: (context, constraints) {
+                return GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  gridDelegate: ProductGridLayout.gridDelegateFor(
+                    constraints.maxWidth - 32,
                   ),
+                  addAutomaticKeepAlives: false,
+                  itemCount: products.length,
+                  itemBuilder: (context, index) {
+                    final product = products[index];
+                    return RepaintBoundary(
+                      child: ProductCard(
+                        product: product,
+                        onAdd: () =>
+                            addToCartWithFeedback(context, ref, product),
+                        onFlyToCart: _flyToCart,
+                      ),
+                    );
+                  },
                 );
               },
             ),

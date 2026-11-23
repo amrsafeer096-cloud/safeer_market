@@ -28,6 +28,7 @@ import '../widgets/home_quick_actions.dart';
 import '../widgets/home_support_speed_dial.dart';
 import '../widgets/product_card.dart';
 import '../widgets/product_card_skeleton.dart';
+import '../widgets/product_grid_layout.dart';
 import '../widgets/promo_carousel.dart';
 import 'product_list_screen.dart';
 import '../../../subscriptions/presentation/providers/subscription_providers.dart';
@@ -354,16 +355,14 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
         return section.isLoading
             ? [
                 header,
-                const SliverToBoxAdapter(child: _ProductsRowSkeleton()),
+                const SliverToBoxAdapter(child: _ProductsGridSkeleton()),
               ]
             : const [];
       }
       if (products.isEmpty) return const [];
       return [
         header,
-        SliverToBoxAdapter(
-          child: _ProductsRow(products: products, onFlyToCart: onFlyToCart),
-        ),
+        _ProductsGridSliver(products: products, onFlyToCart: onFlyToCart),
       ];
     }
 
@@ -534,7 +533,7 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
                 ),
                 ...productsAsync.when(
                   loading: () => const [
-                    SliverToBoxAdapter(child: _ProductsRowSkeleton()),
+                    SliverToBoxAdapter(child: _ProductsGridSkeleton()),
                   ],
                   error: (error, _) => [
                     _MessageSliver(
@@ -551,11 +550,9 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
                         onRetry: () => ref.invalidate(featuredProductsProvider),
                       )
                     else
-                      SliverToBoxAdapter(
-                        child: _ProductsRow(
-                          products: products,
-                          onFlyToCart: onFlyToCart,
-                        ),
+                      _ProductsGridSliver(
+                        products: products,
+                        onFlyToCart: onFlyToCart,
                       ),
                   ],
                 ),
@@ -596,18 +593,14 @@ class _HomeTabState extends ConsumerState<_HomeTab> {
   }
 }
 
-class _ProductsRow extends ConsumerWidget {
-  const _ProductsRow({
+/// Responsive product grid — same formula as «التصنيفات السلعية».
+class _ProductsGridSliver extends ConsumerWidget {
+  const _ProductsGridSliver({
     required this.products,
     required this.onFlyToCart,
   });
 
-  static const cardWidth = 170.0;
-  static const gap = 14.0;
-  static const rowHeight = 320.0;
   static const animatedCards = 4;
-  // Room for the cards' shadows, which a horizontal list would clip.
-  static const padding = EdgeInsets.fromLTRB(16, 4, 16, 18);
 
   final List<Product> products;
   final Future<void> Function(GlobalKey imageKey) onFlyToCart;
@@ -615,58 +608,61 @@ class _ProductsRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final products = shownProducts(ref, this.products);
-    return SizedBox(
-      height: rowHeight,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: padding,
-        // Fixed extent: scroll layout costs nothing per card.
-        itemExtent: cardWidth + gap,
-        addAutomaticKeepAlives: false,
-        itemCount: products.length,
-        itemBuilder: (context, index) {
-          final product = products[index];
-          final card = Padding(
-            padding: const EdgeInsetsDirectional.only(end: gap),
-            child: RepaintBoundary(
-              child: ProductCard(
-                product: product,
-                onAdd: () => addToCartWithFeedback(context, ref, product),
-                onFlyToCart: onFlyToCart,
-              ),
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
+      sliver: SliverLayoutBuilder(
+        builder: (context, constraints) {
+          return SliverGrid(
+            gridDelegate: ProductGridLayout.gridDelegateFor(
+              constraints.crossAxisExtent,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final product = products[index];
+                final card = RepaintBoundary(
+                  child: ProductCard(
+                    product: product,
+                    onAdd: () => addToCartWithFeedback(context, ref, product),
+                    onFlyToCart: onFlyToCart,
+                  ),
+                );
+                if (index >= animatedCards) return card;
+                return card
+                    .animate(delay: (60 * index).ms)
+                    .fadeIn(duration: 400.ms)
+                    .slideY(begin: 0.1);
+              },
+              childCount: products.length,
+              addAutomaticKeepAlives: false,
             ),
           );
-          // Only the cards in view on arrival animate in; the rest just
-          // scroll in, so a fast swipe runs no entrance animations.
-          if (index >= animatedCards) return card;
-          return card
-              .animate(delay: (60 * index).ms)
-              .fadeIn(duration: 400.ms)
-              .slideY(begin: 0.1);
         },
       ),
     );
   }
 }
 
-class _ProductsRowSkeleton extends StatelessWidget {
-  const _ProductsRowSkeleton();
+class _ProductsGridSkeleton extends StatelessWidget {
+  const _ProductsGridSkeleton();
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: _ProductsRow.rowHeight,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: _ProductsRow.padding,
-        itemCount: 4,
-        separatorBuilder: (_, __) => const SizedBox(width: 14),
-        itemBuilder: (_, __) => const SizedBox(
-          width: _ProductsRow.cardWidth,
-          child: ProductCardSkeleton(),
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = ProductGridLayout.columnsFor(constraints.maxWidth - 32);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: ProductGridLayout.gridDelegateFor(
+              constraints.maxWidth - 32,
+            ),
+            itemCount: columns * 2,
+            itemBuilder: (_, __) => const ProductCardSkeleton(),
+          ),
+        );
+      },
     );
   }
 }

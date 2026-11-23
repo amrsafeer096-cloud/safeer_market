@@ -19,8 +19,11 @@ import '../../features/profile/presentation/providers/profile_providers.dart';
 import '../../features/catalog/presentation/screens/product_details_screen.dart';
 import '../../features/home/domain/entities/product.dart';
 import '../../features/favorites/presentation/screens/favorites_screen.dart';
+import '../../features/home/presentation/providers/products_providers.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
+import '../../features/home/presentation/screens/product_list_screen.dart';
 import '../../features/orders/presentation/screens/my_orders_screen.dart';
+import '../../l10n/app_localizations.dart';
 import '../../features/orders/presentation/screens/order_rating_screen.dart';
 import '../../features/orders/presentation/screens/order_tracking_screen.dart';
 import '../../features/profile/presentation/screens/edit_profile_screen.dart';
@@ -299,6 +302,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: 'magazines',
         pageBuilder: (context, state) =>
             _smoothPage(state, const MagazinesScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.offers,
+        name: 'offers',
+        pageBuilder: (context, state) {
+          final title =
+              AppLocalizations.of(context)?.notificationTypePromo ??
+                  'عروض وخصومات';
+          return _smoothPage(
+            state,
+            ProductListScreen(
+              title: title,
+              products: allOfferProductsProvider,
+            ),
+          );
+        },
       ),
       GoRoute(
         path: AppRoutes.notifications,

@@ -28,6 +28,7 @@ class AppNotification {
     required this.createdAt,
     this.imageUrl,
     this.targetUserId,
+    this.orderId,
   });
 
   final String id;
@@ -38,6 +39,9 @@ class AppNotification {
 
   /// Null for a broadcast to every customer.
   final String? targetUserId;
+
+  /// When [type] is [AppNotificationType.order], opens «طلباتي» for this id.
+  final String? orderId;
   final DateTime createdAt;
 }
 
