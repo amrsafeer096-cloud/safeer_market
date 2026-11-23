@@ -204,7 +204,7 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
               ),
               const SizedBox(height: 8),
               Text(
-                'تأكد من تشغيل SQL: 20261123210000_order_prep_receipt_qr.sql',
+                'شغّل في Supabase:\n20261123220000_fix_prep_receipt_ambiguous.sql',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: palette.muted),
               ),
@@ -245,10 +245,11 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
           ),
         ),
         const Divider(height: 28),
+        _kv('الفرع', '${r.branchName} (${r.branchCode})'),
         _kv('رقم الطلب', r.receiptNumber),
         _kv('وقت الطلب', when),
         _kv('المتلقي', r.takerName ?? '—'),
-        _kv('المحضر', r.preparerName ?? 'محضر'),
+        _kv('المحضر', r.preparerName ?? '—'),
         const Divider(height: 28),
         _kv('العميل', r.customerName ?? '—'),
         _kv('تليفون', r.phonesLabel),
@@ -269,12 +270,26 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
                   Text(item.productName,
                       style: const TextStyle(fontWeight: FontWeight.w800)),
                   if (item.barcode != null)
-                    Text(item.barcode!,
+                    Text('باركود: ${item.barcode}',
                         style:
                             TextStyle(fontSize: 12, color: palette.muted)),
+                  if (item.hasDiscount)
+                    Text(
+                      'السعر: ${AppCurrency.of(item.displayPrice)}  ← بعد الخصم: ${AppCurrency.of(item.unitPrice)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.orange.shade800,
+                      ),
+                    )
+                  else
+                    Text(
+                      'السعر: ${AppCurrency.of(item.unitPrice)}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   Text(
-                    '${AppCurrency.of(item.displayPrice)}  ×  ${item.quantity}  =  ${AppCurrency.of(item.lineTotal)}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    'الكمية: ${item.quantity}  •  القيمة: ${AppCurrency.of(item.lineTotal)}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ],
               ),
@@ -282,7 +297,8 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
         ],
         const Divider(height: 28),
         _kv('خدمة التوصيل', AppCurrency.of(r.deliveryFee)),
-        _kv('الإجمالي', AppCurrency.of(r.itemsTotal)),
+        _kv('إجمالي الأصناف', AppCurrency.of(r.itemsTotal)),
+        _kv('الإجمالي شامل التوصيل', AppCurrency.of(r.totalAmount)),
         _kv('عدد الأصناف', '${r.itemCount}'),
       ],
     );

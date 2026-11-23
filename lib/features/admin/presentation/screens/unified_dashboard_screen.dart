@@ -1402,20 +1402,30 @@ class _OrderDetailsView extends ConsumerWidget {
     Widget gap() => const SizedBox(height: 16);
 
     final orderId = '${order['id']}';
+    final preparerName = order['preparer_name']?.toString().trim();
+    final hasPreparer = preparerName != null && preparerName.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Prep receipt for cashier QR — admin + preparer (not drivers).
+        // Receipt only after a preparer is chosen (admin + preparer).
         if (!isDriver) ...[
-          _ActionCard(
-            key: const Key('action-print-prep-receipt'),
-            title: 'طباعة إيصال التحضير',
-            desc: 'QR للكاشير + بيانات العميل والتوصيل',
-            icon: Icons.receipt_long_rounded,
-            color: const Color(0xFF1565C0),
-            onTap: () => showPrepReceiptSheet(context, orderId: orderId),
-          ),
+          if (hasPreparer)
+            _ActionCard(
+              key: const Key('action-print-prep-receipt'),
+              title: 'طباعة إيصال التحضير',
+              desc: 'QR للكاشير • $preparerName',
+              icon: Icons.receipt_long_rounded,
+              color: const Color(0xFF1565C0),
+              onTap: () => showPrepReceiptSheet(context, orderId: orderId),
+            )
+          else
+            _StatusBanner(
+              key: const Key('prep-receipt-need-preparer'),
+              color: Colors.blueGrey,
+              icon: Icons.receipt_long_rounded,
+              text: 'اختر المحضر أولاً ثم اطبع إيصال التحضير',
+            ),
           gap(),
         ],
         if (status == OrderStatus.pending.value && !isDriver)
@@ -1592,12 +1602,29 @@ class _OrderDetailsView extends ConsumerWidget {
                               const Icon(Icons.touch_app, color: Colors.orange),
                           onTap: () async {
                             Navigator.pop(ctx);
+                            final staff = ref.read(staffSessionProvider);
+                            final patch = <String, dynamic>{
+                              'status': OrderStatus.preparing.value,
+                              'preparer_name': p['name'],
+                            };
+                            // Keep taker on the receipt when missing.
+                            Map<String, dynamic>? existing;
+                            for (final o in orders) {
+                              if ('${o['id']}' == orderId) {
+                                existing = o;
+                                break;
+                              }
+                            }
+                            final taker =
+                                existing?['taker_name']?.toString().trim();
+                            if ((taker == null || taker.isEmpty) &&
+                                staff != null) {
+                              patch['taker_name'] = staff.name;
+                            }
                             await Supabase.instance.client
                                 .from('orders')
-                                .update({
-                              'status': OrderStatus.preparing.value,
-                              'preparer_name': p['name']
-                            }).eq('id', orderId);
+                                .update(patch)
+                                .eq('id', orderId);
                             dispatchOrderPush(
                               Supabase.instance.client,
                               orderId: orderId,

@@ -88,10 +88,11 @@ abstract final class PrepReceiptPdf {
               ),
             ),
             sep(),
+            line('الفرع', '${receipt.branchName} (${receipt.branchCode})'),
             line('رقم الطلب', receipt.receiptNumber),
             line('وقت الطلب', when),
             line('المتلقي', receipt.takerName ?? '—'),
-            line('المحضر', receipt.preparerName ?? 'محضر'),
+            line('المحضر', receipt.preparerName ?? '—'),
             sep(),
             line('العميل', receipt.customerName ?? '—'),
             line('تليفون', receipt.phonesLabel),
@@ -143,12 +144,20 @@ abstract final class PrepReceiptPdf {
                               font: font,
                               fontSize: 7,
                               color: PdfColors.grey700)),
+                    if (item.hasDiscount)
+                      pw.Text(
+                        'خصم: ${_money(item.displayPrice)} ← ${_money(item.unitPrice)}',
+                        style: pw.TextStyle(
+                            font: font,
+                            fontSize: 7,
+                            color: PdfColors.orange800),
+                      ),
                     pw.Row(
                       children: [
                         pw.Expanded(child: pw.SizedBox()),
                         pw.SizedBox(
                           width: 36,
-                          child: pw.Text(_money(item.displayPrice),
+                          child: pw.Text(_money(item.unitPrice),
                               textAlign: pw.TextAlign.center,
                               style: pw.TextStyle(font: font, fontSize: 8)),
                         ),
@@ -175,7 +184,8 @@ abstract final class PrepReceiptPdf {
           blocks.addAll([
             sep(),
             line('خدمة التوصيل', _money(receipt.deliveryFee)),
-            line('الإجمالي', _money(receipt.itemsTotal)),
+            line('إجمالي الأصناف', _money(receipt.itemsTotal)),
+            line('الإجمالي شامل التوصيل', _money(receipt.totalAmount)),
             line('عدد الأصناف', '${receipt.itemCount}'),
             pw.SizedBox(height: 8),
             pw.Center(

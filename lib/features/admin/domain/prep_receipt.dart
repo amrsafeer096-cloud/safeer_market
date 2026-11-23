@@ -152,6 +152,9 @@ class PrepReceiptItem {
   double get displayPrice =>
       (listPrice != null && listPrice! > 0) ? listPrice! : unitPrice;
 
+  bool get hasDiscount =>
+      listPrice != null && listPrice! > unitPrice + 0.001;
+
   factory PrepReceiptItem.fromJson(Map<String, dynamic> json) {
     String? text(String key) {
       final v = json[key]?.toString().trim();
