@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_palette.dart';
+import '../../data/report_pdf_exporter.dart';
 import '../../domain/reports.dart';
 
 class AdminSubMenuItem {
@@ -261,9 +262,37 @@ Future<bool> confirmAdminAction(
 
 /// A report: summary cards over a scrollable table.
 class ReportResultView extends StatelessWidget {
-  const ReportResultView({super.key, required this.table});
+  const ReportResultView({
+    super.key,
+    required this.table,
+    this.canExportPdf = true,
+  });
 
   final ReportTable table;
+
+  /// When false, hides PDF export / share / print actions.
+  final bool canExportPdf;
+
+  Future<void> _runPdf(
+    BuildContext context,
+    Future<void> Function(ReportTable) action,
+    String okMessage,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await action(table);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(okMessage)));
+    } catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('تعذّر إنشاء ملف PDF: $error'),
+          backgroundColor: const Color(0xFFD32F2F),
+        ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -290,6 +319,46 @@ class ReportResultView extends StatelessWidget {
                     fontWeight: FontWeight.bold, color: palette.muted)),
           ],
         ),
+        if (canExportPdf) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            key: const Key('report-pdf-actions'),
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                key: const Key('report-pdf-export'),
+                onPressed: () => _runPdf(
+                  context,
+                  ReportPdfExporter.export,
+                  'تم تجهيز ملف PDF للتصدير',
+                ),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                label: const Text('تصدير PDF'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('report-pdf-share'),
+                onPressed: () => _runPdf(
+                  context,
+                  ReportPdfExporter.share,
+                  'جاهز للمشاركة',
+                ),
+                icon: const Icon(Icons.share_rounded, size: 18),
+                label: const Text('مشاركة PDF'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('report-pdf-print'),
+                onPressed: () => _runPdf(
+                  context,
+                  ReportPdfExporter.print,
+                  'تم فتح نافذة الطباعة',
+                ),
+                icon: const Icon(Icons.print_rounded, size: 18),
+                label: const Text('طباعة'),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 10),
         Wrap(
           key: const Key('report-summary'),

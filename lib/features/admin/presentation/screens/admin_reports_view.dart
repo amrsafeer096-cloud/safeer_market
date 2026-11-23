@@ -7,6 +7,7 @@ import '../../data/report_service.dart';
 import '../../data/system_admin_service.dart';
 import '../../domain/admin_permissions.dart';
 import '../../domain/reports.dart';
+import '../providers/staff_session_providers.dart';
 import '../providers/system_admin_providers.dart';
 import '../widgets/admin_section_widgets.dart';
 
@@ -298,7 +299,12 @@ class _AdminReportsViewState extends ConsumerState<AdminReportsView> {
       return const AdminMessage('اختر الفلاتر ثم اضغط «عرض التقرير»',
           icon: Icons.insights_rounded);
     }
-    return ReportResultView(table: table);
+    final staffAdmin =
+        ref.watch(staffSessionProvider)?.isAdmin ?? false;
+    final canExport = staffAdmin ||
+        ref.watch(isRealAdminProvider) ||
+        ref.watch(adminCanProvider(AdminPermission.exportReports));
+    return ReportResultView(table: table, canExportPdf: canExport);
   }
 }
 

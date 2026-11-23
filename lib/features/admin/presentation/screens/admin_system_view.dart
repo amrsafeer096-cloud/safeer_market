@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/admin_permissions.dart';
 import '../providers/system_admin_providers.dart';
 import '../widgets/admin_section_widgets.dart';
 import 'admin_customers_section.dart';
@@ -19,17 +20,20 @@ class AdminSystemView extends ConsumerStatefulWidget {
 }
 
 enum _SystemSection {
-  customers('العملاء', Icons.people_alt_rounded),
-  preparers('المحضرين', Icons.inventory_2_rounded),
-  drivers('الطيارين', Icons.motorcycle_rounded),
-  users('المستخدمين', Icons.badge_rounded),
-  zones('المناطق', Icons.map_rounded),
-  permissions('الصلاحيات', Icons.admin_panel_settings_rounded);
+  customers('العملاء', Icons.people_alt_rounded, AdminPermission.manageCustomers),
+  preparers('المحضرين', Icons.inventory_2_rounded, AdminPermission.managePreparers),
+  drivers('الطيارين', Icons.motorcycle_rounded, AdminPermission.manageDrivers),
+  users('المستخدمين', Icons.badge_rounded, AdminPermission.manageUsers),
+  zones('المناطق', Icons.map_rounded, AdminPermission.manageZones),
+  permissions('الصلاحيات', Icons.admin_panel_settings_rounded, null);
 
-  const _SystemSection(this.label, this.icon);
+  const _SystemSection(this.label, this.icon, this.permission);
 
   final String label;
   final IconData icon;
+
+  /// Null = administrators only (الصلاحيات).
+  final AdminPermission? permission;
 }
 
 class _AdminSystemViewState extends ConsumerState<AdminSystemView> {
@@ -38,11 +42,22 @@ class _AdminSystemViewState extends ConsumerState<AdminSystemView> {
   @override
   Widget build(BuildContext context) {
     final isAdmin = ref.watch(isRealAdminProvider);
-    // «الصلاحيات» exists only for administrators.
+
+    // «الصلاحيات» exists only for administrators; other sections need their key.
     final sections = [
       for (final section in _SystemSection.values)
-        if (section != _SystemSection.permissions || isAdmin) section,
+        if (section == _SystemSection.permissions
+            ? isAdmin
+            : isAdmin ||
+                ref.watch(adminCanProvider(section.permission!)))
+          section,
     ];
+
+    if (sections.isEmpty) {
+      return const AdminLockedSection(
+          message: 'لا توجد أقسام متاحة حسب صلاحياتك');
+    }
+
     final current = sections.contains(_section) ? _section : sections.first;
 
     return AdminSubMenuLayout(

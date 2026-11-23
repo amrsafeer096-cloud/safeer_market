@@ -775,9 +775,9 @@ void main() {
         role: UserRole.customer,
         service: _FakeService(permissions: {AdminPermission.viewReports.key}),
       );
-      await tester.tap(find.byKey(const Key('system-menu-3')));
-      await tester.pumpAndSettle();
+      // No system sections are granted → whole view is locked.
       expect(find.byKey(const Key('admin-locked-section')), findsOneWidget);
+      expect(find.byKey(const Key('system-menu-3')), findsNothing);
     });
   });
 }

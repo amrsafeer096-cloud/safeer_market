@@ -168,22 +168,36 @@ class _AdminPermissionsSectionState
           Expanded(
             child: ListView(
               children: [
-                for (final permission in AdminPermission.values)
-                  SwitchListTile(
-                    key: Key('permission-${permission.key}'),
-                    title: Text(permission.label,
-                        style: const TextStyle(fontWeight: FontWeight.w700)),
-                    value: _granted.contains(permission.key),
-                    onChanged: _isAdminTarget || _saving
-                        ? null
-                        : (on) => setState(() {
-                              if (on) {
-                                _granted.add(permission.key);
-                              } else {
-                                _granted.remove(permission.key);
-                              }
-                            }),
+                for (final group in AdminPermissionGroup.values) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                    child: Text(
+                      group.label,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: palette.accent,
+                      ),
+                    ),
                   ),
+                  for (final permission in AdminPermission.values
+                      .where((p) => p.group == group))
+                    SwitchListTile(
+                      key: Key('permission-${permission.key}'),
+                      title: Text(permission.label,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      value: _granted.contains(permission.key),
+                      onChanged: _isAdminTarget || _saving
+                          ? null
+                          : (on) => setState(() {
+                                if (on) {
+                                  _granted.add(permission.key);
+                                } else {
+                                  _granted.remove(permission.key);
+                                }
+                              }),
+                    ),
+                ],
               ],
             ),
           ),

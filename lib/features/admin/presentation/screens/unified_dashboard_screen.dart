@@ -21,6 +21,7 @@ import '../../../../l10n/app_localizations.dart';
 import '../../../../core/widgets/barcode_scan_icon.dart';
 import '../../../home/presentation/widgets/product_image.dart';
 import '../../../home/presentation/widgets/product_thumb.dart';
+import '../../domain/admin_permissions.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
 import '../../domain/order_prep_timer.dart';
@@ -29,6 +30,7 @@ import '../../../profile/domain/entities/user_role.dart';
 import '../providers/admin_providers.dart';
 import '../providers/order_alternatives_providers.dart';
 import '../providers/staff_session_providers.dart';
+import '../providers/system_admin_providers.dart';
 import '../../../support/domain/entities/support_chat.dart';
 import '../../../support/presentation/providers/support_providers.dart';
 import '../providers/phone_order_providers.dart';
@@ -225,7 +227,8 @@ final adminProductsProvider =
 
   var request = Supabase.instance.client
       .from('products')
-      .select('id, barcode, name, price, image_url, is_active');
+      .select(
+          'id, barcode, name, price, image_url, is_active, stock_quantity');
 
   // نسحب كمية كافية بناءً على أول كلمة لتشمل أي منتجات مشابهة
   if (firstPart.isNotEmpty) request = request.ilike('name', '%$firstPart%');
@@ -754,32 +757,42 @@ class _SidebarMenu extends ConsumerWidget {
     final supportUnread = ref.watch(supportUnreadTotalProvider);
     // Only the secondary sections live here; the five main ones are the
     // tabs under the AppBar ([_AdminTopTabs]).
+    final isAdmin = ref.watch(isRealAdminProvider) ||
+        (ref.watch(staffSessionProvider)?.isAdmin ?? false);
+    bool can(AdminPermission permission) =>
+        isAdmin || ref.watch(adminCanProvider(permission));
+
     final entries = <({int menu, String label, IconData icon})>[
-      (
-        menu: AdminMenu.products,
-        label: l10n.adminMenuProducts,
-        icon: Icons.inventory_2
-      ),
-      (
-        menu: AdminMenu.magazines,
-        label: l10n.magazines,
-        icon: Icons.menu_book_rounded
-      ),
-      (
-        menu: AdminMenu.support,
-        label: l10n.supportCenterTitle,
-        icon: Icons.forum_rounded
-      ),
-      (
-        menu: AdminMenu.notifications,
-        label: l10n.adminSendNotifications,
-        icon: Icons.campaign_rounded
-      ),
-      (
-        menu: AdminMenu.pendingSubscriptions,
-        label: l10n.adminMenuPendingSubscriptions,
-        icon: Icons.workspace_premium_rounded
-      ),
+      if (can(AdminPermission.manageProducts))
+        (
+          menu: AdminMenu.products,
+          label: l10n.adminMenuProducts,
+          icon: Icons.inventory_2
+        ),
+      if (can(AdminPermission.manageMagazines))
+        (
+          menu: AdminMenu.magazines,
+          label: l10n.magazines,
+          icon: Icons.menu_book_rounded
+        ),
+      if (can(AdminPermission.manageSupport))
+        (
+          menu: AdminMenu.support,
+          label: l10n.supportCenterTitle,
+          icon: Icons.forum_rounded
+        ),
+      if (can(AdminPermission.sendNotifications))
+        (
+          menu: AdminMenu.notifications,
+          label: l10n.adminSendNotifications,
+          icon: Icons.campaign_rounded
+        ),
+      if (can(AdminPermission.approveSubscriptions))
+        (
+          menu: AdminMenu.pendingSubscriptions,
+          label: l10n.adminMenuPendingSubscriptions,
+          icon: Icons.workspace_premium_rounded
+        ),
     ];
 
     // Material, not a coloured Container: the tiles paint their selected
@@ -2206,7 +2219,7 @@ class _ProductsGridView extends ConsumerWidget {
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 240,
-                            mainAxisExtent: 290,
+                            mainAxisExtent: 320,
                             crossAxisSpacing: 16,
                             mainAxisSpacing: 16),
                     itemCount: products.length,
@@ -2215,6 +2228,11 @@ class _ProductsGridView extends ConsumerWidget {
                       final isActive = p['is_active'] ?? true;
                       final barcode =
                           p['barcode'] ?? p['id'].toString().substring(0, 6);
+                      final stock = switch (p['stock_quantity']) {
+                        final num n => n.round(),
+                        final String t => int.tryParse(t) ?? 0,
+                        _ => 0,
+                      };
                       return Container(
                         decoration: BoxDecoration(
                             color: palette.card,
@@ -2223,10 +2241,27 @@ class _ProductsGridView extends ConsumerWidget {
                         child: Column(
                           children: [
                             Expanded(
-                                child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: ProductImage(
-                                        imageUrl: p['image_url']))),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: palette.border),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Center(
+                                      child: ProductImage(
+                                        imageUrl: p['image_url'],
+                                        fit: BoxFit.contain,
+                                        placeholderBackground: false,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                             const Divider(height: 1),
                             Padding(
                               padding: const EdgeInsets.all(12),
@@ -2277,6 +2312,18 @@ class _ProductsGridView extends ConsumerWidget {
                                                     size: 12,
                                                     color: palette.muted)
                                               ]))),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'المخزون: $stock',
+                                    key: Key('admin-product-stock-${p['id']}'),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: stock <= 5
+                                          ? Colors.orange.shade800
+                                          : palette.muted,
+                                    ),
+                                  ),
                                   const SizedBox(height: 4),
                                   Text(
                                       AppCurrency.of(double.tryParse(
