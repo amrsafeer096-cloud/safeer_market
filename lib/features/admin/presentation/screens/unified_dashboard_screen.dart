@@ -39,6 +39,7 @@ import '../widgets/customer_order_rating_card.dart';
 import '../widgets/order_detail_panels.dart';
 import '../widgets/order_status_widgets.dart';
 import '../widgets/phone_order_column.dart';
+import '../widgets/prep_receipt_sheet.dart';
 import '../widgets/send_alternatives_sheet.dart';
 import 'admin_order_search_view.dart';
 import 'admin_reports_view.dart';
@@ -1400,9 +1401,23 @@ class _OrderDetailsView extends ConsumerWidget {
 
     Widget gap() => const SizedBox(height: 16);
 
+    final orderId = '${order['id']}';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Prep receipt for cashier QR — admin + preparer (not drivers).
+        if (!isDriver) ...[
+          _ActionCard(
+            key: const Key('action-print-prep-receipt'),
+            title: 'طباعة إيصال التحضير',
+            desc: 'QR للكاشير + بيانات العميل والتوصيل',
+            icon: Icons.receipt_long_rounded,
+            color: const Color(0xFF1565C0),
+            onTap: () => showPrepReceiptSheet(context, orderId: orderId),
+          ),
+          gap(),
+        ],
         if (status == OrderStatus.pending.value && !isDriver)
           _ActionCard(
             key: const Key('action-start-prep'),
