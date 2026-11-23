@@ -45,6 +45,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         );
       case AppNotificationType.supportChat:
         context.push(AppRoutes.supportChat);
+      case AppNotificationType.loyalty:
+        context.push(AppRoutes.rewards);
       case AppNotificationType.general || AppNotificationType.order:
         break;
     }
@@ -53,7 +55,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   static bool _opens(AppNotificationType type) =>
       type == AppNotificationType.magazine ||
       type == AppNotificationType.promo ||
-      type == AppNotificationType.supportChat;
+      type == AppNotificationType.supportChat ||
+      type == AppNotificationType.loyalty;
 
   @override
   Widget build(BuildContext context) {

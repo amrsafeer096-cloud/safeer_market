@@ -4,7 +4,8 @@ enum AppNotificationType {
   promo('promo'),
   magazine('magazine'),
   order('order'),
-  supportChat('support_chat');
+  supportChat('support_chat'),
+  loyalty('loyalty');
 
   const AppNotificationType(this.value);
 

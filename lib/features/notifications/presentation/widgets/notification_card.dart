@@ -29,6 +29,7 @@ extension AppNotificationTypeStyle on AppNotificationType {
         AppNotificationType.magazine => Icons.menu_book_rounded,
         AppNotificationType.order => Icons.shopping_bag_rounded,
         AppNotificationType.supportChat => Icons.support_agent_rounded,
+        AppNotificationType.loyalty => Icons.stars_rounded,
       };
 
   Color get color => switch (this) {
@@ -37,6 +38,7 @@ extension AppNotificationTypeStyle on AppNotificationType {
         AppNotificationType.magazine => const Color(0xFF6A1B9A),
         AppNotificationType.order => AppColors.success,
         AppNotificationType.supportChat => const Color(0xFF0284C7),
+        AppNotificationType.loyalty => const Color(0xFFE6A817),
       };
 
   String label(AppLocalizations l10n) => switch (this) {
@@ -45,6 +47,9 @@ extension AppNotificationTypeStyle on AppNotificationType {
         AppNotificationType.magazine => l10n.notificationTypeMagazine,
         AppNotificationType.order => l10n.notificationTypeOrder,
         AppNotificationType.supportChat => l10n.notificationTypeSupportChat,
+        // Admin + customer labels; keep Arabic primary for the dashboard chip.
+        AppNotificationType.loyalty =>
+          l10n.localeName.startsWith('ar') ? 'نقاط الولاء' : 'Loyalty points',
       };
 }
 
