@@ -73,7 +73,7 @@ abstract final class PrepReceiptPdf {
             pw.Center(
               child: pw.BarcodeWidget(
                 barcode: Barcode.qrCode(),
-                data: receipt.qrPayload,
+                data: receipt.cashierQrPayload,
                 width: 110,
                 height: 110,
                 drawText: false,
@@ -82,14 +82,17 @@ abstract final class PrepReceiptPdf {
             pw.SizedBox(height: 4),
             pw.Center(
               child: pw.Text(
-                receipt.qrPayload,
+                receipt.cashierQrPayload,
                 style: pw.TextStyle(font: font, fontSize: 6.5),
                 textAlign: pw.TextAlign.center,
               ),
             ),
             sep(),
             line('الفرع', '${receipt.branchName} (${receipt.branchCode})'),
-            line('رقم الطلب', receipt.receiptNumber),
+            line(
+              'رقم الطلب',
+              receipt.fujitsuOrderId ?? receipt.receiptNumber,
+            ),
             line('وقت الطلب', when),
             line('المتلقي', receipt.takerName ?? '—'),
             line('المحضر', receipt.preparerName ?? '—'),

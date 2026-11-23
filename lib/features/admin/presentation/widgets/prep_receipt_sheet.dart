@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,6 +39,12 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
   Object? _error;
   var _loading = true;
   var _busy = false;
+  var _pollingFujitsu = false;
+  Timer? _pollTimer;
+  var _pollAttempts = 0;
+
+  static const _maxPollAttempts = 15; // ~30s at 2s interval
+  static const _pollInterval = Duration(seconds: 2);
 
   @override
   void initState() {
@@ -44,11 +52,19 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool fromPoll = false}) async {
+    if (!fromPoll) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final raw = await Supabase.instance.client.rpc(
         'get_order_prep_receipt',
@@ -58,10 +74,14 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
       if (raw is! Map) {
         throw Exception('استجابة غير متوقعة من السيرفر');
       }
+      final receipt =
+          PrepReceipt.fromJson(Map<String, dynamic>.from(raw));
       setState(() {
-        _receipt = PrepReceipt.fromJson(Map<String, dynamic>.from(raw));
+        _receipt = receipt;
         _loading = false;
+        _error = null;
       });
+      _maybeStartFujitsuPoll(receipt);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -71,9 +91,41 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
     }
   }
 
+  void _maybeStartFujitsuPoll(PrepReceipt receipt) {
+    if (!receipt.waitingFujitsu || receipt.hasFujitsuIds) {
+      _pollTimer?.cancel();
+      _pollingFujitsu = false;
+      return;
+    }
+    if (_pollTimer != null) return;
+    _pollingFujitsu = true;
+    _pollAttempts = 0;
+    _pollTimer = Timer.periodic(_pollInterval, (_) async {
+      if (!mounted) {
+        _pollTimer?.cancel();
+        return;
+      }
+      _pollAttempts++;
+      if (_pollAttempts > _maxPollAttempts) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
+        if (mounted) setState(() => _pollingFujitsu = false);
+        return;
+      }
+      await _load(fromPoll: true);
+      final current = _receipt;
+      if (current != null &&
+          (!current.waitingFujitsu || current.hasFujitsuIds)) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
+        if (mounted) setState(() => _pollingFujitsu = false);
+      }
+    });
+  }
+
   Future<void> _run(Future<void> Function(PrepReceipt) action) async {
     final receipt = _receipt;
-    if (receipt == null) return;
+    if (receipt == null || receipt.waitingFujitsu) return;
     setState(() => _busy = true);
     try {
       await action(receipt);
@@ -94,6 +146,9 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final height = MediaQuery.sizeOf(context).height * 0.92;
+    final canPrint = _receipt != null &&
+        !_receipt!.waitingFujitsu &&
+        _receipt!.qrPayload.isNotEmpty;
 
     return SizedBox(
       height: height,
@@ -143,7 +198,7 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
                     children: [
                       FilledButton.icon(
                         key: const Key('prep-receipt-print'),
-                        onPressed: _busy
+                        onPressed: (_busy || !canPrint)
                             ? null
                             : () => _run(PrepReceiptPdf.print),
                         icon: const Icon(Icons.print_rounded),
@@ -151,7 +206,7 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
                       ),
                       OutlinedButton.icon(
                         key: const Key('prep-receipt-share'),
-                        onPressed: _busy
+                        onPressed: (_busy || !canPrint)
                             ? null
                             : () => _run(PrepReceiptPdf.share),
                         icon: const Icon(Icons.share_rounded),
@@ -159,11 +214,12 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
                       ),
                       OutlinedButton.icon(
                         key: const Key('prep-receipt-copy-qr'),
-                        onPressed: _busy
+                        onPressed: (_busy || !canPrint)
                             ? null
                             : () async {
-                                final qr = _receipt!.qrPayload;
-                                await Clipboard.setData(ClipboardData(text: qr));
+                                final qr = _receipt!.cashierQrPayload;
+                                await Clipboard.setData(
+                                    ClipboardData(text: qr));
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -204,7 +260,7 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
               ),
               const SizedBox(height: 8),
               Text(
-                'شغّل في Supabase:\n20261123220000_fix_prep_receipt_ambiguous.sql',
+                'شغّل في Supabase:\n20261124010000_fujitsu_order_sync.sql',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: palette.muted),
               ),
@@ -214,7 +270,63 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
       );
     }
     final r = _receipt!;
+    if (r.waitingFujitsu) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'جاري تسجيل الطلب على الكاشير...',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _pollingFujitsu
+                    ? 'انتظار رقم الطلب من فوجيتسو'
+                    : 'أعد المحاولة بعد تشغيل جسر المزامنة',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: palette.muted),
+              ),
+              if (r.fujitsuSyncError != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  r.fujitsuSyncError!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.red.shade700,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () {
+                  _pollTimer?.cancel();
+                  _pollTimer = null;
+                  _pollAttempts = 0;
+                  _load();
+                },
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('تحديث'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final when = DateFormat('dd/MM/yyyy hh:mm a').format(r.createdAt);
+    final qr = r.cashierQrPayload;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -228,7 +340,7 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
         const SizedBox(height: 12),
         Center(
           child: QrImageView(
-            data: r.qrPayload,
+            data: qr,
             size: 180,
             backgroundColor: Colors.white,
             padding: const EdgeInsets.all(8),
@@ -236,7 +348,7 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
         ),
         const SizedBox(height: 6),
         SelectableText(
-          r.qrPayload,
+          qr,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
@@ -246,7 +358,11 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
         ),
         const Divider(height: 28),
         _kv('الفرع', '${r.branchName} (${r.branchCode})'),
-        _kv('رقم الطلب', r.receiptNumber),
+        _kv('رقم الطلب', r.fujitsuOrderId ?? r.receiptNumber),
+        if (r.fujitsuCustomerNo != null)
+          _kv('رقم العميل (فوجيتسو)', r.fujitsuCustomerNo!),
+        if (r.fujitsuAddressId != null)
+          _kv('عنوان فوجيتسو', r.fujitsuAddressId!),
         _kv('وقت الطلب', when),
         _kv('المتلقي', r.takerName ?? '—'),
         _kv('المحضر', r.preparerName ?? '—'),

@@ -11,6 +11,11 @@ class PrepReceipt {
     required this.deliveryFee,
     required this.totalAmount,
     required this.items,
+    this.waitingFujitsu = false,
+    this.fujitsuOrderId,
+    this.fujitsuCustomerNo,
+    this.fujitsuAddressId,
+    this.fujitsuSyncError,
     this.takerName,
     this.preparerName,
     this.customerName,
@@ -42,6 +47,14 @@ class PrepReceipt {
   final double totalAmount;
   final String? posCustomerId;
   final String? fujitsuZoneId;
+
+  /// True while the local Python bridge has not yet written [fujitsuOrderId].
+  final bool waitingFujitsu;
+  final String? fujitsuOrderId;
+  final String? fujitsuCustomerNo;
+  final String? fujitsuAddressId;
+  final String? fujitsuSyncError;
+
   final List<PrepReceiptItem> items;
 
   int get itemCount => items.fold<int>(0, (s, i) => s + i.quantity);
@@ -49,6 +62,18 @@ class PrepReceipt {
   /// Items total without delivery (matches sample «الإجمالي» of products).
   double get itemsTotal =>
       items.fold<double>(0, (s, i) => s + i.lineTotal);
+
+  bool get hasFujitsuIds =>
+      (fujitsuOrderId?.trim().isNotEmpty ?? false) &&
+      (fujitsuCustomerNo?.trim().isNotEmpty ?? false) &&
+      (fujitsuAddressId?.trim().isNotEmpty ?? false);
+
+  /// Exact cashier QR from Fujitsu ids when available.
+  String get cashierQrPayload {
+    if (!hasFujitsuIds) return qrPayload;
+    final fee = deliveryFee.toStringAsFixed(2);
+    return 'DlvOrd,001,0,$fujitsuOrderId,0,0,$fujitsuCustomerNo,$fujitsuAddressId,0,$fee';
+  }
 
   String get phonesLabel {
     final a = customerPhone?.trim();
@@ -102,15 +127,33 @@ class PrepReceipt {
           _ => 0,
         };
 
+    final waiting = json['waiting_fujitsu'] == true ||
+        json['waiting_fujitsu']?.toString().toLowerCase() == 'true';
+    final fujitsuOrderId = text('fujitsu_order_id');
+    final fujitsuCustomerNo = text('fujitsu_customer_no');
+    final fujitsuAddressId = text('fujitsu_address_id');
+    final fee = money(json['delivery_fee']);
+    final hasFujitsu = fujitsuOrderId != null &&
+        fujitsuCustomerNo != null &&
+        fujitsuAddressId != null;
+    final builtQr = hasFujitsu
+        ? 'DlvOrd,001,0,$fujitsuOrderId,0,0,$fujitsuCustomerNo,$fujitsuAddressId,0,${fee.toStringAsFixed(2)}'
+        : (text('qr_payload') ?? '');
+
     return PrepReceipt(
       orderId: text('order_id') ?? '',
-      receiptNumber: text('receipt_number') ?? '',
-      qrPayload: text('qr_payload') ?? '',
+      receiptNumber: fujitsuOrderId ?? text('receipt_number') ?? '',
+      qrPayload: builtQr,
       storeName: text('store_name') ?? 'سفير ماركت',
       branchName: text('branch_name') ?? 'حي الزهور',
       branchCode: text('branch_code') ?? '001',
       createdAt: DateTime.tryParse('${json['created_at']}')?.toLocal() ??
           DateTime.now(),
+      waitingFujitsu: waiting && !hasFujitsu,
+      fujitsuOrderId: fujitsuOrderId,
+      fujitsuCustomerNo: fujitsuCustomerNo,
+      fujitsuAddressId: fujitsuAddressId,
+      fujitsuSyncError: text('fujitsu_sync_error'),
       takerName: text('taker_name'),
       preparerName: text('preparer_name'),
       customerName: text('customer_name'),
@@ -119,7 +162,7 @@ class PrepReceipt {
       address: text('address'),
       deliveryArea: text('delivery_area'),
       paymentMethod: text('payment_method'),
-      deliveryFee: money(json['delivery_fee']),
+      deliveryFee: fee,
       totalAmount: money(json['total_amount']),
       posCustomerId: text('pos_customer_id'),
       fujitsuZoneId: text('fujitsu_zone_id'),
