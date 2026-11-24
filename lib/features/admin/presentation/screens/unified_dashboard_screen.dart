@@ -41,6 +41,8 @@ import '../widgets/order_status_widgets.dart';
 import '../widgets/phone_order_column.dart';
 import '../widgets/prep_receipt_sheet.dart';
 import '../widgets/send_alternatives_sheet.dart';
+import '../../../orders/domain/order_editability.dart';
+import '../../../orders/presentation/widgets/edit_order_sheet.dart';
 import 'admin_order_search_view.dart';
 import 'admin_reports_view.dart';
 import 'admin_system_view.dart';
@@ -1404,6 +1406,17 @@ class _OrderDetailsView extends ConsumerWidget {
     final orderId = '${order['id']}';
     final preparerName = order['preparer_name']?.toString().trim();
     final hasPreparer = preparerName != null && preparerName.isNotEmpty;
+    final canEdit = !isDriver &&
+        orderAllowsLiveEdit(
+          status: status,
+          prepCompletedAt: order['prep_completed_at'],
+        );
+    final beingEdited = order['is_being_edited'] == true;
+    final deliveryFee = switch (order['delivery_fee']) {
+      final num n => n.toDouble(),
+      final String t => double.tryParse(t) ?? 0,
+      _ => 0.0,
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1426,6 +1439,36 @@ class _OrderDetailsView extends ConsumerWidget {
               icon: Icons.receipt_long_rounded,
               text: 'اختر المحضر أولاً ثم اطبع إيصال التحضير',
             ),
+          gap(),
+        ],
+        if (canEdit) ...[
+          _ActionCard(
+            key: const Key('action-edit-order'),
+            title: 'تعديل الطلب',
+            desc: beingEdited
+                ? 'جاري التعديل الآن'
+                : 'إضافة / حذف أصناف أو تغيير الكميات',
+            icon: Icons.edit_note_rounded,
+            color: const Color(0xFF00897B),
+            onTap: () async {
+              final saved = await showEditOrderSheet(
+                context,
+                orderId: orderId,
+                startedBy:
+                    showAdminFeatures ? 'admin' : 'taker',
+                deliveryFee: deliveryFee,
+              );
+              ref.invalidate(adminOrderItemsProvider(orderId));
+              if (saved && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    backgroundColor: AppColors.success,
+                    content: Text('تم حفظ تعديلات الطلب'),
+                  ),
+                );
+              }
+            },
+          ),
           gap(),
         ],
         if (status == OrderStatus.pending.value && !isDriver)
@@ -1698,41 +1741,82 @@ class _FinishPrepButton extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     final checkedIds = ref.watch(orderPrepChecklistProvider);
     final itemsAsync = ref.watch(adminOrderItemsProvider(order['id']));
+    final beingEdited = order['is_being_edited'] == true;
+
+    // When the edit lock clears, refresh items so the preparer sees finals.
+    ref.listen(liveOrdersProvider, (previous, next) {
+      final prevList = previous?.valueOrNull;
+      final nextList = next.valueOrNull;
+      if (prevList == null || nextList == null) return;
+      Map<String, dynamic>? prevOrder;
+      Map<String, dynamic>? nextOrder;
+      for (final row in prevList) {
+        if ('${row['id']}' == '${order['id']}') {
+          prevOrder = row;
+          break;
+        }
+      }
+      for (final row in nextList) {
+        if ('${row['id']}' == '${order['id']}') {
+          nextOrder = row;
+          break;
+        }
+      }
+      if (prevOrder == null || nextOrder == null) return;
+      if (prevOrder['is_being_edited'] == true &&
+          nextOrder['is_being_edited'] != true) {
+        ref.invalidate(adminOrderItemsProvider('${order['id']}'));
+      }
+    });
 
     final totalItems = itemsAsync.valueOrNull?.length ?? 0;
     final allChecked = totalItems > 0 && checkedIds.length == totalItems;
+    final locked = beingEdited;
 
     return SizedBox(
       width: double.infinity,
       height: 56,
       child: FilledButton.icon(
         key: const Key('action-finish-prep'),
-        icon: const Icon(Icons.inventory_rounded),
-        label: Text(l10n.adminFinishOrderPreparation,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+        icon: Icon(locked ? Icons.lock_clock_rounded : Icons.inventory_rounded),
+        label: Text(
+          locked
+              ? (order['editing_started_by']?.toString() == 'customer'
+                  ? 'بانتظار تعديل العميل للطلب'
+                  : 'بانتظار تعديل الطلب')
+              : l10n.adminFinishOrderPreparation,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+        ),
         style: FilledButton.styleFrom(
-            backgroundColor: allChecked ? AppColors.success : Colors.grey),
-        onPressed: () async {
-          final messenger = ScaffoldMessenger.of(context);
-          if (!allChecked) {
-            messenger.showSnackBar(SnackBar(
-                content: Text(l10n.adminCheckAllItemsFirst),
-                backgroundColor: AppColors.secondary));
-            return;
-          }
-          try {
-            await Supabase.instance.client.from('orders').update({
-              'prep_completed_at': DateTime.now().toUtc().toIso8601String(),
-            }).eq('id', order['id']);
-            messenger.showSnackBar(SnackBar(
-                content: Text(l10n.adminPreparationFinished),
-                backgroundColor: AppColors.success));
-          } on PostgrestException catch (error) {
-            messenger.showSnackBar(SnackBar(
-                content: Text(error.message),
-                backgroundColor: AppColors.secondary));
-          }
-        },
+          backgroundColor: locked
+              ? const Color(0xFFFFA000)
+              : (allChecked ? AppColors.success : Colors.grey),
+          foregroundColor: locked ? Colors.black87 : null,
+        ),
+        onPressed: locked
+            ? null
+            : () async {
+                final messenger = ScaffoldMessenger.of(context);
+                if (!allChecked) {
+                  messenger.showSnackBar(SnackBar(
+                      content: Text(l10n.adminCheckAllItemsFirst),
+                      backgroundColor: AppColors.secondary));
+                  return;
+                }
+                try {
+                  await Supabase.instance.client.from('orders').update({
+                    'prep_completed_at':
+                        DateTime.now().toUtc().toIso8601String(),
+                  }).eq('id', order['id']);
+                  messenger.showSnackBar(SnackBar(
+                      content: Text(l10n.adminPreparationFinished),
+                      backgroundColor: AppColors.success));
+                } on PostgrestException catch (error) {
+                  messenger.showSnackBar(SnackBar(
+                      content: Text(error.message),
+                      backgroundColor: AppColors.secondary));
+                }
+              },
       ),
     );
   }

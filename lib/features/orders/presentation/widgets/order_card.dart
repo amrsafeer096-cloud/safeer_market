@@ -14,6 +14,7 @@ import '../../../cart/domain/weight_options.dart';
 import '../../domain/entities/customer_order.dart';
 import '../providers/orders_providers.dart';
 import 'cancel_order_dialog.dart';
+import 'edit_order_sheet.dart';
 import 'rate_order_dialog.dart';
 
 class OrderStatusStyle {
@@ -450,6 +451,36 @@ class _OrderDetailsState extends ConsumerState<_OrderDetails> {
         ],
         const SizedBox(height: 14),
         OrderAlternativesPanel(orderId: order.id),
+        if (order.canEditItems) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 48,
+            child: FilledButton.tonalIcon(
+              key: Key('edit-order-${order.id}'),
+              onPressed: () async {
+                final saved = await showEditOrderSheet(
+                  context,
+                  orderId: order.id,
+                  startedBy: 'customer',
+                  deliveryFee: order.deliveryFee,
+                );
+                if (!context.mounted) return;
+                ref.invalidate(customerOrderItemsProvider(order.id));
+                if (saved) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      backgroundColor: AppColors.success,
+                      content: Text('تم حفظ تعديلات الطلب'),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.edit_note_rounded),
+              label: const Text('تعديل الطلب'),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
         Text(
           l10n.orderCardItemsTitle,
           style: TextStyle(

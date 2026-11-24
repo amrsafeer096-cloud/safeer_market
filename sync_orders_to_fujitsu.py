@@ -752,6 +752,129 @@ def sync_one_order(order: dict[str, Any]) -> None:
         conn.close()
 
 
+def _rebuild_fujitsu_items(
+    *,
+    order_id: str,
+    fujitsu_order_id_str: str,
+    customer_no: Any,
+    preparer_name: str,
+    created_at: Any,
+    total_value: float | None = None,
+) -> None:
+    """Replace hd_order_items for an already-synced Fujitsu order."""
+    if not fujitsu_order_id_str or fujitsu_order_id_str.upper() == "SKIPPED":
+        return
+    items = fetch_order_items(order_id)
+    conn = connect_sql()
+    cursor = conn.cursor()
+    try:
+        fujitsu_order_id = int(fujitsu_order_id_str)
+        order_no = int(fujitsu_order_id_str[-6:])
+        try:
+            order_date = (
+                datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+                .replace(tzinfo=None)
+                if created_at
+                else datetime.now()
+            )
+        except Exception:
+            order_date = datetime.now()
+        picker_id, picker_name = match_picker(cursor, preparer_name)
+
+        cursor.execute(
+            "DELETE FROM hd_order_items WHERE OrderId = ?",
+            (fujitsu_order_id,),
+        )
+        line_total_sum = 0.0
+        for line_no, item in enumerate(items):
+            insert_hd_order_item(
+                cursor,
+                order_id=fujitsu_order_id,
+                order_no=order_no,
+                order_date=order_date,
+                line_no=line_no,
+                customer_no=int(customer_no or 0),
+                picker_id=picker_id,
+                picker_name=picker_name,
+                item=item,
+            )
+            product = product_of(item)
+            qty = float(item.get("quantity") or 1)
+            unit_price = float(item.get("price_at_time") or 0)
+            line_total_sum += unit_price * qty
+
+        header_total = (
+            float(total_value)
+            if total_value is not None
+            else line_total_sum
+        )
+        cursor.execute(
+            """
+            UPDATE hd_orders
+            SET OrderLineCount = ?,
+                TotalValue = ?,
+                ModifiedTime = GETDATE(),
+                DateModified = GETDATE()
+            WHERE OrderId = ?
+            """,
+            (len(items), header_total, fujitsu_order_id),
+        )
+        conn.commit()
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        supabase.table("orders").update(
+            {
+                "fujitsu_synced_at": now_iso,
+                "fujitsu_items_synced_at": now_iso,
+                "fujitsu_sync_error": None,
+            }
+        ).eq("id", order_id).execute()
+        log(f"🔁 Fujitsu items rebuilt for {fujitsu_order_id_str}")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def sync_edited_fujitsu_items() -> None:
+    """Re-sync hd_order_items when Supabase items changed after Fujitsu sync."""
+    res = (
+        supabase.table("orders")
+        .select(
+            "id, created_at, preparer_name, total_amount, "
+            "fujitsu_order_id, fujitsu_customer_no, "
+            "items_updated_at, fujitsu_items_synced_at, is_being_edited"
+        )
+        .not_.is_("fujitsu_order_id", "null")
+        .neq("fujitsu_order_id", "SKIPPED")
+        .eq("is_being_edited", False)
+        .not_.is_("items_updated_at", "null")
+        .order("items_updated_at")
+        .limit(20)
+        .execute()
+    )
+    for order in res.data or []:
+        fujitsu_order_id = str(order.get("fujitsu_order_id") or "").strip()
+        items_updated = order.get("items_updated_at")
+        items_synced = order.get("fujitsu_items_synced_at")
+        if not fujitsu_order_id or not items_updated:
+            continue
+        if items_synced and str(items_updated) <= str(items_synced):
+            continue
+        try:
+            _rebuild_fujitsu_items(
+                order_id=str(order["id"]),
+                fujitsu_order_id_str=fujitsu_order_id,
+                customer_no=order.get("fujitsu_customer_no"),
+                preparer_name=str(order.get("preparer_name") or ""),
+                created_at=order.get("created_at"),
+                total_value=float(order.get("total_amount") or 0),
+            )
+        except Exception as exc:
+            log(f"⚠️ edited-items sync failed for {fujitsu_order_id}: {exc}")
+
+
 def sync_substitutions() -> None:
     """Push approved alternatives onto already-synced Fujitsu order lines."""
     alts = (
@@ -759,7 +882,8 @@ def sync_substitutions() -> None:
         .select(
             "id, order_id, status, created_at, "
             "orders!inner(fujitsu_order_id, fujitsu_customer_no, fujitsu_synced_at, "
-            "preparer_name, created_at)"
+            "fujitsu_items_synced_at, preparer_name, created_at, total_amount, "
+            "is_being_edited)"
         )
         .in_("status", ["selected", "removed"])
         .not_.is_("orders.fujitsu_order_id", "null")
@@ -779,75 +903,32 @@ def sync_substitutions() -> None:
         order_wrap = alt.get("orders") or {}
         if isinstance(order_wrap, list):
             order_wrap = order_wrap[0] if order_wrap else {}
+        if order_wrap.get("is_being_edited") is True:
+            continue
         fujitsu_order_id_str = str(order_wrap.get("fujitsu_order_id") or "").strip()
-        customer_no = order_wrap.get("fujitsu_customer_no")
-        synced_at = order_wrap.get("fujitsu_synced_at")
+        synced_at = (
+            order_wrap.get("fujitsu_items_synced_at")
+            or order_wrap.get("fujitsu_synced_at")
+        )
         alt_created = alt.get("created_at")
-        if not fujitsu_order_id_str:
+        if not fujitsu_order_id_str or fujitsu_order_id_str.upper() == "SKIPPED":
             continue
         if synced_at and alt_created and str(alt_created) <= str(synced_at):
             continue
         seen_orders.add(order_id)
-
-        items = fetch_order_items(order_id)
-        conn = connect_sql()
-        cursor = conn.cursor()
         try:
-            fujitsu_order_id = int(fujitsu_order_id_str)
-            order_no = int(fujitsu_order_id_str[-6:])
-            created_at = order_wrap.get("created_at")
-            try:
-                order_date = (
-                    datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
-                    .replace(tzinfo=None)
-                    if created_at
-                    else datetime.now()
-                )
-            except Exception:
-                order_date = datetime.now()
-            picker_id, picker_name = match_picker(
-                cursor, str(order_wrap.get("preparer_name") or "")
+            _rebuild_fujitsu_items(
+                order_id=order_id,
+                fujitsu_order_id_str=fujitsu_order_id_str,
+                customer_no=order_wrap.get("fujitsu_customer_no"),
+                preparer_name=str(order_wrap.get("preparer_name") or ""),
+                created_at=order_wrap.get("created_at"),
+                total_value=float(order_wrap.get("total_amount") or 0)
+                if order_wrap.get("total_amount") is not None
+                else None,
             )
-
-            cursor.execute(
-                "DELETE FROM hd_order_items WHERE OrderId = ?",
-                (fujitsu_order_id,),
-            )
-            for line_no, item in enumerate(items):
-                insert_hd_order_item(
-                    cursor,
-                    order_id=fujitsu_order_id,
-                    order_no=order_no,
-                    order_date=order_date,
-                    line_no=line_no,
-                    customer_no=int(customer_no or 0),
-                    picker_id=picker_id,
-                    picker_name=picker_name,
-                    item=item,
-                )
-            cursor.execute(
-                """
-                UPDATE hd_orders
-                SET OrderLineCount = ?, ModifiedTime = GETDATE(),
-                    DateModified = GETDATE()
-                WHERE OrderId = ?
-                """,
-                (len(items), fujitsu_order_id),
-            )
-            conn.commit()
-            supabase.table("orders").update(
-                {
-                    "fujitsu_synced_at": datetime.utcnow().isoformat() + "Z",
-                    "fujitsu_sync_error": None,
-                }
-            ).eq("id", order_id).execute()
-            log(f"🔁 substitutions applied on Fujitsu order {fujitsu_order_id_str}")
         except Exception as exc:
-            conn.rollback()
             log(f"⚠️ substitution sync failed for {fujitsu_order_id_str}: {exc}")
-        finally:
-            cursor.close()
-            conn.close()
 
 
 def main() -> None:
@@ -865,6 +946,10 @@ def main() -> None:
                     sync_one_order(order)
                 except Exception:
                     traceback.print_exc()
+            try:
+                sync_edited_fujitsu_items()
+            except Exception:
+                traceback.print_exc()
             try:
                 sync_substitutions()
             except Exception:

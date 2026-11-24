@@ -1,4 +1,5 @@
 import '../../../admin/domain/entities/order_status.dart';
+import '../order_editability.dart';
 
 class OrdersFailure implements Exception {
   const OrdersFailure(this.message);
@@ -67,6 +68,9 @@ class CustomerOrder {
     this.driverLongitude,
     this.driverName,
     this.driverPhone,
+    this.deliveryFee = 0,
+    this.prepCompletedAt,
+    this.isBeingEdited = false,
   });
 
   factory CustomerOrder.fromRow(Map<String, dynamic> row) {
@@ -76,6 +80,7 @@ class CustomerOrder {
     final reason = row['cancellation_reason']?.toString().trim();
     final driverName = row['driver_name']?.toString().trim();
     final driverPhone = row['driver_phone']?.toString().trim();
+    final prep = row['prep_completed_at'];
     return CustomerOrder(
       id: row['id'].toString(),
       createdAt: created is DateTime
@@ -93,6 +98,13 @@ class CustomerOrder {
       driverName: driverName == null || driverName.isEmpty ? null : driverName,
       driverPhone:
           driverPhone == null || driverPhone.isEmpty ? null : driverPhone,
+      deliveryFee: _toDouble(row['delivery_fee']) ?? 0,
+      prepCompletedAt: prep == null || '$prep'.trim().isEmpty
+          ? null
+          : (prep is DateTime
+              ? prep.toLocal()
+              : DateTime.tryParse('$prep')?.toLocal()),
+      isBeingEdited: row['is_being_edited'] == true,
     );
   }
 
@@ -112,6 +124,9 @@ class CustomerOrder {
   final double? driverLongitude;
   final String? driverName;
   final String? driverPhone;
+  final double deliveryFee;
+  final DateTime? prepCompletedAt;
+  final bool isBeingEdited;
 
   String get shortId => id.length > 8 ? id.substring(0, 8) : id;
 
@@ -140,6 +155,12 @@ class CustomerOrder {
         'preparing',
       }.contains(normalizedStatus);
 
+  /// Live item editing before prep is finished.
+  bool get canEditItems => orderAllowsLiveEdit(
+        status: status,
+        prepCompletedAt: prepCompletedAt,
+      );
+
   CustomerOrder copyWith({
     String? status,
     String? cancellationReason,
@@ -157,6 +178,9 @@ class CustomerOrder {
         driverLongitude: driverLongitude,
         driverName: driverName,
         driverPhone: driverPhone,
+        deliveryFee: deliveryFee,
+        prepCompletedAt: prepCompletedAt,
+        isBeingEdited: isBeingEdited,
       );
 
   static double? _toDouble(Object? value) => switch (value) {

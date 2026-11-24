@@ -58,6 +58,7 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
             .from('orders')
             .select(
               'id, created_at, total_amount, status, address_details, '
+              'delivery_fee, prep_completed_at, is_being_edited, '
               'delivery_latitude, delivery_longitude, '
               'driver_lat, driver_lng, driver_name, driver_phone',
             )
