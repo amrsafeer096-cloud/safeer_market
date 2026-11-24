@@ -34,11 +34,31 @@ import '../../domain/repositories/checkout_repository.dart';
 import '../providers/checkout_providers.dart';
 import 'payment_screen.dart';
 
-class CheckoutScreen extends ConsumerWidget {
+class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CheckoutScreen> createState() => _CheckoutScreenState();
+}
+
+class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
+  /// Owned here so confirm always reads the same instance the TextField uses.
+  late final TextEditingController _phoneController;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final isEmpty = ref.watch(cartProvider.select((items) => items.isEmpty));
 
@@ -64,7 +84,7 @@ class CheckoutScreen extends ConsumerWidget {
         appBar: AppBar(title: Text(l10n.checkoutTitle)),
         bottomNavigationBar: isEmpty
             ? null
-            : _ConfirmBar(onConfirm: () => _confirm(context, ref)),
+            : _ConfirmBar(onConfirm: _confirm),
         body: isEmpty
             ? const _EmptyCheckout()
             : ListView(
@@ -80,7 +100,7 @@ class CheckoutScreen extends ConsumerWidget {
                   _Section(
                     icon: Icons.phone_iphone_rounded,
                     title: 'رقم الموبايل للتوصيل *',
-                    child: const _DeliveryPhoneSection(),
+                    child: _DeliveryPhoneSection(controller: _phoneController),
                   ),
                   const SizedBox(height: 16),
                   _Section(
@@ -102,7 +122,8 @@ class CheckoutScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirm(BuildContext context, WidgetRef ref) async {
+  Future<void> _confirm() async {
+    final context = this.context;
     final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
 
@@ -139,10 +160,9 @@ class CheckoutScreen extends ConsumerWidget {
         return;
     }
 
-    final phone = EgyptianPhone.normalize(
-      ref.read(checkoutDeliveryPhoneProvider),
-    );
-    if (!EgyptianPhone.isValid(phone)) {
+    // Always read the TextField controller — never the autoDispose provider.
+    final phone = EgyptianPhone.normalize(_phoneController.text);
+    if (!EgyptianPhone.pattern.hasMatch(phone)) {
       messenger.showSnackBar(
         SnackBar(
           backgroundColor: AppColors.secondary,
@@ -155,7 +175,10 @@ class CheckoutScreen extends ConsumerWidget {
       );
       return;
     }
-    ref.read(checkoutDeliveryPhoneProvider.notifier).state = phone;
+    _phoneController.value = TextEditingValue(
+      text: phone,
+      selection: TextSelection.collapsed(offset: phone.length),
+    );
 
     final paymentMethod = ref.read(selectedPaymentMethodProvider);
     final total = ref.read(checkoutTotalProvider);
@@ -314,7 +337,9 @@ class _ManageAddressesButton extends ConsumerWidget {
 }
 
 class _DeliveryPhoneSection extends ConsumerStatefulWidget {
-  const _DeliveryPhoneSection();
+  const _DeliveryPhoneSection({required this.controller});
+
+  final TextEditingController controller;
 
   @override
   ConsumerState<_DeliveryPhoneSection> createState() =>
@@ -322,33 +347,22 @@ class _DeliveryPhoneSection extends ConsumerStatefulWidget {
 }
 
 class _DeliveryPhoneSectionState extends ConsumerState<_DeliveryPhoneSection> {
-  late final TextEditingController _controller;
   var _seeded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(
-      text: ref.read(checkoutDeliveryPhoneProvider),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   void _applySuggestion(String? suggested) {
     if (_seeded || suggested == null) return;
-    if (!EgyptianPhone.isValid(suggested)) return;
-    if (_controller.text.trim().isNotEmpty) {
+    final normalized = EgyptianPhone.normalize(suggested);
+    if (!EgyptianPhone.pattern.hasMatch(normalized)) return;
+    if (widget.controller.text.trim().isNotEmpty) {
       _seeded = true;
       return;
     }
     _seeded = true;
-    _controller.text = suggested;
-    ref.read(checkoutDeliveryPhoneProvider.notifier).state = suggested;
+    widget.controller.value = TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+    );
+    setState(() {});
   }
 
   @override
@@ -358,24 +372,25 @@ class _DeliveryPhoneSectionState extends ConsumerState<_DeliveryPhoneSection> {
     ref.listen(checkoutPhoneBootstrapProvider, (_, next) {
       next.whenData(_applySuggestion);
     });
-    final bootstrap = ref.watch(checkoutPhoneBootstrapProvider);
-    bootstrap.whenData(_applySuggestion);
+    ref.watch(checkoutPhoneBootstrapProvider).whenData(_applySuggestion);
 
-    final current = EgyptianPhone.normalize(_controller.text);
-    final valid = EgyptianPhone.isValid(current);
+    final current = EgyptianPhone.normalize(widget.controller.text);
+    final valid = EgyptianPhone.pattern.hasMatch(current);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TextField(
           key: const Key('checkout-delivery-phone'),
-          controller: _controller,
+          controller: widget.controller,
           keyboardType: TextInputType.phone,
           textDirection: TextDirection.ltr,
           textAlign: TextAlign.end,
           autofillHints: const [AutofillHints.telephoneNumber],
           inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[\d+\s-]')),
+            FilteringTextInputFormatter.allow(
+              RegExp(r'[0-9٠-٩۰-۹+\s\-]'),
+            ),
             LengthLimitingTextInputFormatter(14),
           ],
           decoration: InputDecoration(
@@ -383,14 +398,11 @@ class _DeliveryPhoneSectionState extends ConsumerState<_DeliveryPhoneSection> {
             hintText: '01xxxxxxxxx',
             hintTextDirection: TextDirection.ltr,
             prefixIcon: const Icon(Icons.phone_iphone_rounded),
-            errorText: _controller.text.trim().isEmpty
+            errorText: widget.controller.text.trim().isEmpty
                 ? null
                 : (valid ? null : l10n.authEnterValidEgyptianPhone),
           ),
-          onChanged: (value) {
-            ref.read(checkoutDeliveryPhoneProvider.notifier).state = value;
-            setState(() {});
-          },
+          onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 8),
         Text(

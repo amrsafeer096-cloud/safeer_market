@@ -29,38 +29,26 @@ final clockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 final selectedPaymentMethodProvider =
     StateProvider<PaymentMethod>((ref) => PaymentMethod.cashOnDelivery);
 
-/// Delivery mobile typed / autofilled on the checkout screen (`01xxxxxxxxx`).
-final checkoutDeliveryPhoneProvider =
-    StateProvider.autoDispose<String>((ref) => '');
-
-/// Prefills [checkoutDeliveryPhoneProvider] from profile / last order once.
+/// Suggested delivery mobile from profile / auth / last order (autofill only).
+/// The TextField's controller owned by [CheckoutScreen] is the source of truth.
 final checkoutPhoneBootstrapProvider =
     FutureProvider.autoDispose<String?>((ref) async {
   final user = ref.watch(currentUserProvider);
   if (user == null) return null;
 
-  String? suggested;
   final profile = await ref.watch(userProfileProvider.future);
   final fromProfile = EgyptianPhone.normalize(profile?.phone ?? '');
-  if (EgyptianPhone.isValid(fromProfile)) {
-    suggested = fromProfile;
-  } else {
-    final fromAuth = EgyptianPhone.normalize(user.phone ?? '');
-    if (EgyptianPhone.isValid(fromAuth)) {
-      suggested = fromAuth;
-    } else {
-      suggested = await ref
-          .read(checkoutRepositoryProvider)
-          .fetchSuggestedDeliveryPhone(user.id);
-    }
-  }
+  if (EgyptianPhone.pattern.hasMatch(fromProfile)) return fromProfile;
 
-  if (suggested != null &&
-      EgyptianPhone.isValid(suggested) &&
-      ref.read(checkoutDeliveryPhoneProvider).trim().isEmpty) {
-    ref.read(checkoutDeliveryPhoneProvider.notifier).state = suggested;
-  }
-  return suggested;
+  final fromAuth = EgyptianPhone.normalize(user.phone ?? '');
+  if (EgyptianPhone.pattern.hasMatch(fromAuth)) return fromAuth;
+
+  final fromOrders = await ref
+      .read(checkoutRepositoryProvider)
+      .fetchSuggestedDeliveryPhone(user.id);
+  if (fromOrders == null) return null;
+  final normalized = EgyptianPhone.normalize(fromOrders);
+  return EgyptianPhone.pattern.hasMatch(normalized) ? normalized : null;
 });
 
 /// InstaPay transfer screenshot selected at checkout (before upload).
