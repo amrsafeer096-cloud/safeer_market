@@ -5,8 +5,8 @@ import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 
-/// Writes an image to the system clipboard as `image/png` via
-/// `ClipboardItem` so Chrome can paste into WhatsApp Desktop (`Ctrl+V`).
+/// Writes an image to the system clipboard as `image/png` via the browser
+/// `ClipboardItem` API (JS interop — `dart:html` has no usable ClipboardItem).
 Future<bool> copyImageBlobToWebClipboard(
   Uint8List bytes, {
   String mimeType = 'image/png',
@@ -55,35 +55,35 @@ Future<html.Blob> _ensurePngBlob(Uint8List bytes, String mime) async {
   }
   final canvas = html.CanvasElement(width: w, height: h);
   canvas.context2D.drawImage(img, 0, 0);
-  final blob = await canvas.toBlob('image/png');
-  if (blob == null) throw StateError('toBlob failed');
-  return blob;
+  // dart:html's toBlob is non-nullable on current SDKs.
+  return canvas.toBlob('image/png');
 }
 
 Future<bool> _writeClipboardItem(html.Blob pngBlob) async {
   try {
-    final item = html.ClipboardItem({'image/png': pngBlob});
-    final clipboard = html.window.navigator.clipboard;
+    final clipboard = js_util.getProperty(
+      html.window.navigator,
+      'clipboard',
+    );
     if (clipboard == null) return false;
-    await clipboard.write([item]);
+
+    final ctor = js_util.getProperty(html.window, 'ClipboardItem');
+    if (ctor == null) return false;
+
+    // navigator.clipboard.write([new ClipboardItem({'image/png': blob})])
+    // Use JS interop only — dart:html has no ClipboardItem constructor and
+    // its Clipboard.write expects DataTransfer, not a list of items.
+    final item = js_util.callConstructor(
+      ctor,
+      [js_util.jsify({'image/png': pngBlob})],
+    );
+    final arrayCtor = js_util.getProperty(html.window, 'Array');
+    final items = js_util.callConstructor(arrayCtor, [item]);
+    await js_util.promiseToFuture(
+      js_util.callMethod(clipboard, 'write', [items]),
+    );
     return true;
   } catch (_) {
-    try {
-      final ctor = js_util.getProperty(html.window, 'ClipboardItem');
-      final item = js_util.callConstructor(
-        ctor,
-        [js_util.jsify({'image/png': pngBlob})],
-      );
-      final navClipboard =
-          js_util.getProperty(html.window.navigator, 'clipboard');
-      await js_util.promiseToFuture(
-        js_util.callMethod(navClipboard, 'write', [
-          js_util.jsify([item]),
-        ]),
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return false;
   }
 }
