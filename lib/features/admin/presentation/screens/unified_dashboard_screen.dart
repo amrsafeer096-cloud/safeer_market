@@ -272,9 +272,79 @@ class _UnifiedDashboardScreenState
   final Set<String> _locallyPlacedOrderIds = {};
 
   @override
+  void initState() {
+    super.initState();
+    // Capture Esc at the platform level so GoRouter / the previous
+    // «المزيد» route never see it while this dashboard is mounted.
+    HardwareKeyboard.instance.addHandler(_onHardwareEscape);
+  }
+
+  @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareEscape);
     _audioPlayer.dispose();
     super.dispose();
+  }
+
+  /// Always consumes Esc while the admin dashboard is alive.
+  bool _onHardwareEscape(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+    if (!mounted) return false;
+    _handleEscape();
+    return true;
+  }
+
+  /// Close inner overlays / step back inside the dashboard only.
+  /// Never pops the `/admin` route (exit is the AppBar arrow only).
+  void _handleEscape() {
+    if (!mounted) return;
+
+    // Close the mobile drawer if open.
+    final scaffold = Scaffold.maybeOf(context);
+    if (scaffold?.isDrawerOpen ?? false) {
+      scaffold!.closeDrawer();
+      return;
+    }
+
+    // Pop dialogs / sheets / menus only — leave page routes alone.
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    var closedOverlay = false;
+    rootNav.popUntil((route) {
+      if (route is PopupRoute) {
+        closedOverlay = true;
+        return false;
+      }
+      return true;
+    });
+    if (closedOverlay) return;
+
+    final activeMenu = ref.read(adminMenuProvider);
+    final selectedId = ref.read(selectedOrderIdProvider);
+
+    // Dismiss product search popup on تلقي الطلبات.
+    if (activeMenu == AdminMenu.receiveOrders &&
+        ref.read(phoneOrderSearchOpenProvider)) {
+      ref.read(phoneOrderDismissSearchProvider.notifier).state++;
+      FocusManager.instance.primaryFocus?.unfocus();
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    // Order status detail → list.
+    if (activeMenu == AdminMenu.orderStatus && selectedId != null) {
+      ref.read(selectedOrderIdProvider.notifier).state = null;
+      return;
+    }
+
+    // Locked customer with empty cart → customer lookup.
+    if (activeMenu == AdminMenu.receiveOrders) {
+      final order = ref.read(phoneOrderControllerProvider);
+      if (order.customer != null && order.lines.isEmpty) {
+        ref.read(phoneOrderControllerProvider.notifier).clear();
+      }
+    }
+    // Otherwise: stay on the dashboard main screen (no route pop).
   }
 
   void _handleAlarms(List<Map<String, dynamic>> orders) {
@@ -613,61 +683,24 @@ class _UnifiedDashboardScreenState
         _ => orderStatusBody(),
       };
 
-      void onEscape() {
-        // 1) Close dialogs / sheets only — never leave `/admin`.
-        final rootNav = Navigator.of(context, rootNavigator: true);
-        var closedOverlay = false;
-        rootNav.popUntil((route) {
-          if (route is PopupRoute) {
-            closedOverlay = true;
-            return false;
-          }
-          return true;
-        });
-        if (closedOverlay) return;
-
-        final localNav = Navigator.of(context);
-        if (localNav.canPop()) {
-          localNav.pop();
-          return;
-        }
-
-        // 2) Dismiss product search popup / clear focus on تلقي الطلبات.
-        if (activeMenu == AdminMenu.receiveOrders &&
-            ref.read(phoneOrderSearchOpenProvider)) {
-          ref.read(phoneOrderDismissSearchProvider.notifier).state++;
-          FocusManager.instance.primaryFocus?.unfocus();
-          return;
-        }
-        FocusManager.instance.primaryFocus?.unfocus();
-
-        // 3) On order status detail, step back to the list.
-        if (activeMenu == AdminMenu.orderStatus && selectedId != null) {
-          ref.read(selectedOrderIdProvider.notifier).state = null;
-          return;
-        }
-        // 4) Clear the locked phone-order customer (back to search).
-        if (activeMenu == AdminMenu.receiveOrders &&
-            ref.read(phoneOrderControllerProvider).customer != null &&
-            ref.read(phoneOrderControllerProvider).lines.isEmpty) {
-          ref.read(phoneOrderControllerProvider.notifier).clear();
-        }
-        // Stop here: do not pop the admin route / go to the store.
-      }
-
       return PopScope(
+        // System / gesture back must not leave لوحة التحكم والإدارة.
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) return;
-          onEscape();
+          _handleEscape();
         },
-        child: CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.escape): onEscape,
+        child: Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent &&
+                event.logicalKey == LogicalKeyboardKey.escape) {
+              _handleEscape();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
           },
-          child: Focus(
-            autofocus: true,
-            child: Scaffold(
+          child: Scaffold(
         backgroundColor:
             palette.isDark ? palette.background : const Color(0xFFF4F6F8),
         drawer: (!isDesktop && showSystemSidebar)
@@ -798,7 +831,6 @@ class _UnifiedDashboardScreenState
           ],
         ),
       ),
-          ),
         ),
       );
     });

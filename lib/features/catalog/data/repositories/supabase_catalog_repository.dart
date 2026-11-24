@@ -88,14 +88,38 @@ class SupabaseCatalogRepository implements CatalogRepository {
         escaped.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     final firstPart = words.isNotEmpty ? words.first : escaped;
 
+    // Customer search is in-stock only (stock > 0 + active).
     final [barcodeRows, nameRows] = await Future.wait([
-      _products().ilike('barcode', escaped).limit(100),
-      _products().ilike('name', '%$firstPart%').order('name').limit(100),
+      _products().inStock().ilike('barcode', escaped).limit(100),
+      _products()
+          .inStock()
+          .ilike('name', '%$firstPart%')
+          .order('name')
+          .limit(100),
     ]);
 
     final raw = [...barcodeRows, ...nameRows];
     final rawProducts = raw.map(ProductModel.fromJson).toList();
     return _removeDuplicates(rawProducts);
+  }
+
+  /// Barcode lookup that may return OOS rows — used only to show
+  /// «غير متوفر» after an in-stock search misses. Never listed in grids.
+  Future<Product?> lookupBarcodeAnyStock(String barcode) async {
+    final escaped = barcode
+        .trim()
+        .replaceAll(r'\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
+    if (escaped.isEmpty) return null;
+    final row = await _client
+        .from('products')
+        .select()
+        .ilike('barcode', escaped)
+        .limit(1)
+        .maybeSingle();
+    if (row == null) return null;
+    return ProductModel.fromJson(row);
   }
 
   @override

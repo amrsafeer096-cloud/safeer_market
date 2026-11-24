@@ -229,9 +229,10 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
 
     var request = _client.from('products').select(_productColumns);
     request = switch (filter) {
+      // «المخزون الفعلي»: active + stock > 0 only.
       ProductSearchFilterMode.inStock => request.inStock(),
-      ProductSearchFilterMode.allItems =>
-        request.not('is_active', 'is', false),
+      // «كل الأصناف»: no stock / is_active filters — show exact stock.
+      ProductSearchFilterMode.allItems => request,
       ProductSearchFilterMode.offers => request
           .not('is_active', 'is', false)
           .not('discount_price', 'is', null)
@@ -261,13 +262,14 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
         ];
       }
       // Every typed word, in any order (the query only filtered the first).
-      final lowered = [for (final w in words) w.toLowerCase()];
       return products
           .where((product) {
-            final name = product.name.toLowerCase();
+            final name = product.name;
             final barcode = product.barcode ?? '';
-            return lowered.every(
-              (word) => name.contains(word) || barcode.startsWith(word),
+            return words.every(
+              (word) =>
+                  arabicSearchContains(name, word) ||
+                  arabicSearchContains(barcode, word),
             );
           })
           .take(productLimit)

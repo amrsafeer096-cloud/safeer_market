@@ -223,12 +223,21 @@ class FakeCatalogRepository implements CatalogRepository {
     );
   }
 
-  /// Returns every product so tests exercise the app's own matching in
-  /// productSearchProvider rather than this fake's.
+  /// In-stock products so tests match the customer search contract.
   @override
   Future<List<Product>> searchProducts(String query) async {
     searches.add(query);
-    return _all.toList();
+    return [for (final p in _all) if (p.inStock) p];
+  }
+
+  @override
+  Future<Product?> lookupBarcodeAnyStock(String barcode) async {
+    final q = barcode.trim().toLowerCase();
+    if (q.isEmpty) return null;
+    for (final p in _all) {
+      if ((p.barcode ?? '').trim().toLowerCase() == q) return p;
+    }
+    return null;
   }
 
   @override

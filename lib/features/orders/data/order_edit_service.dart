@@ -82,8 +82,8 @@ class OrderEditService {
         );
     request = switch (filter) {
       ProductSearchFilterMode.inStock => request.inStock(),
-      ProductSearchFilterMode.allItems =>
-        request.not('is_active', 'is', false),
+      // «كل الأصناف»: no stock / is_active filters — show exact stock.
+      ProductSearchFilterMode.allItems => request,
       ProductSearchFilterMode.offers => request
           .not('is_active', 'is', false)
           .not('discount_price', 'is', null)

@@ -28,17 +28,22 @@ class SupabaseFavoritesRepository implements FavoritesRepository {
 
   @override
   Future<List<Product>> fetchFavoriteProducts(String userId) async {
-    // A filter on the embedded table nulls `products` instead of dropping the
-    // favorite row; such rows are skipped below.
-    final rows = await _client
+    // `!inner` + stock/active filters drop OOS favorites for customers.
+    // Admins (`includeProductsWithoutImage`) still see every favorited row.
+    var request = _client
         .from(_table)
-        .select('created_at, products(*)')
+        .select('created_at, products!inner(*)')
         .eq('user_id', userId)
         .withImageUnless(
           includeProductsWithoutImage,
           column: 'products.image_url',
-        )
-        .order('created_at', ascending: false);
+        );
+    if (!includeProductsWithoutImage) {
+      request = request
+          .gt('products.stock_quantity', 0)
+          .not('products.is_active', 'is', false);
+    }
+    final rows = await request.order('created_at', ascending: false);
 
     return [
       for (final row in rows)

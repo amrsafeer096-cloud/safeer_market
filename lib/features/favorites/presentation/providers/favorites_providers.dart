@@ -63,5 +63,8 @@ final favoriteProductsProvider =
   final products = await ref
       .watch(favoritesRepositoryProvider)
       .fetchFavoriteProducts(user.id);
-  return products.withImageUnless(includeWithoutImage);
+  // Customers: in-stock only. Admins may still see OOS favorites.
+  return includeWithoutImage
+      ? products.withImageUnless(true)
+      : products.availableFor(includeWithoutImage: false);
 });

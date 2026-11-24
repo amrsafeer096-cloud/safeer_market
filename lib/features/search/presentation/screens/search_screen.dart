@@ -209,28 +209,27 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final loading = resultsAsync.isLoading;
 
     if (results.isEmpty && _isBarcode) {
-      final scanned = matches
-          .where((p) => ProductSearch.matchesBarcode(p, _query))
-          .firstOrNull;
-      if (scanned != null) {
+      // In-stock search missed: probe any stock for «غير متوفر» only
+      // (product is never shown as a card).
+      final anyStock = ref.watch(barcodeAnyStockProvider(_query)).valueOrNull;
+      if (anyStock != null && !anyStock.inStock) {
         return _SearchMessage(
           icon: Icons.remove_shopping_cart_outlined,
           message: l10n.productUnavailableNow,
-          hint: scanned.name,
+          hint: anyStock.name,
           actionLabel: l10n.scanAnotherProduct,
           onAction: _scanBarcode,
         );
       }
-    }
-
-    if (!loading && results.isEmpty && _isBarcode) {
-      return _SearchMessage(
-        icon: Icons.search_off_rounded,
-        message: l10n.noProductWithBarcode(_query),
-        hint: l10n.productMayBeUnavailable,
-        actionLabel: l10n.scanAgain,
-        onAction: _scanBarcode,
-      );
+      if (!loading && anyStock == null) {
+        return _SearchMessage(
+          icon: Icons.search_off_rounded,
+          message: l10n.noProductWithBarcode(_query),
+          hint: l10n.productMayBeUnavailable,
+          actionLabel: l10n.scanAgain,
+          onAction: _scanBarcode,
+        );
+      }
     }
 
     if (!loading && results.isEmpty) {

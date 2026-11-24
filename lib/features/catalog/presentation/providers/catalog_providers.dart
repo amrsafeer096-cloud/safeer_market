@@ -49,9 +49,8 @@ final catalogRepositoryProvider = Provider<CatalogRepository>((ref) {
   );
 });
 
-/// Serves both typed and scanned queries. Includes out-of-stock matches so a
-/// scanned barcode can say «غير متوفر» instead of "not found"; lists show
-/// only `.available`.
+/// Typed / scanned customer search — **in-stock only**. OOS barcode scans
+/// use a separate lookup for the «غير متوفر» message (product never listed).
 final productSearchProvider = FutureProvider.autoDispose
     .family<List<Product>, String>((ref, query) async {
   final trimmed = query.trim();
@@ -59,17 +58,29 @@ final productSearchProvider = FutureProvider.autoDispose
   final includeWithoutImage = ref.watch(showProductsWithoutImageProvider);
   final products =
       await ref.watch(catalogRepositoryProvider).searchProducts(trimmed);
-  return ProductSearch.filter(
-    products.withImageUnless(includeWithoutImage),
-    trimmed,
-  );
+  final visible = includeWithoutImage
+      ? products.withImageUnless(true)
+      : products.availableFor(includeWithoutImage: false);
+  return ProductSearch.filter(visible, trimmed);
 });
 
-/// Not filtered by stock or photo: deep links, the cart and favorites still
-/// open the product, which then shows as unavailable if it is.
+/// Product details. Customers never open OOS / inactive pages (null → not
+/// found). Admins still can (photo tooling / deep links).
 final productByIdProvider =
-    FutureProvider.autoDispose.family<Product?, String>((ref, id) {
-  return ref.watch(catalogRepositoryProvider).fetchProductById(id);
+    FutureProvider.autoDispose.family<Product?, String>((ref, id) async {
+  final product =
+      await ref.watch(catalogRepositoryProvider).fetchProductById(id);
+  if (product == null) return null;
+  if (ref.watch(showProductsWithoutImageProvider)) return product;
+  return product.inStock ? product : null;
+});
+
+/// OOS barcode probe for the search «غير متوفر» message (not a product card).
+final barcodeAnyStockProvider = FutureProvider.autoDispose
+    .family<Product?, String>((ref, barcode) {
+  final trimmed = barcode.trim();
+  if (trimmed.isEmpty) return Future.value(null);
+  return ref.watch(catalogRepositoryProvider).lookupBarcodeAnyStock(trimmed);
 });
 
 const similarProductsLimit = 12;

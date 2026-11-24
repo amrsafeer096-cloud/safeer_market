@@ -17,3 +17,31 @@ enum ProductSearchFilterMode {
 
   bool get isDefault => this == inStock;
 }
+
+/// Normalize Arabic (and Latin) text for substring search: alef variants,
+/// teh marbuta, alef maqsura, tatweel stripped; Latin lowercased.
+String normalizeArabicSearch(String input) {
+  final lower = input.trim().toLowerCase();
+  if (lower.isEmpty) return lower;
+  final out = StringBuffer();
+  for (final unit in lower.runes) {
+    final ch = String.fromCharCode(unit);
+    if (ch == '\u0640') continue; // tatweel ـ
+    out.write(switch (ch) {
+      'أ' || 'إ' || 'آ' || 'ٱ' => 'ا',
+      'ة' => 'ه',
+      'ى' => 'ي',
+      'ؤ' => 'و',
+      'ئ' => 'ي',
+      _ => ch,
+    });
+  }
+  return out.toString();
+}
+
+/// True when [haystack] contains [needle] after [normalizeArabicSearch].
+bool arabicSearchContains(String haystack, String needle) {
+  final n = normalizeArabicSearch(needle);
+  if (n.isEmpty) return true;
+  return normalizeArabicSearch(haystack).contains(n);
+}

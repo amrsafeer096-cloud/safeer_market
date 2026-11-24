@@ -34,7 +34,8 @@ class SupabaseProductsRepository implements ProductsRepository {
 
   @override
   Future<List<Product>> fetchProducts() async {
-    final rows = await _products();
+    // Customer catalog cache: never include stock <= 0 / inactive.
+    final rows = await _products().inStock();
     return rows
         .map((row) => ProductModel.fromJson(Map<String, dynamic>.from(row)))
         .toList();

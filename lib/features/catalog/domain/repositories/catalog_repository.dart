@@ -14,8 +14,11 @@ abstract class CatalogRepository {
   });
 
   /// Products whose barcode equals [query] or whose name contains it,
-  /// case-insensitively. Callers still apply [ProductSearch.filter].
+  /// case-insensitively. Customer implementations return **in-stock only**.
   Future<List<Product>> searchProducts(String query);
+
+  /// Exact barcode match including out-of-stock — message-only, never listed.
+  Future<Product?> lookupBarcodeAnyStock(String barcode);
 
   Future<Product?> fetchProductById(String id);
 

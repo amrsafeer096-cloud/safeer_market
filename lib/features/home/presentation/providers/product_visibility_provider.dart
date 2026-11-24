@@ -111,15 +111,17 @@ bool flagsMissingImage(WidgetRef ref, Product product) =>
     productLacksImage(ref, product);
 
 /// What a product list may show: everything for admins; for everyone else,
-/// [products] minus those whose photo is missing or failed to load. Failures
-/// arrive in [BrokenImageProducts.flushDelay] batches, so a broken card
-/// leaves the list soon after it fails without a rebuild per card.
+/// only **in-stock** products with a valid photo. Zero / negative stock must
+/// never appear in the customer app. Failures arrive in
+/// [BrokenImageProducts.flushDelay] batches, so a broken card leaves the list
+/// soon after it fails without a rebuild per card.
 List<Product> shownProducts(WidgetRef ref, List<Product> products) {
   if (ref.watch(showProductsWithoutImageProvider)) return products;
   final broken = ref.watch(brokenImageProductsProvider);
   return [
     for (final product in products)
-      if (product.hasValidImageUrl &&
+      if (product.inStock &&
+          product.hasValidImageUrl &&
           !BrokenImageProducts._sameLink(broken[product.id], product))
         product,
   ];

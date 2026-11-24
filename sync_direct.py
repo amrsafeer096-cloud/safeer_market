@@ -264,7 +264,9 @@ def sync_active_with_categories():
           AND u.retailprice > 0
           AND i.status = 1
           AND u.transid = 1
-          AND (ISNULL(op.opening_qty, 0) + ISNULL(mv.net_qty, 0)) > 0
+          -- Include zero / negative stock so «كل الأصناف» can list them.
+          -- (Do NOT filter stock_quantity > 0 here — that deleted OOS rows
+          -- on the next sync via barcodes_to_delete.)
         """
         
         cursor.execute(sql_query)
@@ -309,7 +311,11 @@ def sync_active_with_categories():
 
             exact_app_cat = get_exact_app_category(raw_grp, raw_sec)
 
-            real_stock = int(float(row.stock_quantity)) if row.stock_quantity and float(row.stock_quantity) > 0 else 0
+            # Keep exact Fujitsu stock, including 0 and negative balances.
+            try:
+                real_stock = int(float(row.stock_quantity)) if row.stock_quantity is not None else 0
+            except (TypeError, ValueError):
+                real_stock = 0
 
             item_data = {
                 "barcode": barcode_val,

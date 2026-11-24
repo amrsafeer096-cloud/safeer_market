@@ -794,7 +794,10 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   }
 
   void _setPopupOpen(bool open) {
-    if (_popupOpen == open) return;
+    if (_popupOpen == open) {
+      ref.read(phoneOrderSearchOpenProvider.notifier).state = open;
+      return;
+    }
     setState(() => _popupOpen = open);
     ref.read(phoneOrderSearchOpenProvider.notifier).state = open;
   }
@@ -803,18 +806,24 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     _debounce?.cancel();
     _search.clear();
     if (!mounted) return;
-    setState(() => _query = '');
-    _setPopupOpen(false);
+    setState(() {
+      _query = '';
+      _popupOpen = false;
+    });
+    ref.read(phoneOrderSearchOpenProvider.notifier).state = false;
     _searchFocus.unfocus();
   }
 
   void _onChanged(String text) {
     _debounce?.cancel();
     final trimmed = text.trim();
-    _setPopupOpen(trimmed.isNotEmpty);
-    if (trimmed.isEmpty) {
-      setState(() => _query = '');
-    }
+    // Open / rebuild from the first character so previous-products
+    // filtering updates immediately (network search stays debounced).
+    setState(() {
+      _popupOpen = trimmed.isNotEmpty;
+      if (trimmed.isEmpty) _query = '';
+    });
+    ref.read(phoneOrderSearchOpenProvider.notifier).state = trimmed.isNotEmpty;
     _debounce = Timer(PhoneOrderColumn.searchDebounce, () {
       if (mounted) setState(() => _query = trimmed);
     });
@@ -912,18 +921,21 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
 
     List<CustomerPurchaseItem> previousMatches(String q) {
       final history = historyAsync.valueOrNull;
-      if (history == null || q.isEmpty) return const [];
-      final lower = q.toLowerCase();
+      final needle = q.trim();
+      // From the first character: normalized Arabic substring match.
+      if (history == null || needle.isEmpty) return const [];
       return [
         for (final item in history.mostRecent)
-          if (item.product.name.toLowerCase().contains(lower) ||
-              (item.product.barcode ?? '').toLowerCase().startsWith(lower))
+          if (arabicSearchContains(item.product.name, needle) ||
+              arabicSearchContains(item.product.barcode ?? '', needle))
             item,
       ];
     }
 
     Widget searchPopup() {
-      final prev = previousMatches(_query.isEmpty ? _search.text.trim() : _query);
+      // Always use the live field text so 1-char typing filters immediately.
+      final typed = _search.text.trim();
+      final prev = previousMatches(typed);
       return Material(
         key: const Key('phone-order-search-popup'),
         elevation: 14,
