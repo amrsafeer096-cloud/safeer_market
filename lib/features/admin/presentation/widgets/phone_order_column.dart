@@ -64,23 +64,23 @@ class PhoneOrderColumn extends ConsumerWidget {
       phoneOrderControllerProvider.select((state) => state.parked.isNotEmpty),
     );
 
-    Widget header() => Container(
-          height: 60,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          alignment: AlignmentDirectional.centerStart,
-          child: Row(children: [
-            Icon(Icons.headset_mic_rounded, color: palette.accent),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                l10n.adminMenuReceiveOrders,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w900, fontSize: 15),
-              ),
+    Widget header() {
+      final locked = lockedBanner();
+      return Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsetsDirectional.fromSTEB(12, 6, 8, 6),
+        alignment: AlignmentDirectional.centerStart,
+        child: Row(
+          children: [
+            Icon(Icons.headset_mic_rounded, color: palette.accent, size: 22),
+            const SizedBox(width: 6),
+            Text(
+              l10n.adminMenuReceiveOrders,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             // Parks this order (caller, cart, fee, payment, receipt) and
             // opens a blank one.
             OutlinedButton.icon(
@@ -91,7 +91,9 @@ class PhoneOrderColumn extends ConsumerWidget {
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 foregroundColor: palette.accent,
-                side: BorderSide(color: palette.accent.withValues(alpha: 0.5)),
+                side:
+                    BorderSide(color: palette.accent.withValues(alpha: 0.5)),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
               ),
               icon: const Icon(Icons.add_rounded, size: 18),
               label: const Text(
@@ -99,9 +101,15 @@ class PhoneOrderColumn extends ConsumerWidget {
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
-            const Spacer(),
-          ]),
-        );
+            if (locked != null) ...[
+              const SizedBox(width: 10),
+              Expanded(child: locked),
+            ] else
+              const Spacer(),
+          ],
+        ),
+      );
+    }
 
     Widget pendingBanner() {
       final pending = ref.watch(pendingAlternativeOrderIdsProvider);
@@ -146,6 +154,7 @@ class PhoneOrderColumn extends ConsumerWidget {
       return _LockedCustomer(
         customer: customer,
         isSupplemental: state.isSupplemental,
+        compact: true,
         onChange: controller.clear,
         onEdit: () async {
           final confirmed =
@@ -186,7 +195,6 @@ class PhoneOrderColumn extends ConsumerWidget {
             const Divider(height: 1),
             pendingBanner(),
             if (hasParked) const _OpenOrdersStrip(),
-            if (lockedBanner() case final banner?) banner,
             Expanded(
               child: hasCustomer
                   ? _OrderBuilder(onPlaced: onPlaced, splitLayout: false)
@@ -246,8 +254,6 @@ class PhoneOrderColumn extends ConsumerWidget {
           Material(color: palette.card, child: header()),
           const Divider(height: 1),
           pendingBanner(),
-          if (lockedBanner() case final banner?)
-            Material(color: palette.card, child: banner),
           Expanded(
             // RTL: the open-orders list is the far-right column, next to
             // the products.
@@ -774,6 +780,12 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       );
 
   @override
+  void deactivate() {
+    ref.read(phoneOrderSearchOpenProvider.notifier).state = false;
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _debounce?.cancel();
     _search.dispose();
@@ -781,24 +793,28 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     super.dispose();
   }
 
+  void _setPopupOpen(bool open) {
+    if (_popupOpen == open) return;
+    setState(() => _popupOpen = open);
+    ref.read(phoneOrderSearchOpenProvider.notifier).state = open;
+  }
+
   void _dismissSearch() {
     _debounce?.cancel();
     _search.clear();
     if (!mounted) return;
-    setState(() {
-      _query = '';
-      _popupOpen = false;
-    });
+    setState(() => _query = '');
+    _setPopupOpen(false);
     _searchFocus.unfocus();
   }
 
   void _onChanged(String text) {
     _debounce?.cancel();
     final trimmed = text.trim();
-    setState(() {
-      _popupOpen = trimmed.isNotEmpty;
-      if (trimmed.isEmpty) _query = '';
-    });
+    _setPopupOpen(trimmed.isNotEmpty);
+    if (trimmed.isEmpty) {
+      setState(() => _query = '');
+    }
     _debounce = Timer(PhoneOrderColumn.searchDebounce, () {
       if (mounted) setState(() => _query = trimmed);
     });
@@ -809,10 +825,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   Future<void> _onSubmitted(String text) async {
     final code = text.trim();
     _debounce?.cancel();
-    setState(() {
-      _query = code;
-      _popupOpen = code.isNotEmpty;
-    });
+    setState(() => _query = code);
+    _setPopupOpen(code.isNotEmpty);
     if (code.isEmpty) return;
     try {
       final products = await ref.read(
@@ -831,12 +845,20 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     }
   }
 
+  /// `+` / `-` in the search list: adjust cart only — keep popup open.
+  Future<void> _adjustFromSearch(Product product) async {
+    await _addProduct(context, ref, product);
+  }
+
+  /// Barcode Enter with a single exact match: add and clear search.
   Future<void> _pickProduct(Product product) async {
     await _addProduct(context, ref, product);
     if (!mounted) return;
     _dismissSearch();
   }
 
+  /// Detail card confirm (Enter / confirm / weight) is the only path that
+  /// clears search from a list tap.
   Future<void> _openDetails(Product product) async {
     await showProductDetailsDialog(
       context,
@@ -882,7 +904,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         quantityLabel: countLabel,
         inCart: line != null,
         showZeroStockInRed: _filter == ProductSearchFilterMode.allItems,
-        onAdd: () => _pickProduct(product),
+        onAdd: () => _adjustFromSearch(product),
         onOpen: () => _openDetails(product),
         onRemove: () => controller.remove(product),
       );
@@ -904,9 +926,11 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       final prev = previousMatches(_query.isEmpty ? _search.text.trim() : _query);
       return Material(
         key: const Key('phone-order-search-popup'),
-        elevation: 8,
+        elevation: 14,
+        shadowColor: Colors.black54,
         color: palette.card,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1026,6 +1050,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       );
     }
 
+    final showClear = _popupOpen || _search.text.trim().isNotEmpty;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1041,9 +1067,29 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
             decoration: InputDecoration(
               hintText: l10n.phoneOrderProductSearchHint,
               prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
-              suffixIcon: ProductSearchFilterButton(
-                mode: _filter,
-                onChanged: (mode) => setState(() => _filter = mode),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (showClear)
+                    TextButton(
+                      key: const Key('phone-order-search-clear'),
+                      onPressed: _dismissSearch,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'مسح',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ProductSearchFilterButton(
+                    mode: _filter,
+                    onChanged: (mode) => setState(() => _filter = mode),
+                  ),
+                ],
               ),
               border: const OutlineInputBorder(),
               isDense: true,
@@ -1054,7 +1100,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         Expanded(
           child: _popupOpen
               ? Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
                   child: searchPopup(),
                 )
               : Center(
@@ -1082,6 +1128,7 @@ class _LockedCustomer extends StatelessWidget {
     required this.onEdit,
     required this.onShowHistory,
     this.isSupplemental = false,
+    this.compact = false,
   });
 
   final PhoneOrderCustomer customer;
@@ -1089,6 +1136,7 @@ class _LockedCustomer extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onShowHistory;
   final bool isSupplemental;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -1103,6 +1151,7 @@ class _LockedCustomer extends StatelessWidget {
       customer.phone2,
       customer.phone3,
     ].whereType<String>().where((p) => p.trim().isNotEmpty).join(' / ');
+    final iconSize = compact ? 18.0 : 22.0;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1110,8 +1159,9 @@ class _LockedCustomer extends StatelessWidget {
         onTap: onEdit,
         borderRadius: BorderRadius.circular(10),
         child: Container(
-          margin: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-          padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 2, 6),
+          margin: compact ? EdgeInsets.zero : const EdgeInsets.fromLTRB(10, 8, 10, 4),
+          padding: EdgeInsetsDirectional.fromSTEB(
+              compact ? 8 : 10, compact ? 4 : 6, 2, compact ? 4 : 6),
           decoration: BoxDecoration(
             color: palette.accent.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
@@ -1119,8 +1169,9 @@ class _LockedCustomer extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(Icons.person_pin_rounded, color: palette.accent, size: 22),
-              const SizedBox(width: 8),
+              Icon(Icons.person_pin_rounded,
+                  color: palette.accent, size: iconSize),
+              const SizedBox(width: 6),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1130,14 +1181,20 @@ class _LockedCustomer extends StatelessWidget {
                       TextSpan(children: [
                         TextSpan(
                           text: customer.fullName ?? l10n.adminNoName,
-                          style: const TextStyle(fontWeight: FontWeight.w900),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: compact ? 12.5 : null,
+                          ),
                         ),
                         const TextSpan(text: '  •  '),
                         TextSpan(
                           text: phones.isEmpty
                               ? l10n.adminNoPhoneNumber
                               : phones,
-                          style: TextStyle(color: palette.muted),
+                          style: TextStyle(
+                            color: palette.muted,
+                            fontSize: compact ? 12 : null,
+                          ),
                         ),
                       ]),
                       maxLines: 1,
@@ -1147,7 +1204,8 @@ class _LockedCustomer extends StatelessWidget {
                       place.isEmpty ? l10n.phoneOrderNoAddress : place,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: palette.muted),
+                      style: TextStyle(
+                          fontSize: compact ? 11 : 12, color: palette.muted),
                     ),
                   ],
                 ),
@@ -1158,7 +1216,8 @@ class _LockedCustomer extends StatelessWidget {
                   child: Chip(
                     key: const Key('phone-order-supplemental-badge'),
                     label: const Text('طلب ملحق',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                        style: TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w800)),
                     visualDensity: VisualDensity.compact,
                     backgroundColor: Colors.orange.shade100,
                     side: BorderSide(color: Colors.orange.shade400),
@@ -1169,22 +1228,33 @@ class _LockedCustomer extends StatelessWidget {
                 key: const Key('phone-order-customer-history'),
                 tooltip: 'مشتريات العميل المعتادة والسابقة',
                 visualDensity: VisualDensity.compact,
+                constraints: compact
+                    ? const BoxConstraints.tightFor(width: 34, height: 34)
+                    : null,
                 onPressed: onShowHistory,
-                icon: Icon(Icons.history_rounded, color: palette.accent),
+                icon: Icon(Icons.history_rounded,
+                    color: palette.accent, size: iconSize),
               ),
               IconButton(
                 key: const Key('phone-order-edit-customer'),
                 tooltip: 'بيانات العميل',
                 visualDensity: VisualDensity.compact,
+                constraints: compact
+                    ? const BoxConstraints.tightFor(width: 34, height: 34)
+                    : null,
                 onPressed: onEdit,
-                icon: Icon(Icons.edit_rounded, color: palette.accent),
+                icon: Icon(Icons.edit_rounded,
+                    color: palette.accent, size: iconSize),
               ),
               IconButton(
                 key: const Key('phone-order-change-customer'),
                 tooltip: l10n.phoneOrderChangeCustomer,
                 visualDensity: VisualDensity.compact,
+                constraints: compact
+                    ? const BoxConstraints.tightFor(width: 34, height: 34)
+                    : null,
                 onPressed: onChange,
-                icon: const Icon(Icons.swap_horiz_rounded),
+                icon: Icon(Icons.swap_horiz_rounded, size: iconSize),
               ),
             ],
           ),
@@ -1364,34 +1434,35 @@ class _CartPanel extends ConsumerWidget {
       ],
     );
 
+    final canSetFee =
+        ref.watch(adminCanProvider(AdminPermission.canSetDeliveryFee));
+    final showFeeChips = canSetFee && !state.isSupplemental;
+
     final feeAndTotals = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Divider(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: Text(l10n.deliveryFee,
-                  style: TextStyle(
-                      fontWeight: FontWeight.w800, color: palette.muted)),
-            ),
-            if (state.isSupplemental)
-              const Chip(
-                key: Key('phone-order-cart-supplemental'),
-                label: Text('طلب ملحق',
-                    style:
-                        TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
+        if (showFeeChips) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(l10n.deliveryFee,
+                    style: TextStyle(
+                        fontWeight: FontWeight.w800, color: palette.muted)),
               ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Builder(builder: (context) {
-          final canSetFee = !state.isSupplemental &&
-              ref.watch(
-                  adminCanProvider(AdminPermission.canSetDeliveryFee));
-          return Wrap(
+              if (state.isSupplemental)
+                const Chip(
+                  key: Key('phone-order-cart-supplemental'),
+                  label: Text('طلب ملحق',
+                      style: TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w800)),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
             spacing: 6,
             runSpacing: 4,
             children: [
@@ -1403,12 +1474,22 @@ class _CartPanel extends ConsumerWidget {
                       ? l10n.phoneOrderFreeDelivery
                       : AppCurrency.of(fee)),
                   selected: state.deliveryFee == fee,
-                  onSelected:
-                      canSetFee ? (_) => onFee(fee) : null,
+                  onSelected: (_) => onFee(fee),
                 ),
             ],
-          );
-        }),
+          ),
+        ] else if (state.isSupplemental)
+          const Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Chip(
+              key: Key('phone-order-cart-supplemental'),
+              label: Text('طلب ملحق',
+                  style:
+                      TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+            ),
+          ),
         payment,
         const SizedBox(height: 8),
         // Totals table: item count first, then items, delivery, grand total.

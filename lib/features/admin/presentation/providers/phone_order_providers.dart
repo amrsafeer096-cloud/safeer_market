@@ -21,6 +21,9 @@ final phoneOrdersRepositoryProvider = Provider<PhoneOrdersRepository>((ref) {
 /// Bumped by the dashboard Esc handler so the product search popup dismisses.
 final phoneOrderDismissSearchProvider = StateProvider<int>((ref) => 0);
 
+/// Whether the تلقي الطلبات product-search popup is open (for Esc stepping).
+final phoneOrderSearchOpenProvider = StateProvider<bool>((ref) => false);
+
 /// Callers matching what was typed in «ابحث برقم الهاتف أو اسم العميل».
 final phoneOrderCustomersProvider = FutureProvider.autoDispose
     .family<List<PhoneOrderCustomer>, String>((ref, query) {

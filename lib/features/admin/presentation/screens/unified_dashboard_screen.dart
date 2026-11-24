@@ -614,20 +614,33 @@ class _UnifiedDashboardScreenState
       };
 
       void onEscape() {
-        // 1) Close the top-most dialog / route.
+        // 1) Close dialogs / sheets only — never leave `/admin`.
         final rootNav = Navigator.of(context, rootNavigator: true);
-        if (rootNav.canPop()) {
-          rootNav.pop();
+        var closedOverlay = false;
+        rootNav.popUntil((route) {
+          if (route is PopupRoute) {
+            closedOverlay = true;
+            return false;
+          }
+          return true;
+        });
+        if (closedOverlay) return;
+
+        final localNav = Navigator.of(context);
+        if (localNav.canPop()) {
+          localNav.pop();
           return;
         }
-        final nav = Navigator.of(context);
-        if (nav.canPop()) {
-          nav.pop();
-          return;
-        }
+
         // 2) Dismiss product search popup / clear focus on تلقي الطلبات.
-        ref.read(phoneOrderDismissSearchProvider.notifier).state++;
+        if (activeMenu == AdminMenu.receiveOrders &&
+            ref.read(phoneOrderSearchOpenProvider)) {
+          ref.read(phoneOrderDismissSearchProvider.notifier).state++;
+          FocusManager.instance.primaryFocus?.unfocus();
+          return;
+        }
         FocusManager.instance.primaryFocus?.unfocus();
+
         // 3) On order status detail, step back to the list.
         if (activeMenu == AdminMenu.orderStatus && selectedId != null) {
           ref.read(selectedOrderIdProvider.notifier).state = null;
@@ -639,15 +652,22 @@ class _UnifiedDashboardScreenState
             ref.read(phoneOrderControllerProvider).lines.isEmpty) {
           ref.read(phoneOrderControllerProvider.notifier).clear();
         }
+        // Stop here: do not pop the admin route / go to the store.
       }
 
-      return CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.escape): onEscape,
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
+          onEscape();
         },
-        child: Focus(
-          autofocus: true,
-          child: Scaffold(
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): onEscape,
+          },
+          child: Focus(
+            autofocus: true,
+            child: Scaffold(
         backgroundColor:
             palette.isDark ? palette.background : const Color(0xFFF4F6F8),
         drawer: (!isDesktop && showSystemSidebar)
@@ -778,6 +798,7 @@ class _UnifiedDashboardScreenState
           ],
         ),
       ),
+          ),
         ),
       );
     });
@@ -1697,11 +1718,15 @@ class _OrderDetailsView extends ConsumerWidget {
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
+      // Only unfinished prep counts: «إتمام تجهيز الطلب» stamps
+      // prep_completed_at while status stays «preparing» until a driver
+      // is assigned — those must not block the next order.
       final busy = await Supabase.instance.client
           .from('orders')
           .select('id')
           .eq('status', OrderStatus.preparing.value)
           .eq('preparer_name', staff.name)
+          .isFilter('prep_completed_at', null)
           .limit(1);
       if ((busy as List).isNotEmpty) {
         messenger.showSnackBar(const SnackBar(
