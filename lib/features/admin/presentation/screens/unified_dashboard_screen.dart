@@ -1406,11 +1406,22 @@ class _OrderDetailsView extends ConsumerWidget {
     final orderId = '${order['id']}';
     final preparerName = order['preparer_name']?.toString().trim();
     final hasPreparer = preparerName != null && preparerName.isNotEmpty;
-    final canEdit = !isDriver &&
+    final staff = ref.watch(staffSessionProvider);
+    // Preparers / drivers never see «تعديل الطلب» — only print / finish prep.
+    final blockedStaffRole =
+        staff?.isPreparer == true || staff?.isDriver == true || isDriver;
+    final isStaffAdmin = staff?.isAdmin == true;
+    final isStaffTaker = staff?.isTaker == true;
+    // Super-admin / staff admin always; cashiers need «تعديل الطلبات».
+    final hasEditPermission = ref.watch(isRealAdminProvider) ||
+        isStaffAdmin ||
+        ref.watch(adminCanProvider(AdminPermission.editOrders));
+    final canEdit = !blockedStaffRole &&
         orderAllowsLiveEdit(
           status: status,
           prepCompletedAt: order['prep_completed_at'],
-        );
+        ) &&
+        (isStaffAdmin || isStaffTaker || hasEditPermission);
     final beingEdited = order['is_being_edited'] == true;
     final deliveryFee = switch (order['delivery_fee']) {
       final num n => n.toDouble(),
@@ -1454,8 +1465,9 @@ class _OrderDetailsView extends ConsumerWidget {
               final saved = await showEditOrderSheet(
                 context,
                 orderId: orderId,
-                startedBy:
-                    showAdminFeatures ? 'admin' : 'taker',
+                startedBy: isStaffAdmin || ref.read(isRealAdminProvider)
+                    ? 'admin'
+                    : 'taker',
                 deliveryFee: deliveryFee,
               );
               ref.invalidate(adminOrderItemsProvider(orderId));

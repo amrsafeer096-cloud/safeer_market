@@ -53,6 +53,10 @@ enum AdminPermission {
   sendAlternatives(
       'send_alternatives',
       'إرسال بدائل للمنتجات',
+      AdminPermissionGroup.orderActions),
+  editOrders(
+      'edit_orders',
+      'تعديل الطلبات',
       AdminPermissionGroup.orderActions);
 
   const AdminPermission(this.key, this.label, this.group);
