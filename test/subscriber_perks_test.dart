@@ -54,6 +54,11 @@ final _pro = Subscription(
 
 class _FakeCheckoutRepository implements CheckoutRepository {
   double? deliveryFee;
+  String? customerPhone;
+
+  @override
+  Future<String?> fetchSuggestedDeliveryPhone(String userId) async =>
+      '01012345678';
 
   @override
   Future<String> placeOrder({
@@ -63,6 +68,8 @@ class _FakeCheckoutRepository implements CheckoutRepository {
     required String deliveryArea,
     required double deliveryFee,
     required PaymentMethod paymentMethod,
+    required String customerPhone,
+    String? customerName,
     double? deliveryLatitude,
     double? deliveryLongitude,
     String paymentStatus = 'unpaid',
@@ -70,6 +77,7 @@ class _FakeCheckoutRepository implements CheckoutRepository {
     String? receiptUrl,
   }) async {
     this.deliveryFee = deliveryFee;
+    this.customerPhone = customerPhone;
     return 'order-1';
   }
 
@@ -217,10 +225,15 @@ void main() {
 
       final orderId = await container
           .read(checkoutControllerProvider.notifier)
-          .placeOrder(_home, paymentMethod: PaymentMethod.cashOnDelivery);
+          .placeOrder(
+            _home,
+            paymentMethod: PaymentMethod.cashOnDelivery,
+            customerPhone: '01012345678',
+          );
 
       expect(orderId, 'order-1');
       expect(repository.deliveryFee, 0);
+      expect(repository.customerPhone, '01012345678');
     });
   });
 

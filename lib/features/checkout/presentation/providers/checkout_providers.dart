@@ -8,8 +8,10 @@ import '../../../../core/network/supabase_providers.dart';
 import '../../../../core/notifications/order_push_dispatcher.dart';
 import '../../../addresses/domain/entities/address.dart';
 import '../../../addresses/presentation/providers/addresses_providers.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../cart/presentation/providers/cart_providers.dart';
+import '../../../profile/presentation/providers/profile_providers.dart';
 import '../../../subscriptions/presentation/providers/subscription_providers.dart';
 import '../../data/repositories/supabase_checkout_repository.dart';
 import '../../domain/checkout_pricing.dart';
@@ -26,6 +28,40 @@ final clockProvider = Provider<DateTime Function()>((ref) => DateTime.now);
 
 final selectedPaymentMethodProvider =
     StateProvider<PaymentMethod>((ref) => PaymentMethod.cashOnDelivery);
+
+/// Delivery mobile typed / autofilled on the checkout screen (`01xxxxxxxxx`).
+final checkoutDeliveryPhoneProvider =
+    StateProvider.autoDispose<String>((ref) => '');
+
+/// Prefills [checkoutDeliveryPhoneProvider] from profile / last order once.
+final checkoutPhoneBootstrapProvider =
+    FutureProvider.autoDispose<String?>((ref) async {
+  final user = ref.watch(currentUserProvider);
+  if (user == null) return null;
+
+  String? suggested;
+  final profile = await ref.watch(userProfileProvider.future);
+  final fromProfile = EgyptianPhone.normalize(profile?.phone ?? '');
+  if (EgyptianPhone.isValid(fromProfile)) {
+    suggested = fromProfile;
+  } else {
+    final fromAuth = EgyptianPhone.normalize(user.phone ?? '');
+    if (EgyptianPhone.isValid(fromAuth)) {
+      suggested = fromAuth;
+    } else {
+      suggested = await ref
+          .read(checkoutRepositoryProvider)
+          .fetchSuggestedDeliveryPhone(user.id);
+    }
+  }
+
+  if (suggested != null &&
+      EgyptianPhone.isValid(suggested) &&
+      ref.read(checkoutDeliveryPhoneProvider).trim().isEmpty) {
+    ref.read(checkoutDeliveryPhoneProvider.notifier).state = suggested;
+  }
+  return suggested;
+});
 
 /// InstaPay transfer screenshot selected at checkout (before upload).
 class InstaPayReceiptDraft {
@@ -87,6 +123,7 @@ class CheckoutController extends AutoDisposeAsyncNotifier<void> {
   Future<String?> placeOrder(
     Address address, {
     required PaymentMethod paymentMethod,
+    required String customerPhone,
     bool clearCart = true,
     String paymentStatus = 'unpaid',
     String? paymentMethodOverride,
@@ -101,6 +138,15 @@ class CheckoutController extends AutoDisposeAsyncNotifier<void> {
     if (user == null) {
       state = AsyncError(
         CheckoutFailure(l10n.pleaseSignInFirst),
+        StackTrace.current,
+      );
+      return null;
+    }
+
+    final phone = EgyptianPhone.normalize(customerPhone);
+    if (!EgyptianPhone.isValid(phone)) {
+      state = AsyncError(
+        CheckoutFailure(l10n.authEnterValidEgyptianPhone),
         StackTrace.current,
       );
       return null;
@@ -135,6 +181,9 @@ class CheckoutController extends AutoDisposeAsyncNotifier<void> {
         );
       }
 
+      final profile = ref.read(userProfileProvider).valueOrNull;
+      final customerName = (profile?.fullName ?? user.fullName)?.trim();
+
       final orderId = await repo.placeOrder(
         userId: user.id,
         items: items,
@@ -142,6 +191,8 @@ class CheckoutController extends AutoDisposeAsyncNotifier<void> {
         deliveryArea: address.area,
         deliveryFee: quote.fee,
         paymentMethod: paymentMethod,
+        customerPhone: phone,
+        customerName: customerName,
         deliveryLatitude: address.latitude,
         deliveryLongitude: address.longitude,
         paymentStatus: paymentStatus,
@@ -152,6 +203,7 @@ class CheckoutController extends AutoDisposeAsyncNotifier<void> {
       unawaited(
         ref.read(orderPushDispatcherProvider).notifyOrderCreated(orderId),
       );
+      ref.invalidate(userProfileProvider);
       if (clearCart) {
         ref.read(cartProvider.notifier).clear();
       }

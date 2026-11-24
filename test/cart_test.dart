@@ -21,6 +21,7 @@ import 'package:safeer_market/features/checkout/presentation/screens/checkout_sc
 import 'package:safeer_market/features/checkout/presentation/screens/payment_screen.dart';
 import 'package:safeer_market/features/home/domain/entities/product.dart';
 import 'package:safeer_market/features/home/presentation/screens/home_screen.dart';
+import 'package:safeer_market/features/profile/domain/entities/user_profile.dart';
 
 import 'test_helpers.dart';
 
@@ -55,9 +56,10 @@ Address _address({
 final _home = _address(kmNorthOfStore: 1.45);
 
 class _FakeCheckoutRepository implements CheckoutRepository {
-  _FakeCheckoutRepository({this.failure});
+  _FakeCheckoutRepository({this.failure, this.suggestedPhone = '01012345678'});
 
   final CheckoutFailure? failure;
+  final String? suggestedPhone;
   List<CartItem>? placedItems;
   String? placedBy;
   String? addressDetails;
@@ -65,6 +67,11 @@ class _FakeCheckoutRepository implements CheckoutRepository {
   double? deliveryFee;
   double? deliveryLatitude;
   PaymentMethod? paymentMethod;
+  String? customerPhone;
+
+  @override
+  Future<String?> fetchSuggestedDeliveryPhone(String userId) async =>
+      suggestedPhone;
 
   @override
   Future<String> placeOrder({
@@ -74,6 +81,8 @@ class _FakeCheckoutRepository implements CheckoutRepository {
     required String deliveryArea,
     required double deliveryFee,
     required PaymentMethod paymentMethod,
+    required String customerPhone,
+    String? customerName,
     double? deliveryLatitude,
     double? deliveryLongitude,
     String paymentStatus = 'unpaid',
@@ -88,6 +97,7 @@ class _FakeCheckoutRepository implements CheckoutRepository {
     this.deliveryFee = deliveryFee;
     this.deliveryLatitude = deliveryLatitude;
     this.paymentMethod = paymentMethod;
+    this.customerPhone = customerPhone;
     return 'a1b2c3d4-0000-0000-0000-000000000000';
   }
 
@@ -115,6 +125,12 @@ Future<void> _continueToCheckout(WidgetTester tester) async {
   expect(find.byType(CheckoutScreen), findsOneWidget);
 }
 
+final _checkoutProfile = UserProfile(
+  id: testUser.id,
+  fullName: 'Amr',
+  phone: '01012345678',
+);
+
 Future<void> _openCheckoutWith(
   WidgetTester tester,
   List<Address> addresses, {
@@ -126,6 +142,7 @@ Future<void> _openCheckoutWith(
     products: const [_apple],
     authRepository: FakeAuthRepository(user: testUser),
     addressesRepository: FakeAddressesRepository(addresses),
+    profileRepository: FakeProfileRepository(_checkoutProfile),
     overrides: [
       checkoutRepositoryProvider.overrideWithValue(
         repository ?? _FakeCheckoutRepository(),
@@ -429,6 +446,7 @@ void main() {
       products: const [_apple],
       authRepository: FakeAuthRepository(user: testUser),
       addressesRepository: FakeAddressesRepository([_home]),
+      profileRepository: FakeProfileRepository(_checkoutProfile),
       newOrderNotifier: driverAlerts,
       overrides: [checkoutRepositoryProvider.overrideWithValue(repository)],
     );
@@ -464,6 +482,7 @@ void main() {
     expect(repository.deliveryFee, 30);
     expect(repository.deliveryLatitude, _home.latitude);
     expect(repository.paymentMethod, PaymentMethod.cashOnDelivery);
+    expect(repository.customerPhone, '01012345678');
     // Drivers hear about it once the warehouse marks it ready, not now.
     expect(driverAlerts.notifiedOrders, isEmpty);
     expect(
@@ -651,6 +670,7 @@ void main() {
       products: const [_apple],
       authRepository: FakeAuthRepository(user: testUser),
       addressesRepository: addresses,
+      profileRepository: FakeProfileRepository(_checkoutProfile),
       overrides: [checkoutRepositoryProvider.overrideWithValue(repository)],
     );
     await skipSplash(tester);

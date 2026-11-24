@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../../cart/domain/entities/cart_item.dart';
 import '../../domain/payment_method.dart';
 import '../../domain/repositories/checkout_repository.dart';
@@ -16,6 +17,34 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
   final SupabaseClient _client;
 
   @override
+  Future<String?> fetchSuggestedDeliveryPhone(String userId) async {
+    try {
+      final profile = await _client
+          .from('profiles')
+          .select('phone')
+          .eq('id', userId)
+          .maybeSingle();
+      final fromProfile = EgyptianPhone.normalize('${profile?['phone'] ?? ''}');
+      if (EgyptianPhone.isValid(fromProfile)) return fromProfile;
+
+      final lastOrder = await _client
+          .from('orders')
+          .select('customer_phone')
+          .eq('user_id', userId)
+          .not('customer_phone', 'is', null)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      final fromOrder =
+          EgyptianPhone.normalize('${lastOrder?['customer_phone'] ?? ''}');
+      if (EgyptianPhone.isValid(fromOrder)) return fromOrder;
+    } catch (_) {
+      // Prefill is best-effort; checkout still requires a typed number.
+    }
+    return null;
+  }
+
+  @override
   Future<String> placeOrder({
     required String userId,
     required List<CartItem> items,
@@ -23,6 +52,8 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
     required String deliveryArea,
     required double deliveryFee,
     required PaymentMethod paymentMethod,
+    required String customerPhone,
+    String? customerName,
     double? deliveryLatitude,
     double? deliveryLongitude,
     String paymentStatus = 'unpaid',
@@ -33,7 +64,13 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
       throw CheckoutFailure(L10n.current.cartEmpty);
     }
 
+    final phone = EgyptianPhone.normalize(customerPhone);
+    if (!EgyptianPhone.isValid(phone)) {
+      throw CheckoutFailure(L10n.current.authEnterValidEgyptianPhone);
+    }
+
     final itemsTotal = items.fold<double>(0, (sum, item) => sum + item.total);
+    final name = customerName?.trim();
 
     try {
       final order = await _client
@@ -49,6 +86,8 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
             'status': _initialStatus,
             'payment_method': paymentMethodOverride ?? paymentMethod.value,
             'payment_status': paymentStatus,
+            'customer_phone': phone,
+            if (name != null && name.isNotEmpty) 'customer_name': name,
             if (receiptUrl != null && receiptUrl.isNotEmpty)
               'receipt_url': receiptUrl,
           })
@@ -71,6 +110,22 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
       } catch (_) {
         await _deleteOrder(orderId);
         rethrow;
+      }
+
+      // Persist for auto-fill on every future checkout.
+      try {
+        await _client.from('profiles').upsert({
+          'id': userId,
+          'phone': phone,
+          if (name != null && name.isNotEmpty) 'full_name': name,
+        });
+      } catch (_) {
+        try {
+          await _client
+              .from('profiles')
+              .update({'phone': phone})
+              .eq('id', userId);
+        } catch (_) {}
       }
 
       return orderId.toString();

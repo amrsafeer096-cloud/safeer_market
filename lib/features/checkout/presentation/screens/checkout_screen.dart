@@ -20,6 +20,7 @@ import '../../../addresses/presentation/screens/add_address_screen.dart';
 import '../../../addresses/presentation/widgets/address_card.dart';
 import '../../../addresses/presentation/widgets/address_picker_sheet.dart';
 import '../../../addresses/presentation/widgets/pin_address_on_map.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../cart/presentation/providers/cart_providers.dart';
 import '../../../home/presentation/providers/home_providers.dart';
@@ -74,6 +75,12 @@ class CheckoutScreen extends ConsumerWidget {
                     title: l10n.checkoutDeliveryAddress,
                     trailing: const _ManageAddressesButton(),
                     child: const _DeliveryAddressSection(),
+                  ),
+                  const SizedBox(height: 16),
+                  _Section(
+                    icon: Icons.phone_iphone_rounded,
+                    title: 'رقم الموبايل للتوصيل *',
+                    child: const _DeliveryPhoneSection(),
                   ),
                   const SizedBox(height: 16),
                   _Section(
@@ -132,6 +139,24 @@ class CheckoutScreen extends ConsumerWidget {
         return;
     }
 
+    final phone = EgyptianPhone.normalize(
+      ref.read(checkoutDeliveryPhoneProvider),
+    );
+    if (!EgyptianPhone.isValid(phone)) {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.secondary,
+          content: Text(
+            phone.isEmpty
+                ? 'أدخل رقم الموبايل للتوصيل'
+                : l10n.authEnterValidEgyptianPhone,
+          ),
+        ),
+      );
+      return;
+    }
+    ref.read(checkoutDeliveryPhoneProvider.notifier).state = phone;
+
     final paymentMethod = ref.read(selectedPaymentMethodProvider);
     final total = ref.read(checkoutTotalProvider);
 
@@ -142,6 +167,7 @@ class CheckoutScreen extends ConsumerWidget {
           await ref.read(checkoutControllerProvider.notifier).placeOrder(
                 address,
                 paymentMethod: paymentMethod,
+                customerPhone: phone,
                 clearCart: false,
                 paymentStatus: 'pending',
                 paymentMethodOverride: 'visa',
@@ -177,6 +203,7 @@ class CheckoutScreen extends ConsumerWidget {
           await ref.read(checkoutControllerProvider.notifier).placeOrder(
                 address,
                 paymentMethod: paymentMethod,
+                customerPhone: phone,
                 paymentStatus: 'pending_verification',
                 paymentMethodOverride: 'instapay',
                 receipt: receipt,
@@ -190,6 +217,7 @@ class CheckoutScreen extends ConsumerWidget {
         await ref.read(checkoutControllerProvider.notifier).placeOrder(
               address,
               paymentMethod: paymentMethod,
+              customerPhone: phone,
             );
     if (orderId == null) return;
     _showPlaced(context, ref, messenger, l10n, orderId);
@@ -281,6 +309,101 @@ class _ManageAddressesButton extends ConsumerWidget {
     return TextButton(
       onPressed: () => context.push(AppRoutes.addresses),
       child: Text(AppLocalizations.of(context)!.manageAddresses),
+    );
+  }
+}
+
+class _DeliveryPhoneSection extends ConsumerStatefulWidget {
+  const _DeliveryPhoneSection();
+
+  @override
+  ConsumerState<_DeliveryPhoneSection> createState() =>
+      _DeliveryPhoneSectionState();
+}
+
+class _DeliveryPhoneSectionState extends ConsumerState<_DeliveryPhoneSection> {
+  late final TextEditingController _controller;
+  var _seeded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: ref.read(checkoutDeliveryPhoneProvider),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _applySuggestion(String? suggested) {
+    if (_seeded || suggested == null) return;
+    if (!EgyptianPhone.isValid(suggested)) return;
+    if (_controller.text.trim().isNotEmpty) {
+      _seeded = true;
+      return;
+    }
+    _seeded = true;
+    _controller.text = suggested;
+    ref.read(checkoutDeliveryPhoneProvider.notifier).state = suggested;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final palette = context.palette;
+    ref.listen(checkoutPhoneBootstrapProvider, (_, next) {
+      next.whenData(_applySuggestion);
+    });
+    final bootstrap = ref.watch(checkoutPhoneBootstrapProvider);
+    bootstrap.whenData(_applySuggestion);
+
+    final current = EgyptianPhone.normalize(_controller.text);
+    final valid = EgyptianPhone.isValid(current);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          key: const Key('checkout-delivery-phone'),
+          controller: _controller,
+          keyboardType: TextInputType.phone,
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.end,
+          autofillHints: const [AutofillHints.telephoneNumber],
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[\d+\s-]')),
+            LengthLimitingTextInputFormatter(14),
+          ],
+          decoration: InputDecoration(
+            labelText: 'رقم الموبايل للتوصيل *',
+            hintText: '01xxxxxxxxx',
+            hintTextDirection: TextDirection.ltr,
+            prefixIcon: const Icon(Icons.phone_iphone_rounded),
+            errorText: _controller.text.trim().isEmpty
+                ? null
+                : (valid ? null : l10n.authEnterValidEgyptianPhone),
+          ),
+          onChanged: (value) {
+            ref.read(checkoutDeliveryPhoneProvider.notifier).state = value;
+            setState(() {});
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          valid
+              ? 'سيتم التواصل على هذا الرقم عند التوصيل'
+              : 'مطلوب — رقم مصري 11 رقم يبدأ بـ 010 / 011 / 012 / 015',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: valid ? palette.muted : AppColors.secondary,
+          ),
+        ),
+      ],
     );
   }
 }
