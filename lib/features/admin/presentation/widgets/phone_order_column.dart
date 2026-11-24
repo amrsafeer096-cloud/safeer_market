@@ -64,6 +64,45 @@ class PhoneOrderColumn extends ConsumerWidget {
       phoneOrderControllerProvider.select((state) => state.parked.isNotEmpty),
     );
 
+    Widget? lockedBanner() {
+      if (!hasCustomer) return null;
+      final state = ref.watch(phoneOrderControllerProvider);
+      final customer = state.customer!;
+      final controller = ref.read(phoneOrderControllerProvider.notifier);
+      return _LockedCustomer(
+        customer: customer,
+        isSupplemental: state.isSupplemental,
+        compact: true,
+        onChange: controller.clear,
+        onEdit: () async {
+          final confirmed =
+              await showCustomerDetailsSheet(context, customer: customer);
+          if (confirmed == null || !context.mounted) return;
+          final hasToday = await ref
+              .read(phoneOrdersRepositoryProvider)
+              .hasOrderToday(confirmed);
+          if (!context.mounted) return;
+          if (hasToday) {
+            final kind = await showSameDayOrderDialog(context);
+            if (kind == null || !context.mounted) return;
+            await controller.selectCustomerWithZoneFee(confirmed);
+            if (kind == SameDayOrderKind.supplemental) {
+              controller
+                ..setDeliveryFee(0)
+                ..setSupplemental(true);
+            } else {
+              controller.setSupplemental(false);
+            }
+          } else {
+            await controller.selectCustomerWithZoneFee(confirmed);
+            controller.setSupplemental(false);
+          }
+        },
+        onShowHistory: () =>
+            showCustomerPurchaseHistoryDialog(context, customer),
+      );
+    }
+
     Widget header() {
       final locked = lockedBanner();
       return Container(
@@ -143,45 +182,6 @@ class PhoneOrderColumn extends ConsumerWidget {
             ),
           ),
         ),
-      );
-    }
-
-    Widget? lockedBanner() {
-      if (!hasCustomer) return null;
-      final state = ref.watch(phoneOrderControllerProvider);
-      final customer = state.customer!;
-      final controller = ref.read(phoneOrderControllerProvider.notifier);
-      return _LockedCustomer(
-        customer: customer,
-        isSupplemental: state.isSupplemental,
-        compact: true,
-        onChange: controller.clear,
-        onEdit: () async {
-          final confirmed =
-              await showCustomerDetailsSheet(context, customer: customer);
-          if (confirmed == null || !context.mounted) return;
-          final hasToday = await ref
-              .read(phoneOrdersRepositoryProvider)
-              .hasOrderToday(confirmed);
-          if (!context.mounted) return;
-          if (hasToday) {
-            final kind = await showSameDayOrderDialog(context);
-            if (kind == null || !context.mounted) return;
-            await controller.selectCustomerWithZoneFee(confirmed);
-            if (kind == SameDayOrderKind.supplemental) {
-              controller
-                ..setDeliveryFee(0)
-                ..setSupplemental(true);
-            } else {
-              controller.setSupplemental(false);
-            }
-          } else {
-            await controller.selectCustomerWithZoneFee(confirmed);
-            controller.setSupplemental(false);
-          }
-        },
-        onShowHistory: () =>
-            showCustomerPurchaseHistoryDialog(context, customer),
       );
     }
 
