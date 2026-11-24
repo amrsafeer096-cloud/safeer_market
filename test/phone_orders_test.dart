@@ -228,6 +228,7 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     required double deliveryFee,
     PhoneOrderPayment paymentMethod = PhoneOrderPayment.cash,
     PaymentReceiptImage? receipt,
+    bool isSupplemental = false,
   }) async {
     if (placeFailure != null) throw placeFailure!;
     placed.add((customer: customer, lines: lines, fee: deliveryFee));
@@ -235,6 +236,9 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     receipts.add(receipt);
     return 'a1b2c3d4-0000-0000-0000-000000000000';
   }
+
+  @override
+  Future<bool> hasOrderToday(PhoneOrderCustomer customer) async => false;
 
   @override
   Future<List<PhoneOrderArea>> fetchAreas({String? city}) async => city == null
@@ -252,6 +256,14 @@ Future<void> _confirmCustomerDetails(WidgetTester tester) async {
   await tester.pumpAndSettle();
   expect(find.byKey(const Key('customer-details-sheet')), findsOneWidget);
   await tester.tap(find.byKey(const Key('customer-details-confirm')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _confirmAndPlaceOrder(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('phone-order-confirm')));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('payment-confirm-dialog')), findsOneWidget);
+  await tester.tap(find.byKey(const Key('payment-confirm-submit')));
   await tester.pumpAndSettle();
 }
 
@@ -824,8 +836,7 @@ void main() {
         contains('115'),
       );
 
-      await tester.tap(find.byKey(const Key('phone-order-confirm')));
-      await tester.pumpAndSettle();
+      await _confirmAndPlaceOrder(tester);
 
       final order = repository.placed.single;
       expect(order.customer.posCustomerId, 812);
@@ -1200,8 +1211,7 @@ void main() {
       await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
       await tester.pump();
 
-      await tester.tap(find.byKey(const Key('phone-order-confirm')));
-      await tester.pumpAndSettle();
+      await _confirmAndPlaceOrder(tester);
       await tester.tap(find.byKey(const Key('phone-order-cart-toggle')));
       await tester.pumpAndSettle();
 
@@ -1308,8 +1318,7 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('phone-order-receipt-pick')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('phone-order-confirm')));
-      await tester.pumpAndSettle();
+      await _confirmAndPlaceOrder(tester);
       expect(repository.payments.single, PhoneOrderPayment.visaOnDelivery);
       expect(repository.receipts.single, isNull);
     });
@@ -1357,8 +1366,7 @@ void main() {
       expect(find.byKey(const Key('phone-order-receipt-thumb')), findsOneWidget);
       expect(find.byKey(const Key('phone-order-receipt-required')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('phone-order-confirm')));
-      await tester.pumpAndSettle();
+      await _confirmAndPlaceOrder(tester);
       expect(repository.payments.single, PhoneOrderPayment.instaPay);
       expect(repository.receipts.single!.fileName, 'receipt.png');
     });

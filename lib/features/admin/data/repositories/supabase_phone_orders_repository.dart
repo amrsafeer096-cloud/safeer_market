@@ -287,6 +287,7 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     required double deliveryFee,
     PhoneOrderPayment paymentMethod = PhoneOrderPayment.cash,
     PaymentReceiptImage? receipt,
+    bool isSupplemental = false,
   }) async {
     String? receiptUrl;
     if (paymentMethod.needsReceipt) {
@@ -324,6 +325,10 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
         },
         if (customer.fujitsuAddressId != null)
           'p_fujitsu_address_id': customer.fujitsuAddressId,
+        if (isSupplemental) ...{
+          'p_is_supplemental': true,
+          'p_admin_note': 'طلب ملحق',
+        },
       });
     } catch (_) {
       if (receiptUrl != null) await _removeReceipt(receiptUrl);
@@ -333,6 +338,21 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
       throw PhoneOrderFailure(L10n.current.phoneOrderFailed('$orderId'));
     }
     return orderId;
+  }
+
+  @override
+  Future<bool> hasOrderToday(PhoneOrderCustomer customer) async {
+    try {
+      final raw = await _rpc('customer_has_order_today', {
+        if (customer.posCustomerId != null)
+          'p_pos_customer_id': customer.posCustomerId,
+        if (customer.userId != null) 'p_user_id': customer.userId,
+        if (customer.phone != null) 'p_phone': customer.phone,
+      });
+      return raw == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// The InstaPay screenshot goes to the public `payment_receipts` bucket,

@@ -18,6 +18,9 @@ final phoneOrdersRepositoryProvider = Provider<PhoneOrdersRepository>((ref) {
   return SupabasePhoneOrdersRepository(ref.watch(supabaseClientProvider));
 });
 
+/// Bumped by the dashboard Esc handler so the product search popup dismisses.
+final phoneOrderDismissSearchProvider = StateProvider<int>((ref) => 0);
+
 /// Callers matching what was typed in «ابحث برقم الهاتف أو اسم العميل».
 final phoneOrderCustomersProvider = FutureProvider.autoDispose
     .family<List<PhoneOrderCustomer>, String>((ref, query) {
@@ -295,6 +298,10 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
   void setDeliveryFee(double fee) =>
       state = state.copyWith(deliveryFee: fee < 0 ? 0 : fee);
 
+  /// Marks / clears a same-day «طلب ملحق» (does not change the fee by itself).
+  void setSupplemental(bool value) =>
+      state = state.copyWith(isSupplemental: value);
+
   /// Replaces the cart (e.g. «إعادة آخر طلب بالكامل»).
   void replaceLines(List<PhoneOrderLine> lines) =>
       state = state.copyWith(lines: List.of(lines));
@@ -333,6 +340,7 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
             deliveryFee: state.deliveryFee,
             paymentMethod: state.paymentMethod,
             receipt: state.receipt,
+            isSupplemental: state.isSupplemental,
           );
       unawaited(
         ref.read(orderPushDispatcherProvider).notifyOrderCreated(orderId),

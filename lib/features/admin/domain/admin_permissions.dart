@@ -4,6 +4,10 @@
 enum AdminPermission {
   // —— الشاشات / القوائم ——
   receiveOrders('receive_orders', 'تلقي الطلبات', AdminPermissionGroup.menus),
+  canSetDeliveryFee(
+      'can_set_delivery_fee',
+      'تحديد رسوم التوصيل',
+      AdminPermissionGroup.menus),
   orderStatus('order_status', 'حالة الطلب', AdminPermissionGroup.menus),
   searchOrders('search_orders', 'بحث الطلبات', AdminPermissionGroup.menus),
   viewReports('view_reports', 'عرض التقارير واليومية', AdminPermissionGroup.menus),

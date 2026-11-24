@@ -332,6 +332,7 @@ class PhoneOrderState {
     this.submitting = false,
     this.paymentMethod = PhoneOrderPayment.cash,
     this.receipt,
+    this.isSupplemental = false,
     this.id = 1,
     this.nextId = 2,
     this.parked = const [],
@@ -351,6 +352,9 @@ class PhoneOrderState {
 
   /// The InstaPay transfer image (kept only while paying by InstaPay).
   final PaymentReceiptImage? receipt;
+
+  /// «طلب ملحق»: free delivery follow-up on a same-day order.
+  final bool isSupplemental;
 
   /// Identifies this draft among the open orders.
   final int id;
@@ -408,6 +412,7 @@ class PhoneOrderState {
     PhoneOrderPayment? paymentMethod,
     PaymentReceiptImage? receipt,
     bool clearReceipt = false,
+    bool? isSupplemental,
     int? id,
     int? nextId,
     List<PhoneOrderState>? parked,
@@ -419,6 +424,7 @@ class PhoneOrderState {
         submitting: submitting ?? this.submitting,
         paymentMethod: paymentMethod ?? this.paymentMethod,
         receipt: clearReceipt ? null : receipt ?? this.receipt,
+        isSupplemental: isSupplemental ?? this.isSupplemental,
         id: id ?? this.id,
         nextId: nextId ?? this.nextId,
         parked: parked ?? this.parked,

@@ -179,6 +179,10 @@ abstract class SystemAdminService {
 
   /// Permission keys of the signed-in user.
   Future<Set<String>> myPermissions();
+
+  /// Permission keys for a staff-login row (linked profile grants).
+  Future<Set<String>> staffMemberPermissions(String staffId);
+
   Future<Set<String>> permissionsOf(String userId);
   Future<void> setPermissions(String userId, Set<String> permissions);
 
@@ -431,6 +435,15 @@ class SupabaseSystemAdminService implements SystemAdminService {
   @override
   Future<Set<String>> myPermissions() => _guard(() async {
         return _keys(await _client.rpc('my_permissions'));
+      });
+
+  @override
+  Future<Set<String>> staffMemberPermissions(String staffId) =>
+      _guard(() async {
+        return _keys(await _client.rpc(
+          'staff_member_permissions',
+          params: {'p_staff_id': staffId},
+        ));
       });
 
   @override

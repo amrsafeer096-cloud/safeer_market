@@ -12,15 +12,19 @@ import '../../../cart/domain/weight_options.dart';
 import '../../../cart/presentation/widgets/weight_picker_sheet.dart';
 import '../../../checkout/domain/delivery_pricing.dart';
 import '../../../home/domain/entities/product.dart';
+import '../../domain/admin_permissions.dart';
 import '../../domain/phone_order.dart';
 import '../../domain/product_search_filter.dart';
 import '../../domain/repositories/phone_orders_repository.dart';
 import '../providers/order_alternatives_providers.dart';
 import '../providers/phone_order_providers.dart';
+import '../providers/system_admin_providers.dart';
 import 'customer_details_sheet.dart';
 import 'customer_purchase_history_dialog.dart';
 import 'new_customer_dialogs.dart';
+import 'payment_confirm_dialog.dart';
 import 'product_details_dialog.dart';
+import 'same_day_order_dialog.dart';
 import 'staff_product_search_tile.dart';
 
 /// «تلقي الطلبات»: find (or add) the caller, build their cart, and place
@@ -134,6 +138,44 @@ class PhoneOrderColumn extends ConsumerWidget {
       );
     }
 
+    Widget? lockedBanner() {
+      if (!hasCustomer) return null;
+      final state = ref.watch(phoneOrderControllerProvider);
+      final customer = state.customer!;
+      final controller = ref.read(phoneOrderControllerProvider.notifier);
+      return _LockedCustomer(
+        customer: customer,
+        isSupplemental: state.isSupplemental,
+        onChange: controller.clear,
+        onEdit: () async {
+          final confirmed =
+              await showCustomerDetailsSheet(context, customer: customer);
+          if (confirmed == null || !context.mounted) return;
+          final hasToday = await ref
+              .read(phoneOrdersRepositoryProvider)
+              .hasOrderToday(confirmed);
+          if (!context.mounted) return;
+          if (hasToday) {
+            final kind = await showSameDayOrderDialog(context);
+            if (kind == null || !context.mounted) return;
+            await controller.selectCustomerWithZoneFee(confirmed);
+            if (kind == SameDayOrderKind.supplemental) {
+              controller
+                ..setDeliveryFee(0)
+                ..setSupplemental(true);
+            } else {
+              controller.setSupplemental(false);
+            }
+          } else {
+            await controller.selectCustomerWithZoneFee(confirmed);
+            controller.setSupplemental(false);
+          }
+        },
+        onShowHistory: () =>
+            showCustomerPurchaseHistoryDialog(context, customer),
+      );
+    }
+
     if (!splitLayout) {
       return Material(
         color: palette.card,
@@ -144,6 +186,7 @@ class PhoneOrderColumn extends ConsumerWidget {
             const Divider(height: 1),
             pendingBanner(),
             if (hasParked) const _OpenOrdersStrip(),
+            if (lockedBanner() case final banner?) banner,
             Expanded(
               child: hasCustomer
                   ? _OrderBuilder(onPlaced: onPlaced, splitLayout: false)
@@ -203,6 +246,8 @@ class PhoneOrderColumn extends ConsumerWidget {
           Material(color: palette.card, child: header()),
           const Divider(height: 1),
           pendingBanner(),
+          if (lockedBanner() case final banner?)
+            Material(color: palette.card, child: banner),
           Expanded(
             // RTL: the open-orders list is the far-right column, next to
             // the products.
@@ -387,6 +432,28 @@ Future<void> _confirmOrder(
 ) async {
   final messenger = ScaffoldMessenger.of(context);
   final l10n = AppLocalizations.of(context)!;
+  final controller = ref.read(phoneOrderControllerProvider.notifier);
+  final current = ref.read(phoneOrderControllerProvider).paymentMethod;
+
+  final confirmedPayment = await showPaymentConfirmDialog(
+    context,
+    current: current,
+  );
+  if (confirmedPayment == null || !context.mounted) return;
+  controller.setPayment(confirmedPayment);
+
+  // InstaPay still needs a receipt before submit.
+  if (confirmedPayment.needsReceipt &&
+      !ref.read(phoneOrderControllerProvider).hasReceipt) {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+        backgroundColor: AppColors.secondary,
+        content: Text('أرفق صورة التحويل قبل تسجيل طلب إنستا باي'),
+      ));
+    return;
+  }
+
   void fail(String message) => messenger
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(
@@ -394,8 +461,7 @@ Future<void> _confirmOrder(
       content: Text(message),
     ));
   try {
-    final orderId =
-        await ref.read(phoneOrderControllerProvider.notifier).submit();
+    final orderId = await controller.submit();
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
@@ -466,23 +532,6 @@ void _showMessage(BuildContext context, String message, {bool ok = false}) {
     ));
 }
 
-/// Tapping a product row (not its − / +) opens its details: image, barcode,
-/// stock and the bulk «إضافة كمية بالجملة».
-Future<void> _openProductDetails(
-  BuildContext context,
-  WidgetRef ref,
-  Product product,
-) {
-  return showProductDetailsDialog(
-    context,
-    product: product,
-    onAddQuantity: (quantity) => ref
-        .read(phoneOrderControllerProvider.notifier)
-        .addQuantity(product, quantity),
-    onPickWeight: () => _addProduct(context, ref, product),
-  );
-}
-
 /// Unit products go straight into the cart; weight-based products open the
 /// weight sheet first (same flow as the customer app).
 Future<void> _addProduct(
@@ -539,9 +588,26 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
   Future<void> _confirmCustomer(PhoneOrderCustomer draft) async {
     final confirmed = await showCustomerDetailsSheet(context, customer: draft);
     if (confirmed == null || !mounted) return;
-    await ref
-        .read(phoneOrderControllerProvider.notifier)
-        .selectCustomerWithZoneFee(confirmed);
+    final controller = ref.read(phoneOrderControllerProvider.notifier);
+    final hasToday = await ref
+        .read(phoneOrdersRepositoryProvider)
+        .hasOrderToday(confirmed);
+    if (!mounted) return;
+    if (hasToday) {
+      final kind = await showSameDayOrderDialog(context);
+      if (kind == null || !mounted) return;
+      await controller.selectCustomerWithZoneFee(confirmed);
+      if (kind == SameDayOrderKind.supplemental) {
+        controller
+          ..setDeliveryFee(0)
+          ..setSupplemental(true);
+      } else {
+        controller.setSupplemental(false);
+      }
+    } else {
+      await controller.selectCustomerWithZoneFee(confirmed);
+      controller.setSupplemental(false);
+    }
   }
 
   Future<void> _addCustomer() async {
@@ -691,9 +757,11 @@ class _OrderBuilder extends ConsumerStatefulWidget {
 
 class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
   Timer? _debounce;
   String _query = '';
   var _filter = ProductSearchFilterMode.inStock;
+  var _popupOpen = false;
 
   /// The cart and delivery fee panel; closed, it is one summary line so the
   /// product results keep the height.
@@ -709,13 +777,30 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   void dispose() {
     _debounce?.cancel();
     _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _dismissSearch() {
+    _debounce?.cancel();
+    _search.clear();
+    if (!mounted) return;
+    setState(() {
+      _query = '';
+      _popupOpen = false;
+    });
+    _searchFocus.unfocus();
   }
 
   void _onChanged(String text) {
     _debounce?.cancel();
+    final trimmed = text.trim();
+    setState(() {
+      _popupOpen = trimmed.isNotEmpty;
+      if (trimmed.isEmpty) _query = '';
+    });
     _debounce = Timer(PhoneOrderColumn.searchDebounce, () {
-      if (mounted) setState(() => _query = text.trim());
+      if (mounted) setState(() => _query = trimmed);
     });
   }
 
@@ -724,7 +809,10 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   Future<void> _onSubmitted(String text) async {
     final code = text.trim();
     _debounce?.cancel();
-    setState(() => _query = code);
+    setState(() {
+      _query = code;
+      _popupOpen = code.isNotEmpty;
+    });
     if (code.isEmpty) return;
     try {
       final products = await ref.read(
@@ -736,14 +824,34 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       final match =
           products.where((product) => product.barcode?.trim() == code);
       if (match.length == 1 && mounted) {
-        await _addProduct(context, ref, match.single);
-        if (!mounted) return;
-        _search.clear();
-        setState(() => _query = '');
+        await _pickProduct(match.single);
       }
     } catch (_) {
       // The results list shows the error.
     }
+  }
+
+  Future<void> _pickProduct(Product product) async {
+    await _addProduct(context, ref, product);
+    if (!mounted) return;
+    _dismissSearch();
+  }
+
+  Future<void> _openDetails(Product product) async {
+    await showProductDetailsDialog(
+      context,
+      product: product,
+      onAddQuantity: (quantity) {
+        ref
+            .read(phoneOrderControllerProvider.notifier)
+            .addQuantity(product, quantity);
+        _dismissSearch();
+      },
+      onPickWeight: () async {
+        await _addProduct(context, ref, product);
+        if (mounted) _dismissSearch();
+      },
+    );
   }
 
   @override
@@ -754,37 +862,185 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     final controller = ref.read(phoneOrderControllerProvider.notifier);
     final customer = state.customer!;
 
+    ref.listen(phoneOrderDismissSearchProvider, (prev, next) {
+      if (prev != next) _dismissSearch();
+    });
+
+    final historyAsync =
+        ref.watch(phoneOrderCustomerHistoryProvider(customer.key));
+
+    Widget productTile(Product product) {
+      final line = state.lineOf(product.id);
+      final countLabel = switch (line) {
+        PhoneOrderLine(:final weightInGrams?) =>
+          WeightOptions.phoneOrderLabel(weightInGrams),
+        PhoneOrderLine(:final quantity) => '$quantity',
+        null => '0',
+      };
+      return StaffProductSearchTile(
+        product: product,
+        quantityLabel: countLabel,
+        inCart: line != null,
+        showZeroStockInRed: _filter == ProductSearchFilterMode.allItems,
+        onAdd: () => _pickProduct(product),
+        onOpen: () => _openDetails(product),
+        onRemove: () => controller.remove(product),
+      );
+    }
+
+    List<CustomerPurchaseItem> previousMatches(String q) {
+      final history = historyAsync.valueOrNull;
+      if (history == null || q.isEmpty) return const [];
+      final lower = q.toLowerCase();
+      return [
+        for (final item in history.mostRecent)
+          if (item.product.name.toLowerCase().contains(lower) ||
+              (item.product.barcode ?? '').toLowerCase().startsWith(lower))
+            item,
+      ];
+    }
+
+    Widget searchPopup() {
+      final prev = previousMatches(_query.isEmpty ? _search.text.trim() : _query);
+      return Material(
+        key: const Key('phone-order-search-popup'),
+        elevation: 8,
+        color: palette.card,
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'نتائج البحث',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('phone-order-search-dismiss'),
+                    tooltip: 'إغلاق',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _dismissSearch,
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // RTL: first child is on the right — previous products.
+                  Expanded(
+                    flex: 4,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+                          child: Text(
+                            'المنتجات السابقة للعميل',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 13,
+                              color: palette.muted,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: historyAsync.isLoading
+                              ? const Center(
+                                  child: CircularProgressIndicator())
+                              : prev.isEmpty
+                                  ? Center(
+                                      child: Text(
+                                        'لا توجد مشتريات مطابقة',
+                                        style: TextStyle(color: palette.muted),
+                                      ),
+                                    )
+                                  : ListView.separated(
+                                      key: const Key(
+                                          'phone-order-previous-products'),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6),
+                                      itemCount: prev.length,
+                                      separatorBuilder: (_, __) =>
+                                          const Divider(height: 1),
+                                      itemBuilder: (context, i) {
+                                        final item = prev[i];
+                                        return productTile(item.product);
+                                      },
+                                    ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  VerticalDivider(width: 1, color: palette.border),
+                  // Main catalog results (left in RTL).
+                  Expanded(
+                    flex: 6,
+                    child: _query.isEmpty
+                        ? Center(
+                            child: Text(
+                              'جاري البحث…',
+                              style: TextStyle(color: palette.muted),
+                            ),
+                          )
+                        : ref
+                            .watch(phoneOrderProductsProvider(_productQuery))
+                            .when(
+                              loading: () => const Center(
+                                  child: CircularProgressIndicator()),
+                              error: (error, _) => Center(
+                                child: Text('$error',
+                                    textAlign: TextAlign.center),
+                              ),
+                              data: (products) => products.isEmpty
+                                  ? Center(
+                                      child: Text(l10n.phoneOrderNoProducts,
+                                          style: TextStyle(
+                                              color: palette.muted)),
+                                    )
+                                  : ListView.separated(
+                                      key: const Key('phone-order-products'),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 4),
+                                      itemCount: products.length,
+                                      separatorBuilder: (_, __) =>
+                                          const Divider(height: 1),
+                                      itemBuilder: (context, index) =>
+                                          productTile(products[index]),
+                                    ),
+                            ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _LockedCustomer(
-          customer: customer,
-          onChange: controller.clear,
-          onEdit: () async {
-            final confirmed =
-                await showCustomerDetailsSheet(context, customer: customer);
-            if (confirmed == null || !context.mounted) return;
-            await ref
-                .read(phoneOrderControllerProvider.notifier)
-                .selectCustomerWithZoneFee(confirmed);
-          },
-          onShowHistory: () =>
-              showCustomerPurchaseHistoryDialog(context, customer),
-        ),
-        // The product search sits right under the customer bar; no category
-        // chips, so results start immediately below it.
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
           child: TextField(
             key: const Key('phone-order-product-search'),
             controller: _search,
+            focusNode: _searchFocus,
             onChanged: _onChanged,
             onSubmitted: _onSubmitted,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               hintText: l10n.phoneOrderProductSearchHint,
               prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
-              // RTL: suffix sits on the far left (funnel + stock/+- column).
               suffixIcon: ProductSearchFilterButton(
                 mode: _filter,
                 onChanged: (mode) => setState(() => _filter = mode),
@@ -795,56 +1051,16 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
           ),
         ),
         const SizedBox(height: 4),
-        // Everything not taken by the search above and the cart bar below.
         Expanded(
-          child: _query.isEmpty
-              ? Center(
+          child: _popupOpen
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: searchPopup(),
+                )
+              : Center(
                   child: Text(l10n.phoneOrderSearchProductsPrompt,
                       style: TextStyle(color: palette.muted)),
-                )
-              : ref.watch(phoneOrderProductsProvider(_productQuery)).when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, _) => Center(
-                      child: Text('$error', textAlign: TextAlign.center),
-                    ),
-                    data: (products) => products.isEmpty
-                        ? Center(
-                            child: Text(l10n.phoneOrderNoProducts,
-                                style: TextStyle(color: palette.muted)),
-                          )
-                        : ListView.separated(
-                            key: const Key('phone-order-products'),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            itemCount: products.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1, indent: 12),
-                            itemBuilder: (context, index) {
-                              final product = products[index];
-                              final line = state.lineOf(product.id);
-                              final countLabel = switch (line) {
-                                PhoneOrderLine(:final weightInGrams?) =>
-                                  WeightOptions.phoneOrderLabel(weightInGrams),
-                                PhoneOrderLine(:final quantity) =>
-                                  '$quantity',
-                                null => '0',
-                              };
-                              return StaffProductSearchTile(
-                                product: product,
-                                quantityLabel: countLabel,
-                                inCart: line != null,
-                                showZeroStockInRed:
-                                    _filter == ProductSearchFilterMode.allItems,
-                                onAdd: () =>
-                                    _addProduct(context, ref, product),
-                                onOpen: () =>
-                                    _openProductDetails(context, ref, product),
-                                onRemove: () => controller.remove(product),
-                              );
-                            },
-                          ),
-                  ),
+                ),
         ),
         if (!widget.splitLayout)
           _CartPanel(
@@ -865,12 +1081,14 @@ class _LockedCustomer extends StatelessWidget {
     required this.onChange,
     required this.onEdit,
     required this.onShowHistory,
+    this.isSupplemental = false,
   });
 
   final PhoneOrderCustomer customer;
   final VoidCallback onChange;
   final VoidCallback onEdit;
   final VoidCallback onShowHistory;
+  final bool isSupplemental;
 
   @override
   Widget build(BuildContext context) {
@@ -892,7 +1110,7 @@ class _LockedCustomer extends StatelessWidget {
         onTap: onEdit,
         borderRadius: BorderRadius.circular(10),
         child: Container(
-          margin: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          margin: const EdgeInsets.fromLTRB(10, 8, 10, 4),
           padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 2, 6),
           decoration: BoxDecoration(
             color: palette.accent.withValues(alpha: 0.08),
@@ -934,6 +1152,19 @@ class _LockedCustomer extends StatelessWidget {
                   ],
                 ),
               ),
+              if (isSupplemental)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 4),
+                  child: Chip(
+                    key: const Key('phone-order-supplemental-badge'),
+                    label: const Text('طلب ملحق',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Colors.orange.shade100,
+                    side: BorderSide(color: Colors.orange.shade400),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
               IconButton(
                 key: const Key('phone-order-customer-history'),
                 tooltip: 'مشتريات العميل المعتادة والسابقة',
@@ -1137,26 +1368,47 @@ class _CartPanel extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Divider(height: 10),
-        Text(l10n.deliveryFee,
-            style:
-                TextStyle(fontWeight: FontWeight.w800, color: palette.muted)),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
+        Row(
           children: [
-            for (final fee in _fees)
-              ChoiceChip(
-                key: Key('phone-order-fee-${fee.toInt()}'),
+            Expanded(
+              child: Text(l10n.deliveryFee,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w800, color: palette.muted)),
+            ),
+            if (state.isSupplemental)
+              const Chip(
+                key: Key('phone-order-cart-supplemental'),
+                label: Text('طلب ملحق',
+                    style:
+                        TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
                 visualDensity: VisualDensity.compact,
-                label: Text(fee == 0
-                    ? l10n.phoneOrderFreeDelivery
-                    : AppCurrency.of(fee)),
-                selected: state.deliveryFee == fee,
-                onSelected: (_) => onFee(fee),
+                padding: EdgeInsets.zero,
               ),
           ],
         ),
+        const SizedBox(height: 6),
+        Builder(builder: (context) {
+          final canSetFee = !state.isSupplemental &&
+              ref.watch(
+                  adminCanProvider(AdminPermission.canSetDeliveryFee));
+          return Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              for (final fee in _fees)
+                ChoiceChip(
+                  key: Key('phone-order-fee-${fee.toInt()}'),
+                  visualDensity: VisualDensity.compact,
+                  label: Text(fee == 0
+                      ? l10n.phoneOrderFreeDelivery
+                      : AppCurrency.of(fee)),
+                  selected: state.deliveryFee == fee,
+                  onSelected:
+                      canSetFee ? (_) => onFee(fee) : null,
+                ),
+            ],
+          );
+        }),
         payment,
         const SizedBox(height: 8),
         // Totals table: item count first, then items, delivery, grand total.

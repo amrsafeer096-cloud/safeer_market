@@ -87,13 +87,20 @@ abstract class PhoneOrdersRepository {
   /// [paymentMethod] is stored on the order; an InstaPay order needs its
   /// [receipt] image, which is uploaded first and linked on the order, and
   /// the order is saved as paid.
+  ///
+  /// [isSupplemental] marks a same-day «طلب ملحق» (usually with fee 0).
   Future<String> placeOrder({
     required PhoneOrderCustomer customer,
     required List<PhoneOrderLine> lines,
     required double deliveryFee,
     PhoneOrderPayment paymentMethod = PhoneOrderPayment.cash,
     PaymentReceiptImage? receipt,
+    bool isSupplemental = false,
   });
+
+  /// True when this customer already has a non-cancelled order created today
+  /// (Africa/Cairo calendar day).
+  Future<bool> hasOrderToday(PhoneOrderCustomer customer);
 
   /// Past purchases for [customer], matched by user / POS id / phone.
   Future<CustomerPurchaseHistory> fetchCustomerHistory(

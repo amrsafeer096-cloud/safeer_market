@@ -71,6 +71,7 @@ class _AdminPermissionsSectionState
         _saving = false;
       });
       ref.invalidate(myPermissionsProvider);
+      ref.invalidate(staffPermissionsProvider);
       showAdminSnack(context, 'تم حفظ الصلاحيات');
     } catch (error) {
       if (!mounted) return;

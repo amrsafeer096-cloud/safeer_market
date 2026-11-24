@@ -170,6 +170,10 @@ class _FakeService implements SystemAdminService {
   Future<Set<String>> myPermissions() async => permissions;
 
   @override
+  Future<Set<String>> staffMemberPermissions(String staffId) async =>
+      permissions;
+
+  @override
   Future<Set<String>> permissionsOf(String userId) async =>
       savedPermissions[userId] ?? {AdminPermission.viewReports.key};
 

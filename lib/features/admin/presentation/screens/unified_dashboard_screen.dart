@@ -25,6 +25,7 @@ import '../../domain/admin_permissions.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
 import '../../domain/order_prep_timer.dart';
+import '../../domain/staff_session.dart';
 import '../../../profile/presentation/providers/profile_providers.dart';
 import '../../../profile/domain/entities/user_role.dart';
 import '../providers/admin_providers.dart';
@@ -451,13 +452,17 @@ class _UnifiedDashboardScreenState
     final bool showSystemSidebar = staffSession.isAdmin;
     final palette = context.palette;
 
-    // Keep the active tab inside what this staff role may open (top tabs
-    // and, for admin, the system sidebar: products / magazines / …).
-    final allowed = staffSession.allowedTabs;
-    if (!staffSession.canOpenMenu(activeMenu)) {
+    // Role tabs ∩ granted menu permissions (see staffAllowedMenusProvider).
+    final allowed = ref.watch(staffAllowedMenusProvider);
+    final canOpenActive = allowed.contains(activeMenu) ||
+        (showSystemSidebar &&
+            StaffSession.systemSidebarMenus.contains(activeMenu));
+    if (!canOpenActive) {
+      final fallback =
+          allowed.isNotEmpty ? allowed.first : AdminMenu.orderStatus;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        ref.read(adminMenuProvider.notifier).state = allowed.first;
+        ref.read(adminMenuProvider.notifier).state = fallback;
       });
     }
 
@@ -608,7 +613,41 @@ class _UnifiedDashboardScreenState
         _ => orderStatusBody(),
       };
 
-      return Scaffold(
+      void onEscape() {
+        // 1) Close the top-most dialog / route.
+        final rootNav = Navigator.of(context, rootNavigator: true);
+        if (rootNav.canPop()) {
+          rootNav.pop();
+          return;
+        }
+        final nav = Navigator.of(context);
+        if (nav.canPop()) {
+          nav.pop();
+          return;
+        }
+        // 2) Dismiss product search popup / clear focus on تلقي الطلبات.
+        ref.read(phoneOrderDismissSearchProvider.notifier).state++;
+        FocusManager.instance.primaryFocus?.unfocus();
+        // 3) On order status detail, step back to the list.
+        if (activeMenu == AdminMenu.orderStatus && selectedId != null) {
+          ref.read(selectedOrderIdProvider.notifier).state = null;
+          return;
+        }
+        // 4) Clear the locked phone-order customer (back to search).
+        if (activeMenu == AdminMenu.receiveOrders &&
+            ref.read(phoneOrderControllerProvider).customer != null &&
+            ref.read(phoneOrderControllerProvider).lines.isEmpty) {
+          ref.read(phoneOrderControllerProvider.notifier).clear();
+        }
+      }
+
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): onEscape,
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
         backgroundColor:
             palette.isDark ? palette.background : const Color(0xFFF4F6F8),
         drawer: (!isDesktop && showSystemSidebar)
@@ -737,6 +776,8 @@ class _UnifiedDashboardScreenState
               ),
             Expanded(child: menuBody),
           ],
+        ),
+      ),
         ),
       );
     });
@@ -1412,6 +1453,8 @@ class _OrderDetailsView extends ConsumerWidget {
         staff?.isPreparer == true || staff?.isDriver == true || isDriver;
     final isStaffAdmin = staff?.isAdmin == true;
     final isStaffTaker = staff?.isTaker == true;
+    final isStaffPreparer = staff?.isPreparer == true;
+    final isStaffDriver = staff?.isDriver == true;
     // Super-admin / staff admin always; cashiers need «تعديل الطلبات».
     final hasEditPermission = ref.watch(isRealAdminProvider) ||
         isStaffAdmin ||
@@ -1422,6 +1465,14 @@ class _OrderDetailsView extends ConsumerWidget {
           prepCompletedAt: order['prep_completed_at'],
         ) &&
         (isStaffAdmin || isStaffTaker || hasEditPermission);
+    final canStartPrep = isStaffPreparer ||
+        isStaffAdmin ||
+        ref.watch(adminCanProvider(AdminPermission.startPrep));
+    final canFinishPrep = isStaffPreparer ||
+        isStaffAdmin ||
+        ref.watch(adminCanProvider(AdminPermission.finishPrep));
+    final canAssignDriver = isStaffAdmin ||
+        ref.watch(adminCanProvider(AdminPermission.assignDriver));
     final beingEdited = order['is_being_edited'] == true;
     final deliveryFee = switch (order['delivery_fee']) {
       final num n => n.toDouble(),
@@ -1433,7 +1484,7 @@ class _OrderDetailsView extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Receipt only after a preparer is chosen (admin + preparer).
-        if (!isDriver) ...[
+        if (!isDriver && !isStaffDriver) ...[
           if (hasPreparer)
             _ActionCard(
               key: const Key('action-print-prep-receipt'),
@@ -1483,14 +1534,17 @@ class _OrderDetailsView extends ConsumerWidget {
           ),
           gap(),
         ],
-        if (status == OrderStatus.pending.value && !isDriver)
+        if (status == OrderStatus.pending.value &&
+            !isDriver &&
+            !isStaffDriver &&
+            canStartPrep)
           _ActionCard(
             key: const Key('action-start-prep'),
             title: l10n.startPreparing,
             desc: l10n.adminOrderAwaitingPreparer,
             icon: Icons.play_circle_fill,
             color: Colors.orange,
-            onTap: () => _showPreparerDialog(context, ref, order['id']),
+            onTap: () => _onStartPreparing(context, ref, orderId),
           ),
         if (status == OrderStatus.preparing.value) ...[
           Text(l10n.adminPreparerName('${order['preparer_name']}'),
@@ -1504,9 +1558,9 @@ class _OrderDetailsView extends ConsumerWidget {
               icon: Icons.check_circle,
               text: 'تم إتمام تجهيز الطلب',
             )
-          else if (!isDriver)
+          else if (!isDriver && !isStaffDriver && canFinishPrep)
             _FinishPrepButton(order: order),
-          if (showAdminFeatures) ...[
+          if (showAdminFeatures && canAssignDriver) ...[
             gap(),
             _AdminDriverAssigner(
               key: ValueKey('assign-${order['id']}'),
@@ -1514,7 +1568,7 @@ class _OrderDetailsView extends ConsumerWidget {
               enabled: prepDone,
               startDelivery: true,
             ),
-          ] else if (prepDone) ...[
+          ] else if (prepDone && !isStaffDriver) ...[
             gap(),
             _StatusBanner(
               color: Colors.red,
@@ -1525,12 +1579,21 @@ class _OrderDetailsView extends ConsumerWidget {
         ],
         if (status == OrderStatus.readyForDelivery.value) ...[
           if (!hasDriver) ...[
-            if (showAdminFeatures)
+            if (showAdminFeatures && canAssignDriver)
               _AdminDriverAssigner(
                 key: ValueKey('assign-${order['id']}'),
                 order: order,
                 enabled: true,
                 startDelivery: false,
+              )
+            else if (isStaffDriver || isDriver)
+              _ActionCard(
+                key: const Key('action-driver-accept'),
+                title: l10n.adminPickUpAndStartRoute,
+                desc: staff?.name ?? '',
+                icon: Icons.motorcycle_rounded,
+                color: Colors.blue,
+                onTap: () => _onDriverAccept(context, ref, order),
               )
             else
               _StatusBanner(
@@ -1546,28 +1609,14 @@ class _OrderDetailsView extends ConsumerWidget {
               text: 'تم إسناد الأوردر للطيار: $driverName',
             ),
             gap(),
-            if (isDriver || showAdminFeatures)
+            if (isDriver || isStaffDriver || showAdminFeatures)
               _ActionCard(
                 key: const Key('action-driver-accept'),
                 title: l10n.adminPickUpAndStartRoute,
                 desc: l10n.adminDriverName('$driverName'),
                 icon: Icons.motorcycle_rounded,
                 color: Colors.blue,
-                onTap: () async {
-                  final orderId = order['id'].toString();
-                  final previous =
-                      (order['status'] ?? 'ready_for_delivery').toString();
-                  await Supabase.instance.client.from('orders').update({
-                    'status': OrderStatus.outForDelivery.value,
-                  }).eq('id', orderId);
-                  dispatchOrderPush(
-                    Supabase.instance.client,
-                    orderId: orderId,
-                    trigger: 'status',
-                    previousStatus: previous,
-                  );
-                  if (context.mounted) navigateToOrder(context, ref, order);
-                },
+                onTap: () => _onDriverAccept(context, ref, order),
               )
             else
               _StatusBanner(
@@ -1578,22 +1627,22 @@ class _OrderDetailsView extends ConsumerWidget {
           ],
         ],
         if (status == OrderStatus.outForDelivery.value) ...[
-          if (isDriver || showAdminFeatures)
+          if (isDriver || isStaffDriver || showAdminFeatures)
             _ActionCard(
               title: l10n.adminMarkDelivered,
               desc: l10n.adminCloseOrderPermanently,
               icon: Icons.done_all,
               color: AppColors.success,
               onTap: () async {
-                final orderId = order['id'].toString();
+                final id = order['id'].toString();
                 final previous =
                     (order['status'] ?? 'out_for_delivery').toString();
                 await Supabase.instance.client.from('orders').update({
                   'status': OrderStatus.delivered.value,
-                }).eq('id', orderId);
+                }).eq('id', id);
                 dispatchOrderPush(
                   Supabase.instance.client,
-                  orderId: orderId,
+                  orderId: id,
                   trigger: 'status',
                   previousStatus: previous,
                 );
@@ -1624,6 +1673,153 @@ class _OrderDetailsView extends ConsumerWidget {
           ),
       ],
     );
+  }
+
+  Future<void> _onStartPreparing(
+    BuildContext context,
+    WidgetRef ref,
+    String orderId,
+  ) async {
+    final staff = ref.read(staffSessionProvider);
+    // Admins keep the manual picker; logged-in preparers self-assign.
+    if (staff?.isPreparer == true && staff?.isAdmin != true) {
+      await _autoStartAsPreparer(context, ref, orderId, staff!);
+      return;
+    }
+    _showPreparerDialog(context, ref, orderId);
+  }
+
+  Future<void> _autoStartAsPreparer(
+    BuildContext context,
+    WidgetRef ref,
+    String orderId,
+    StaffSession staff,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final busy = await Supabase.instance.client
+          .from('orders')
+          .select('id')
+          .eq('status', OrderStatus.preparing.value)
+          .eq('preparer_name', staff.name)
+          .limit(1);
+      if ((busy as List).isNotEmpty) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text(
+            'لديك طلب قيد التجهيز حالياً، يرجى إتمام تجهيزه أولاً قبل بدء طلب جديد',
+          ),
+          backgroundColor: AppColors.secondary,
+        ));
+        return;
+      }
+
+      final patch = <String, dynamic>{
+        'status': OrderStatus.preparing.value,
+        'preparer_name': staff.name,
+      };
+      Map<String, dynamic>? existing;
+      for (final o in orders) {
+        if ('${o['id']}' == orderId) {
+          existing = o;
+          break;
+        }
+      }
+      final taker = existing?['taker_name']?.toString().trim();
+      if (taker == null || taker.isEmpty) {
+        patch['taker_name'] = staff.name;
+      }
+      await Supabase.instance.client
+          .from('orders')
+          .update(patch)
+          .eq('id', orderId);
+      dispatchOrderPush(
+        Supabase.instance.client,
+        orderId: orderId,
+        trigger: 'status',
+        previousStatus: OrderStatus.pending.value,
+      );
+      AudioPlayer().play(UrlSource(
+          'https://jugdxfhmjakmzjvfltjv.supabase.co/storage/v1/object/public/product_images/accept_order.mp3.mp3'));
+    } on PostgrestException catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error.message),
+        backgroundColor: AppColors.secondary,
+      ));
+    }
+  }
+
+  Future<void> _onDriverAccept(
+    BuildContext context,
+    WidgetRef ref,
+    Map<String, dynamic> order,
+  ) async {
+    final staff = ref.read(staffSessionProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    final orderId = order['id'].toString();
+    final previous = (order['status'] ?? 'ready_for_delivery').toString();
+    final existingDriver = order['driver_name']?.toString().trim();
+    final isAdminActor =
+        staff?.isAdmin == true || ref.read(isRealAdminProvider);
+
+    // Logged-in drivers self-assign; admins keep the assigned name as-is.
+    final assignName = (!isAdminActor && staff?.isDriver == true)
+        ? staff!.name
+        : (existingDriver != null && existingDriver.isNotEmpty
+            ? existingDriver
+            : staff?.name);
+
+    if (assignName == null || assignName.isEmpty) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('لم يتم تحديد الطيار'),
+        backgroundColor: AppColors.secondary,
+      ));
+      return;
+    }
+
+    if (!isAdminActor && staff?.isDriver == true) {
+      try {
+        final busy = await Supabase.instance.client
+            .from('orders')
+            .select('id')
+            .eq('status', OrderStatus.outForDelivery.value)
+            .eq('driver_name', assignName)
+            .limit(1);
+        if ((busy as List).isNotEmpty) {
+          messenger.showSnackBar(const SnackBar(
+            content: Text(
+              'لديك طلب قيد التوصيل حالياً، يرجى إتمام توصيله أولاً قبل استلام طلب جديد',
+            ),
+            backgroundColor: AppColors.secondary,
+          ));
+          return;
+        }
+      } on PostgrestException catch (error) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(error.message),
+          backgroundColor: AppColors.secondary,
+        ));
+        return;
+      }
+    }
+
+    try {
+      await Supabase.instance.client.from('orders').update({
+        'status': OrderStatus.outForDelivery.value,
+        'driver_name': assignName,
+      }).eq('id', orderId);
+      dispatchOrderPush(
+        Supabase.instance.client,
+        orderId: orderId,
+        trigger: 'status',
+        previousStatus: previous,
+      );
+      if (context.mounted) navigateToOrder(context, ref, order);
+    } on PostgrestException catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error.message),
+        backgroundColor: AppColors.secondary,
+      ));
+    }
   }
 
   void _showPreparerDialog(
@@ -2042,6 +2238,9 @@ class _CheckableProductsList extends ConsumerWidget {
                 ));
               }
             },
+            canSendAlternatives: ref.watch(staffSessionProvider)?.isAdmin ==
+                    true ||
+                ref.watch(adminCanProvider(AdminPermission.sendAlternatives)),
             palette: palette,
           ),
       ],
@@ -2056,6 +2255,7 @@ class _PrepItemCard extends StatelessWidget {
     required this.hasPendingAlternatives,
     required this.onToggle,
     required this.onSendAlternatives,
+    required this.canSendAlternatives,
     required this.palette,
   });
 
@@ -2064,6 +2264,7 @@ class _PrepItemCard extends StatelessWidget {
   final bool hasPendingAlternatives;
   final ValueChanged<bool> onToggle;
   final VoidCallback onSendAlternatives;
+  final bool canSendAlternatives;
   final AppPalette palette;
 
   @override
@@ -2203,28 +2404,32 @@ class _PrepItemCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton.icon(
-              onPressed: hasPendingAlternatives ? null : onSendAlternatives,
-              icon: Icon(
-                hasPendingAlternatives
-                    ? Icons.hourglass_top_rounded
-                    : Icons.swap_horiz_rounded,
-                size: 18,
-              ),
-              label: Text(
-                hasPendingAlternatives ? 'بدائل بانتظار الرد' : 'إرسال بدائل',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.deepOrange,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                visualDensity: VisualDensity.compact,
+          if (canSendAlternatives) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: hasPendingAlternatives ? null : onSendAlternatives,
+                icon: Icon(
+                  hasPendingAlternatives
+                      ? Icons.hourglass_top_rounded
+                      : Icons.swap_horiz_rounded,
+                  size: 18,
+                ),
+                label: Text(
+                  hasPendingAlternatives
+                      ? 'بدائل بانتظار الرد'
+                      : 'إرسال بدائل',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.deepOrange,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  visualDensity: VisualDensity.compact,
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
