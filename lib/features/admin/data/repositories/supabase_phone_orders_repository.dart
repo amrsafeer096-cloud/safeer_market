@@ -45,6 +45,9 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     String? zone,
     String? fujitsuZoneId,
     String? phone2,
+    String? phone3,
+    String? notes,
+    String? branch,
     PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
     String? governorate,
     String? city,
@@ -63,6 +66,9 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
       'p_zone': zone,
       if (fujitsuZoneId != null) 'p_fujitsu_zone_id': fujitsuZoneId,
       if (phone2 != null) 'p_phone2': phone2,
+      if (phone3 != null) 'p_phone3': phone3,
+      if (notes != null) 'p_notes': notes,
+      if (branch != null) 'p_branch': branch,
       if (type != PhoneOrderCustomerType.regular) 'p_customer_type': type.value,
       if (governorate != null) 'p_governorate': governorate,
       if (city != null) 'p_city': city,
@@ -78,6 +84,111 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
       throw PhoneOrderFailure(L10n.current.phoneOrderFailed('no customer'));
     }
     return _toCustomer(rows.first);
+  }
+
+  @override
+  Future<PhoneOrderCustomerDetails> fetchCustomerDetails(
+    PhoneOrderCustomer customer,
+  ) async {
+    final raw = await _rpc('get_phone_order_customer_details', {
+      if (customer.posCustomerId != null)
+        'p_pos_customer_id': customer.posCustomerId,
+      if (customer.userId != null) 'p_user_id': customer.userId,
+    });
+    final map = switch (raw) {
+      final Map m => Map<String, dynamic>.from(m),
+      _ => <String, dynamic>{},
+    };
+    final custMap = switch (map['customer']) {
+      final Map m => Map<String, dynamic>.from(m),
+      _ => <String, dynamic>{},
+    };
+    final addrList = switch (map['addresses']) {
+      final List list => list,
+      _ => const [],
+    };
+    return PhoneOrderCustomerDetails(
+      customer: _toCustomer({
+        ...custMap,
+        if (custMap['source'] == null)
+          'source': customer.source == PhoneOrderCustomerSource.app
+              ? 'app'
+              : 'pos',
+      }),
+      addresses: [
+        for (final row in addrList)
+          if (row is Map) _toAddress(Map<String, dynamic>.from(row)),
+      ],
+    );
+  }
+
+  @override
+  Future<PhoneOrderCustomer> updateCustomerDetails({
+    required int posCustomerId,
+    String? fullName,
+    String? phone,
+    String? phone2,
+    String? phone3,
+    String? notes,
+  }) async {
+    final raw = await _rpc('update_phone_order_customer_details', {
+      'p_pos_customer_id': posCustomerId,
+      if (fullName != null) 'p_full_name': fullName,
+      if (phone != null) 'p_phone': phone,
+      // Empty string clears optional phones / notes in the RPC.
+      if (phone2 != null) 'p_phone2': phone2,
+      if (phone3 != null) 'p_phone3': phone3,
+      if (notes != null) 'p_notes': notes,
+    });
+    final map = switch (raw) {
+      final Map m => Map<String, dynamic>.from(m),
+      _ => <String, dynamic>{},
+    };
+    return _toCustomer({...map, 'source': 'pos'});
+  }
+
+  @override
+  Future<PhoneOrderCustomerAddress> upsertCustomerAddress({
+    int? posCustomerId,
+    String? userId,
+    int? addressId,
+    String? address,
+    String? zone,
+    String? branch,
+    String? governorate,
+    String? city,
+    String? building,
+    String? floor,
+    String? apartment,
+    double? latitude,
+    double? longitude,
+    String? fujitsuZoneId,
+    bool isPrimary = false,
+  }) async {
+    final raw = await _rpc('upsert_customer_address', {
+      if (posCustomerId != null) 'p_pos_customer_id': posCustomerId,
+      if (userId != null) 'p_user_id': userId,
+      if (addressId != null) 'p_address_id': addressId,
+      if (address != null) 'p_address': address,
+      if (zone != null) 'p_zone': zone,
+      if (branch != null) 'p_branch': branch,
+      if (governorate != null) 'p_governorate': governorate,
+      if (city != null) 'p_city': city,
+      if (building != null) 'p_building': building,
+      if (floor != null) 'p_floor': floor,
+      if (apartment != null) 'p_apartment': apartment,
+      if (latitude != null && longitude != null) ...{
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+      },
+      if (fujitsuZoneId != null) 'p_fujitsu_zone_id': fujitsuZoneId,
+      'p_is_primary': isPrimary,
+    });
+    final map = switch (raw) {
+      final Map m => Map<String, dynamic>.from(m),
+      _ => <String, dynamic>{},
+    };
+    return _toAddress(map);
   }
 
   @override
@@ -211,6 +322,8 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
           'p_payment_status': paymentMethod.paymentStatus,
           if (receiptUrl != null) 'p_receipt_url': receiptUrl,
         },
+        if (customer.fujitsuAddressId != null)
+          'p_fujitsu_address_id': customer.fujitsuAddressId,
       });
     } catch (_) {
       if (receiptUrl != null) await _removeReceipt(receiptUrl);
@@ -438,9 +551,52 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
           (isApp || row.containsKey('source') ? null : integer(row['id'])),
       fullName: text('full_name'),
       phone: text('phone'),
+      phone2: text('phone2'),
+      phone3: text('phone3'),
+      notes: text('notes'),
       address: text('address'),
       zone: text('zone'),
       fujitsuZoneId: text('fujitsu_zone_id'),
+      fujitsuCustomerNo: integer(row['fujitsu_customer_no']),
+      fujitsuAddressId: integer(row['fujitsu_address_id']),
+      selectedAddressId: text('selected_address_id'),
+    );
+  }
+
+  static PhoneOrderCustomerAddress _toAddress(Map<String, dynamic> row) {
+    String? text(String key) {
+      final value = row[key]?.toString().trim();
+      return value == null || value.isEmpty ? null : value;
+    }
+
+    int? integer(Object? value) => switch (value) {
+          final num id => id.toInt(),
+          final String id => int.tryParse(id),
+          _ => null,
+        };
+    double? decimal(Object? value) => switch (value) {
+          final num n => n.toDouble(),
+          final String s => double.tryParse(s),
+          _ => null,
+        };
+    final fromApp = row['source_table'] == 'addresses';
+    final id = text('id') ?? '';
+    return PhoneOrderCustomerAddress(
+      id: id,
+      address: text('address') ?? 'بدون عنوان',
+      zone: text('zone'),
+      branch: text('branch'),
+      governorate: text('governorate'),
+      city: text('city'),
+      building: text('building'),
+      floor: text('floor'),
+      apartment: text('apartment'),
+      latitude: decimal(row['latitude']),
+      longitude: decimal(row['longitude']),
+      fujitsuZoneId: text('fujitsu_zone_id'),
+      fujitsuAddressId: integer(row['fujitsu_address_id']),
+      isPrimary: row['is_primary'] == true,
+      fromAppAddresses: fromApp,
     );
   }
 

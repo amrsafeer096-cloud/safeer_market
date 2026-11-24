@@ -23,6 +23,9 @@ abstract class PhoneOrdersRepository {
     String? zone,
     String? fujitsuZoneId,
     String? phone2,
+    String? phone3,
+    String? notes,
+    String? branch,
     PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
     String? governorate,
     String? city,
@@ -31,6 +34,40 @@ abstract class PhoneOrdersRepository {
     String? apartment,
     double? latitude,
     double? longitude,
+  });
+
+  /// Full customer card + address list for the «بيانات العميل» modal.
+  Future<PhoneOrderCustomerDetails> fetchCustomerDetails(
+    PhoneOrderCustomer customer,
+  );
+
+  /// Updates name / phones / notes on a POS customer.
+  Future<PhoneOrderCustomer> updateCustomerDetails({
+    required int posCustomerId,
+    String? fullName,
+    String? phone,
+    String? phone2,
+    String? phone3,
+    String? notes,
+  });
+
+  /// Adds or edits a row in `customer_addresses`.
+  Future<PhoneOrderCustomerAddress> upsertCustomerAddress({
+    int? posCustomerId,
+    String? userId,
+    int? addressId,
+    String? address,
+    String? zone,
+    String? branch,
+    String? governorate,
+    String? city,
+    String? building,
+    String? floor,
+    String? apartment,
+    double? latitude,
+    double? longitude,
+    String? fujitsuZoneId,
+    bool isPrimary = false,
   });
 
   /// Active delivery zones (`delivery_zones`), for [city] when given. Empty

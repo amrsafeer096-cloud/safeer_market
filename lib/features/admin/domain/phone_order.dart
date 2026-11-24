@@ -74,6 +74,70 @@ class PhoneOrderArea {
   String get id => fujitsuZoneId ?? name;
 }
 
+/// One saved delivery address (Supabase `customer_addresses` or app `addresses`).
+class PhoneOrderCustomerAddress {
+  const PhoneOrderCustomerAddress({
+    required this.id,
+    required this.address,
+    this.zone,
+    this.branch,
+    this.governorate,
+    this.city,
+    this.building,
+    this.floor,
+    this.apartment,
+    this.latitude,
+    this.longitude,
+    this.fujitsuZoneId,
+    this.fujitsuAddressId,
+    this.isPrimary = false,
+    this.fromAppAddresses = false,
+  });
+
+  /// String form of the row id (bigint or uuid).
+  final String id;
+  final String address;
+  final String? zone;
+  final String? branch;
+  final String? governorate;
+  final String? city;
+  final String? building;
+  final String? floor;
+  final String? apartment;
+  final double? latitude;
+  final double? longitude;
+  final String? fujitsuZoneId;
+  final int? fujitsuAddressId;
+  final bool isPrimary;
+
+  /// True when this row came from the app `addresses` table (read-only edit).
+  final bool fromAppAddresses;
+
+  int? get customerAddressId =>
+      fromAppAddresses ? null : int.tryParse(id);
+
+  String get displayLine {
+    final parts = [
+      address,
+      if (zone != null && zone!.trim().isNotEmpty && !address.contains(zone!))
+        zone,
+      if (branch != null && branch!.trim().isNotEmpty) 'فرع: $branch',
+    ];
+    return parts.whereType<String>().join(' — ');
+  }
+}
+
+/// Bundle returned by `get_phone_order_customer_details`.
+class PhoneOrderCustomerDetails {
+  const PhoneOrderCustomerDetails({
+    required this.customer,
+    this.addresses = const [],
+  });
+
+  final PhoneOrderCustomer customer;
+  final List<PhoneOrderCustomerAddress> addresses;
+}
+
 class PhoneOrderCustomer {
   const PhoneOrderCustomer({
     required this.source,
@@ -81,9 +145,15 @@ class PhoneOrderCustomer {
     this.posCustomerId,
     this.fullName,
     this.phone,
+    this.phone2,
+    this.phone3,
+    this.notes,
     this.address,
     this.zone,
     this.fujitsuZoneId,
+    this.fujitsuCustomerNo,
+    this.fujitsuAddressId,
+    this.selectedAddressId,
   });
 
   final PhoneOrderCustomerSource source;
@@ -93,14 +163,62 @@ class PhoneOrderCustomer {
   final int? posCustomerId;
   final String? fullName;
   final String? phone;
+  final String? phone2;
+  final String? phone3;
+  final String? notes;
   final String? address;
   final String? zone;
 
   /// Fujitsu code of the customer's delivery zone, when one was chosen.
   final String? fujitsuZoneId;
 
+  /// Linked Fujitsu `Customers.CustomerNo`, when known.
+  final int? fujitsuCustomerNo;
+
+  /// Fujitsu `CustomerAddresses.AddressId` chosen for this order.
+  final int? fujitsuAddressId;
+
+  /// Supabase `customer_addresses.id` chosen for this order (as string).
+  final String? selectedAddressId;
+
   /// Stable across searches, for list keys and "is this the same caller".
   String get key => userId ?? 'pos-$posCustomerId';
+
+  PhoneOrderCustomer copyWith({
+    String? fullName,
+    String? phone,
+    String? phone2,
+    String? phone3,
+    String? notes,
+    String? address,
+    String? zone,
+    String? fujitsuZoneId,
+    int? fujitsuCustomerNo,
+    int? fujitsuAddressId,
+    String? selectedAddressId,
+    bool clearPhone2 = false,
+    bool clearPhone3 = false,
+    bool clearNotes = false,
+    bool clearFujitsuAddressId = false,
+  }) =>
+      PhoneOrderCustomer(
+        source: source,
+        userId: userId,
+        posCustomerId: posCustomerId,
+        fullName: fullName ?? this.fullName,
+        phone: phone ?? this.phone,
+        phone2: clearPhone2 ? null : phone2 ?? this.phone2,
+        phone3: clearPhone3 ? null : phone3 ?? this.phone3,
+        notes: clearNotes ? null : notes ?? this.notes,
+        address: address ?? this.address,
+        zone: zone ?? this.zone,
+        fujitsuZoneId: fujitsuZoneId ?? this.fujitsuZoneId,
+        fujitsuCustomerNo: fujitsuCustomerNo ?? this.fujitsuCustomerNo,
+        fujitsuAddressId: clearFujitsuAddressId
+            ? null
+            : fujitsuAddressId ?? this.fujitsuAddressId,
+        selectedAddressId: selectedAddressId ?? this.selectedAddressId,
+      );
 }
 
 class PhoneOrderLine {

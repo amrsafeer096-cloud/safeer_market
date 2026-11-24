@@ -17,6 +17,7 @@ import '../../domain/product_search_filter.dart';
 import '../../domain/repositories/phone_orders_repository.dart';
 import '../providers/order_alternatives_providers.dart';
 import '../providers/phone_order_providers.dart';
+import 'customer_details_sheet.dart';
 import 'customer_purchase_history_dialog.dart';
 import 'new_customer_dialogs.dart';
 import 'product_details_dialog.dart';
@@ -535,6 +536,14 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
     });
   }
 
+  Future<void> _confirmCustomer(PhoneOrderCustomer draft) async {
+    final confirmed = await showCustomerDetailsSheet(context, customer: draft);
+    if (confirmed == null || !mounted) return;
+    await ref
+        .read(phoneOrderControllerProvider.notifier)
+        .selectCustomerWithZoneFee(confirmed);
+  }
+
   Future<void> _addCustomer() async {
     final typed = _search.text.trim();
     final looksLikePhone = RegExp(r'^[\d\s+()-]+$').hasMatch(typed);
@@ -546,9 +555,7 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
       ),
     );
     if (customer != null) {
-      ref
-          .read(phoneOrderControllerProvider.notifier)
-          .selectCustomerWithZoneFee(customer);
+      await _confirmCustomer(customer);
     }
   }
 
@@ -610,10 +617,7 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
                                 final customer = customers[index];
                                 return _CustomerTile(
                                   customer: customer,
-                                  onTap: () => ref
-                                      .read(
-                                          phoneOrderControllerProvider.notifier)
-                                      .selectCustomerWithZoneFee(customer),
+                                  onTap: () => _confirmCustomer(customer),
                                 );
                               },
                             ),
@@ -756,6 +760,14 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         _LockedCustomer(
           customer: customer,
           onChange: controller.clear,
+          onEdit: () async {
+            final confirmed =
+                await showCustomerDetailsSheet(context, customer: customer);
+            if (confirmed == null || !context.mounted) return;
+            await ref
+                .read(phoneOrderControllerProvider.notifier)
+                .selectCustomerWithZoneFee(confirmed);
+          },
           onShowHistory: () =>
               showCustomerPurchaseHistoryDialog(context, customer),
         ),
@@ -851,11 +863,13 @@ class _LockedCustomer extends StatelessWidget {
   const _LockedCustomer({
     required this.customer,
     required this.onChange,
+    required this.onEdit,
     required this.onShowHistory,
   });
 
   final PhoneOrderCustomer customer;
   final VoidCallback onChange;
+  final VoidCallback onEdit;
   final VoidCallback onShowHistory;
 
   @override
@@ -866,63 +880,84 @@ class _LockedCustomer extends StatelessWidget {
         .whereType<String>()
         .where((part) => part.trim().isNotEmpty)
         .join(' - ');
-    return Container(
-      key: const Key('phone-order-locked-customer'),
-      margin: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-      padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 2, 6),
-      decoration: BoxDecoration(
-        color: palette.accent.withValues(alpha: 0.08),
+    final phones = [
+      customer.phone,
+      customer.phone2,
+      customer.phone3,
+    ].whereType<String>().where((p) => p.trim().isNotEmpty).join(' / ');
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('phone-order-locked-customer'),
+        onTap: onEdit,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: palette.accent.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.person_pin_rounded, color: palette.accent, size: 22),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text.rich(
-                  TextSpan(children: [
-                    TextSpan(
-                      text: customer.fullName ?? l10n.adminNoName,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 2, 6),
+          decoration: BoxDecoration(
+            color: palette.accent.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: palette.accent.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.person_pin_rounded, color: palette.accent, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text.rich(
+                      TextSpan(children: [
+                        TextSpan(
+                          text: customer.fullName ?? l10n.adminNoName,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        const TextSpan(text: '  •  '),
+                        TextSpan(
+                          text: phones.isEmpty
+                              ? l10n.adminNoPhoneNumber
+                              : phones,
+                          style: TextStyle(color: palette.muted),
+                        ),
+                      ]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const TextSpan(text: '  •  '),
-                    TextSpan(
-                      text: customer.phone ?? l10n.adminNoPhoneNumber,
-                      style: TextStyle(color: palette.muted),
+                    Text(
+                      place.isEmpty ? l10n.phoneOrderNoAddress : place,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: palette.muted),
                     ),
-                  ]),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  ],
                 ),
-                Text(
-                  place.isEmpty ? l10n.phoneOrderNoAddress : place,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: palette.muted),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                key: const Key('phone-order-customer-history'),
+                tooltip: 'مشتريات العميل المعتادة والسابقة',
+                visualDensity: VisualDensity.compact,
+                onPressed: onShowHistory,
+                icon: Icon(Icons.history_rounded, color: palette.accent),
+              ),
+              IconButton(
+                key: const Key('phone-order-edit-customer'),
+                tooltip: 'بيانات العميل',
+                visualDensity: VisualDensity.compact,
+                onPressed: onEdit,
+                icon: Icon(Icons.edit_rounded, color: palette.accent),
+              ),
+              IconButton(
+                key: const Key('phone-order-change-customer'),
+                tooltip: l10n.phoneOrderChangeCustomer,
+                visualDensity: VisualDensity.compact,
+                onPressed: onChange,
+                icon: const Icon(Icons.swap_horiz_rounded),
+              ),
+            ],
           ),
-          IconButton(
-            key: const Key('phone-order-customer-history'),
-            tooltip: 'مشتريات العميل المعتادة والسابقة',
-            visualDensity: VisualDensity.compact,
-            onPressed: onShowHistory,
-            icon: Icon(Icons.history_rounded, color: palette.accent),
-          ),
-          IconButton(
-            key: const Key('phone-order-change-customer'),
-            tooltip: l10n.phoneOrderChangeCustomer,
-            visualDensity: VisualDensity.compact,
-            onPressed: onChange,
-            icon: const Icon(Icons.swap_horiz_rounded),
-          ),
-        ],
+        ),
       ),
     );
   }

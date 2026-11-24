@@ -179,20 +179,54 @@ def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
 def find_customer(cursor, phone: str) -> Optional[tuple[int, Optional[int]]]:
     if not phone:
         return None
+    pattern = f"%{phone}%"
     cursor.execute(
         """
         SELECT TOP 1 CustomerNo, DefaultAddressId
         FROM Customers
         WHERE REPLACE(REPLACE(REPLACE(ISNULL(Mobile,''),'+',''),' ',''),'-','') LIKE ?
            OR REPLACE(REPLACE(REPLACE(ISNULL(Phone1,''),'+',''),' ',''),'-','') LIKE ?
+           OR REPLACE(REPLACE(REPLACE(ISNULL(Phone2,''),'+',''),' ',''),'-','') LIKE ?
+           OR REPLACE(REPLACE(REPLACE(ISNULL(Phone3,''),'+',''),' ',''),'-','') LIKE ?
         ORDER BY CustomerNo DESC
         """,
-        (f"%{phone}%", f"%{phone}%"),
+        (pattern, pattern, pattern, pattern),
     )
     row = cursor.fetchone()
     if not row:
         return None
     return int(row[0]), (int(row[1]) if row[1] is not None else None)
+
+
+def update_customer_phones(
+    cursor,
+    *,
+    customer_no: int,
+    phone: str,
+    phone2: Optional[str] = None,
+    phone3: Optional[str] = None,
+) -> None:
+    """Sync Mobile / Phone1 / Phone2 / Phone3 on Fujitsu Customers."""
+    mobile = truncate(phone, 20) or None
+    p2 = truncate(phone2 or "", 20) or None
+    p3 = truncate(phone3 or "", 20) or None
+    try:
+        cursor.execute(
+            """
+            UPDATE Customers
+            SET Mobile = COALESCE(?, Mobile),
+                Phone1 = COALESCE(?, Phone1),
+                Phone2 = CASE WHEN ? IS NULL THEN Phone2 ELSE ? END,
+                Phone3 = CASE WHEN ? IS NULL THEN Phone3 ELSE ? END,
+                ModifiedBy = ?,
+                DateModified = GETDATE(),
+                last_modified_time = GETDATE()
+            WHERE CustomerNo = ?
+            """,
+            (mobile, mobile, p2, p2, p3, p3, STAFF_USER_ID, customer_no),
+        )
+    except Exception as exc:
+        log(f"⚠️ could not update phones for customer {customer_no}: {exc}")
 
 
 def insert_customer_address(
@@ -242,6 +276,8 @@ def create_customer(
     name: str,
     phone: str,
     address: str,
+    phone2: Optional[str] = None,
+    phone3: Optional[str] = None,
 ) -> tuple[int, int]:
     seq_cust = next_hd_sequence(cursor, DOC_CUSTOMER, daily=False)
     customer_no = 2000000 + seq_cust
@@ -250,6 +286,8 @@ def create_customer(
 
     display_name = truncate(name, 200, "عميل")
     mobile = truncate(phone, 20) or None
+    p2 = truncate(phone2 or "", 20) or None
+    p3 = truncate(phone3 or "", 20) or None
 
     cursor.execute(
         """
@@ -257,7 +295,7 @@ def create_customer(
             CustomerNo, ArabicName, EnglishName,
             CustomerType, CompanyId, BranchId,
             IsDisabled, RegistrationDate, CreatedFrom,
-            Mobile, Phone1, DefaultAddressId, CustomerCategory,
+            Mobile, Phone1, Phone2, Phone3, DefaultAddressId, CustomerCategory,
             CreatedBy, ModifiedBy, AppVersion,
             DateCreated, DateModified,
             SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
@@ -266,7 +304,7 @@ def create_customer(
             ?, ?, ?,
             1, 0, 0,
             0, GETDATE(), 1,
-            ?, ?, ?, 0,
+            ?, ?, ?, ?, ?, 0,
             ?, ?, ?,
             GETDATE(), GETDATE(),
             0, 0, 0, 0,
@@ -279,6 +317,8 @@ def create_customer(
             display_name,
             mobile,
             mobile,
+            p2,
+            p3,
             address_id,
             STAFF_USER_ID,
             STAFF_USER_ID,
@@ -294,6 +334,29 @@ def create_customer(
     return customer_no, address_id
 
 
+def find_matching_address(
+    cursor, *, customer_no: int, address: str
+) -> Optional[int]:
+    """Return an existing CustomerAddresses.AddressId when the text matches."""
+    full = truncate(address, 3000, "").strip()
+    if not full:
+        return None
+    cursor.execute(
+        """
+        SELECT AddressId, FullAddress, StreetAddress
+        FROM CustomerAddresses
+        WHERE CustomerNo = ?
+        ORDER BY AddressId DESC
+        """,
+        (customer_no,),
+    )
+    for row in cursor.fetchall() or []:
+        existing = (str(row[1] or "").strip() or str(row[2] or "").strip())
+        if existing == full:
+            return int(row[0])
+    return None
+
+
 def ensure_address(
     cursor,
     *,
@@ -302,6 +365,7 @@ def ensure_address(
     address: str,
 ) -> int:
     full = truncate(address, 3000, "بدون عنوان")
+    # Prefer an explicit AddressId already known on the Supabase order.
     if address_id:
         cursor.execute(
             "SELECT FullAddress, StreetAddress FROM CustomerAddresses WHERE AddressId = ?",
@@ -312,6 +376,12 @@ def ensure_address(
             existing = (str(row[0] or "").strip() or str(row[1] or "").strip())
             if existing == full.strip() or not (address or "").strip():
                 return int(address_id)
+
+    matched = find_matching_address(
+        cursor, customer_no=customer_no, address=address
+    )
+    if matched is not None:
+        return matched
 
     seq_addr = next_hd_sequence(cursor, DOC_ADDRESS, daily=False)
     new_id = seq_addr
@@ -334,6 +404,67 @@ def ensure_address(
     except Exception:
         pass
     return new_id
+
+
+def load_pos_customer_phones(pos_customer_id: Any) -> tuple[Optional[str], Optional[str]]:
+    """phone2 / phone3 from Supabase pos_customers for Fujitsu Phone2/Phone3."""
+    if not pos_customer_id:
+        return None, None
+    try:
+        res = (
+            supabase.table("pos_customers")
+            .select("phone2, phone3")
+            .eq("id", pos_customer_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return None, None
+        row = rows[0]
+        p2 = normalize_phone(row.get("phone2")) or None
+        p3 = normalize_phone(row.get("phone3")) or None
+        return p2, p3
+    except Exception as exc:
+        log(f"⚠️ pos_customers phones lookup failed: {exc}")
+        return None, None
+
+
+def write_back_customer_link(
+    *,
+    pos_customer_id: Any,
+    customer_no: int,
+    address_id: int,
+    address: str,
+) -> None:
+    """Persist Fujitsu ids onto pos_customers / customer_addresses."""
+    if not pos_customer_id:
+        return
+    try:
+        supabase.table("pos_customers").update(
+            {
+                "fujitsu_customer_no": customer_no,
+                "synced_to_fujitsu": True,
+            }
+        ).eq("id", pos_customer_id).execute()
+    except Exception as exc:
+        log(f"⚠️ pos_customers fujitsu_customer_no write-back failed: {exc}")
+    try:
+        # Match by exact address text for this customer.
+        res = (
+            supabase.table("customer_addresses")
+            .select("id, address")
+            .eq("pos_customer_id", pos_customer_id)
+            .execute()
+        )
+        for row in res.data or []:
+            if (str(row.get("address") or "").strip() == (address or "").strip()):
+                supabase.table("customer_addresses").update(
+                    {"fujitsu_address_id": address_id}
+                ).eq("id", row["id"]).execute()
+                break
+    except Exception as exc:
+        log(f"⚠️ customer_addresses fujitsu_address_id write-back failed: {exc}")
 
 
 def match_picker(cursor, preparer_name: str) -> tuple[int, str]:
@@ -416,7 +547,7 @@ def fetch_pending_orders() -> list[dict[str, Any]]:
             "id, created_at, status, preparer_name, taker_name, "
             "customer_name, customer_phone, address_details, delivery_fee, "
             "total_amount, payment_method, pos_customer_id, fujitsu_order_id, "
-            "fujitsu_synced_at"
+            "fujitsu_address_id, fujitsu_synced_at"
         )
         .not_.is_("preparer_name", "null")
         .is_("fujitsu_order_id", "null")
@@ -647,6 +778,16 @@ def sync_one_order(order: dict[str, Any]) -> None:
     delivery_fee = float(order.get("delivery_fee") or 0)
     total_value = float(order.get("total_amount") or 0)
     pay = payment_code(order.get("payment_method"))
+    pos_customer_id = order.get("pos_customer_id")
+    preferred_address_id = order.get("fujitsu_address_id")
+    try:
+        preferred_address_id = (
+            int(preferred_address_id) if preferred_address_id is not None else None
+        )
+    except (TypeError, ValueError):
+        preferred_address_id = None
+
+    phone2, phone3 = load_pos_customer_phones(pos_customer_id)
 
     items = fetch_order_items(order_id)
     if not items:
@@ -657,16 +798,28 @@ def sync_one_order(order: dict[str, Any]) -> None:
     try:
         found = find_customer(cursor, phone)
         if found:
-            customer_no, address_id = found
+            customer_no, default_address_id = found
+            update_customer_phones(
+                cursor,
+                customer_no=customer_no,
+                phone=phone,
+                phone2=phone2,
+                phone3=phone3,
+            )
             address_id = ensure_address(
                 cursor,
                 customer_no=customer_no,
-                address_id=address_id,
+                address_id=preferred_address_id or default_address_id,
                 address=address,
             )
         else:
             customer_no, address_id = create_customer(
-                cursor, name=name, phone=phone, address=address
+                cursor,
+                name=name,
+                phone=phone,
+                address=address,
+                phone2=phone2,
+                phone3=phone3,
             )
 
         seq = next_hd_sequence(cursor, DOC_ORDER, daily=True)
@@ -731,6 +884,13 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 "pos_receipt_number": fujitsu_order_id_str,
             }
         ).eq("id", order_id).execute()
+
+        write_back_customer_link(
+            pos_customer_id=pos_customer_id,
+            customer_no=customer_no,
+            address_id=address_id,
+            address=address,
+        )
 
         log(
             f"✅ synced order {order_id[:8]}… → Fujitsu {fujitsu_order_id_str} "

@@ -90,6 +90,9 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     String? zone,
     String? fujitsuZoneId,
     String? phone2,
+    String? phone3,
+    String? notes,
+    String? branch,
     PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
     String? governorate,
     String? city,
@@ -108,6 +111,9 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     createdDetails.add({
       'fujitsu_zone_id': fujitsuZoneId,
       'phone2': phone2,
+      'phone3': phone3,
+      'notes': notes,
+      'branch': branch,
       'type': type,
       'governorate': governorate,
       'city': city,
@@ -122,9 +128,86 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
       posCustomerId: 1000000001,
       fullName: fullName,
       phone: phone,
+      phone2: phone2,
+      phone3: phone3,
+      notes: notes,
       address: address,
       zone: zone,
       fujitsuZoneId: fujitsuZoneId,
+    );
+  }
+
+  @override
+  Future<PhoneOrderCustomerDetails> fetchCustomerDetails(
+    PhoneOrderCustomer customer,
+  ) async {
+    return PhoneOrderCustomerDetails(
+      customer: customer,
+      addresses: [
+        if ((customer.address ?? '').trim().isNotEmpty)
+          PhoneOrderCustomerAddress(
+            id: '1',
+            address: customer.address!,
+            zone: customer.zone,
+            fujitsuZoneId: customer.fujitsuZoneId,
+            isPrimary: true,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Future<PhoneOrderCustomer> updateCustomerDetails({
+    required int posCustomerId,
+    String? fullName,
+    String? phone,
+    String? phone2,
+    String? phone3,
+    String? notes,
+  }) async {
+    return PhoneOrderCustomer(
+      source: PhoneOrderCustomerSource.pos,
+      posCustomerId: posCustomerId,
+      fullName: fullName,
+      phone: phone,
+      phone2: phone2?.isEmpty == true ? null : phone2,
+      phone3: phone3?.isEmpty == true ? null : phone3,
+      notes: notes?.isEmpty == true ? null : notes,
+    );
+  }
+
+  @override
+  Future<PhoneOrderCustomerAddress> upsertCustomerAddress({
+    int? posCustomerId,
+    String? userId,
+    int? addressId,
+    String? address,
+    String? zone,
+    String? branch,
+    String? governorate,
+    String? city,
+    String? building,
+    String? floor,
+    String? apartment,
+    double? latitude,
+    double? longitude,
+    String? fujitsuZoneId,
+    bool isPrimary = false,
+  }) async {
+    return PhoneOrderCustomerAddress(
+      id: '${addressId ?? 99}',
+      address: address ?? 'بدون عنوان',
+      zone: zone,
+      branch: branch,
+      governorate: governorate,
+      city: city,
+      building: building,
+      floor: floor,
+      apartment: apartment,
+      latitude: latitude,
+      longitude: longitude,
+      fujitsuZoneId: fujitsuZoneId,
+      isPrimary: isPrimary,
     );
   }
 
@@ -163,6 +246,21 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     PhoneOrderCustomer customer,
   ) async =>
       history;
+}
+
+Future<void> _confirmCustomerDetails(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('customer-details-sheet')), findsOneWidget);
+  await tester.tap(find.byKey(const Key('customer-details-confirm')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _pickCustomer(
+  WidgetTester tester,
+  PhoneOrderCustomer customer,
+) async {
+  await tester.tap(find.byKey(Key('phone-order-customer-${customer.key}')));
+  await _confirmCustomerDetails(tester);
 }
 
 Future<({_FakePhoneOrders repository, List<String> placedIds})> _pumpColumn(
@@ -702,8 +800,7 @@ void main() {
       expect(find.text('منى أحمد'), findsOneWidget);
       expect(find.text('مدينة نصر، شارع 9'), findsOneWidget);
 
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
       expect(
           find.byKey(const Key('phone-order-locked-customer')), findsOneWidget);
 
@@ -750,8 +847,7 @@ void main() {
       tester.view.physicalSize = const Size(480, 960);
       await tester.pumpAndSettle();
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
       expect(find.byKey(const Key('phone-order-customer-history')), findsOneWidget);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
       await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
@@ -776,8 +872,7 @@ void main() {
     ) async {
       await _pumpColumn(tester);
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
 
       await tester.enterText(
           find.byKey(const Key('phone-order-product-search')), _rice.barcode!);
@@ -823,6 +918,7 @@ void main() {
           find.byKey(const Key('new-customer-name')), 'سارة علي');
       await tester.tap(find.byKey(const Key('new-customer-save')));
       await tester.pumpAndSettle();
+      await _confirmCustomerDetails(tester);
 
       expect(repository.created.single, {
         'name': 'سارة علي',
@@ -909,6 +1005,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('address-save')));
       await tester.pumpAndSettle();
+      await _confirmCustomerDetails(tester);
 
       expect(repository.created.single['name'], 'سارة علي');
       expect(repository.created.single['phone'], '01198765432');
@@ -921,6 +1018,9 @@ void main() {
         // The chosen zone's Fujitsu id is saved with the customer.
         'fujitsu_zone_id': 'Z7',
         'phone2': '01255555555',
+        'phone3': null,
+        'notes': null,
+        'branch': null,
         'type': PhoneOrderCustomerType.vip,
         'governorate': 'القاهرة',
         'city': 'مدينة نصر',
@@ -933,6 +1033,7 @@ void main() {
       // Both modals closed; the customer is locked in.
       expect(find.byKey(const Key('customer-address-dialog')), findsNothing);
       expect(find.byKey(const Key('new-customer-dialog')), findsNothing);
+      expect(find.byKey(const Key('customer-details-sheet')), findsNothing);
       expect(
           find.byKey(const Key('phone-order-locked-customer')), findsOneWidget);
     });
@@ -952,8 +1053,7 @@ void main() {
           .setMockMethodCallHandler(SystemChannels.platform, null));
 
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
       expect(find.byKey(const Key('phone-order-category-all')), findsNothing,
           reason: 'the category chips row is gone');
 
@@ -982,8 +1082,7 @@ void main() {
     testWidgets('the totals table starts with the item count', (tester) async {
       await _pumpColumn(tester);
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
       await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
       await tester.pump();
@@ -1034,8 +1133,7 @@ void main() {
         ],
       );
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
 
       // Nothing inline any more: just the button in the customer bar.
       expect(find.byKey(const Key('phone-order-history-dialog')), findsNothing);
@@ -1097,8 +1195,7 @@ void main() {
       repository.placeFailure =
           const PhoneOrderFailure('تعذّر تسجيل الطلب: product_not_found');
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${_mona.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
       await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
       await tester.pump();
@@ -1114,8 +1211,7 @@ void main() {
 
     Future<void> pick(WidgetTester tester, PhoneOrderCustomer who) async {
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
-      await tester.tap(find.byKey(Key('phone-order-customer-${who.key}')));
-      await tester.pumpAndSettle();
+      await _pickCustomer(tester, who);
     }
 
     Future<void> openCart(WidgetTester tester) async {

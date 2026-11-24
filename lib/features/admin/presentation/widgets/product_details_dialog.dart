@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -6,9 +7,10 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_palette.dart';
+import '../../../../core/web/web_image_clipboard.dart';
 import '../../../home/domain/entities/product.dart';
-import '../../../home/presentation/widgets/product_image.dart';
 import '../../domain/phone_order.dart';
+import 'draggable_product_image.dart';
 
 /// «تفاصيل المنتج» for the order taker: a large image (copy / share it to
 /// send to a customer), barcode and stock, and a bulk «إضافة كمية بالجملة».
@@ -98,8 +100,8 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
     return (bytes: response.bodyBytes, mime: mime, name: 'product.$ext');
   }
 
-  /// The picture goes to the clipboard when the platform allows it;
-  /// otherwise (or when the download is blocked) its link is copied.
+  /// Web: `ClipboardItem({image/png})` for Ctrl+V into WhatsApp.
+  /// Other platforms: Pasteboard. Falls back to the image URL on CORS errors.
   Future<void> _copyImage() async {
     final url = _imageUrl;
     if (url == null || _busy) return;
@@ -107,8 +109,16 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
     var copiedImage = false;
     try {
       final image = await _download();
-      await Pasteboard.writeImage(image.bytes);
-      copiedImage = true;
+      if (kIsWeb) {
+        copiedImage = await copyImageBlobToWebClipboard(
+          image.bytes,
+          mimeType: image.mime,
+        );
+      }
+      if (!copiedImage) {
+        await Pasteboard.writeImage(image.bytes);
+        copiedImage = true;
+      }
     } catch (_) {
       copiedImage = false;
     }
@@ -338,7 +348,8 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: ProductImage(
+                  // Web: native <img draggable> for Chrome → WhatsApp drag.
+                  child: DraggableProductImage(
                     imageUrl: _imageUrl,
                     iconSize: 56,
                     fit: BoxFit.contain,
