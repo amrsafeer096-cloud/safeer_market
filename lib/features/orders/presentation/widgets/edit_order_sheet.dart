@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
+import '../../../admin/domain/product_search_filter.dart';
+import '../../../admin/presentation/widgets/staff_product_search_tile.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../data/order_edit_service.dart';
 import '../../domain/order_editability.dart';
@@ -56,6 +58,7 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
   var _lockHeld = false;
   Object? _error;
   List<Product> _hits = const [];
+  var _filter = ProductSearchFilterMode.inStock;
   Timer? _debounce;
 
   OrderEditService get _service => ref.read(orderEditServiceProvider);
@@ -113,7 +116,10 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 280), () async {
       try {
-        final hits = await _service.searchCatalog(value);
+        final hits = await _service.searchCatalog(
+          value,
+          filter: _filter,
+        );
         if (!mounted) return;
         setState(() => _hits = hits);
       } catch (_) {
@@ -134,14 +140,34 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
             productId: product.id,
             productName: product.name,
             barcode: product.barcode,
+            imageUrl: product.imageUrl,
+            listPrice: product.hasActiveOffer ? product.price : null,
+            stockQuantity: product.stockQuantity,
             unitPrice: product.effectivePrice,
             quantity: 1,
           ),
         );
       }
-      _hits = const [];
-      _search.clear();
     });
+  }
+
+  void _removeOne(String productId) {
+    final i = _lines.indexWhere((l) => l.productId == productId);
+    if (i < 0) return;
+    setState(() {
+      if (_lines[i].quantity <= 1) {
+        _lines.removeAt(i);
+      } else {
+        _lines[i].quantity -= 1;
+      }
+    });
+  }
+
+  int _qtyOf(String productId) {
+    for (final line in _lines) {
+      if (line.productId == productId) return line.quantity;
+    }
+    return 0;
   }
 
   Future<void> _closeWithoutSave() async {
@@ -304,33 +330,47 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
     }
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
       children: [
         TextField(
           key: const Key('edit-order-search'),
           controller: _search,
           onChanged: _onSearchChanged,
-          decoration: const InputDecoration(
-            labelText: 'بحث لإضافة منتج',
-            hintText: 'اسم أو باركود',
-            prefixIcon: Icon(Icons.search_rounded),
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'بحث بالاسم أو الباركود',
+            prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
+            suffixIcon: ProductSearchFilterButton(
+              mode: _filter,
+              onChanged: (mode) {
+                setState(() => _filter = mode);
+                _onSearchChanged(_search.text);
+              },
+            ),
+            border: const OutlineInputBorder(),
+            isDense: true,
           ),
         ),
         if (_hits.isNotEmpty) ...[
           const SizedBox(height: 8),
-          for (final product in _hits)
-            ListTile(
-              dense: true,
-              title: Text(product.name,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(AppCurrency.of(product.effectivePrice)),
-              trailing: IconButton(
-                icon: const Icon(Icons.add_circle_rounded,
-                    color: AppColors.success),
-                onPressed: () => _addProduct(product),
-              ),
+          const Text(
+            'نتائج البحث',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+          ),
+          const SizedBox(height: 4),
+          for (final product in _hits) ...[
+            StaffProductSearchTile(
+              product: product,
+              quantityLabel: '${_qtyOf(product.id)}',
+              inCart: _qtyOf(product.id) > 0,
+              showZeroStockInRed:
+                  _filter == ProductSearchFilterMode.allItems,
+              onAdd: () => _addProduct(product),
+              onRemove: () => _removeOne(product.id),
             ),
-          const Divider(height: 24),
+            const Divider(height: 1, indent: 12),
+          ],
+          const SizedBox(height: 12),
         ],
         const Text(
           'أصناف الطلب',
@@ -341,95 +381,39 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
           Text(
             'لا توجد أصناف — أضف منتجاً من البحث',
             style: TextStyle(color: palette.muted),
-          ),
-        for (var i = 0; i < _lines.length; i++)
-          _EditLineTile(
-            line: _lines[i],
-            onChanged: () => setState(() {}),
-            onRemove: () => setState(() => _lines.removeAt(i)),
-          ),
+          )
+        else
+          for (final line in _lines)
+            _OrderLineAsProductTile(
+              line: line,
+              onAdd: () => setState(() => line.quantity += 1),
+              onRemove: () => _removeOne(line.productId),
+            ),
       ],
     );
   }
 }
 
-class _EditLineTile extends StatelessWidget {
-  const _EditLineTile({
+/// Existing cart line rendered with the same staff product tile chrome.
+class _OrderLineAsProductTile extends StatelessWidget {
+  const _OrderLineAsProductTile({
     required this.line,
-    required this.onChanged,
+    required this.onAdd,
     required this.onRemove,
   });
 
   final OrderEditLine line;
-  final VoidCallback onChanged;
+  final VoidCallback onAdd;
   final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
-    final palette = context.palette;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    line.productName,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'حذف',
-                  onPressed: onRemove,
-                  icon: const Icon(Icons.delete_outline_rounded,
-                      color: Colors.red),
-                ),
-              ],
-            ),
-            Text(
-              '${AppCurrency.of(line.unitPrice)} × ${line.quantity} = ${AppCurrency.of(line.lineTotal)}',
-              style: TextStyle(color: palette.muted, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                IconButton.filledTonal(
-                  onPressed: () {
-                    if (line.quantity <= 1) {
-                      onRemove();
-                      return;
-                    }
-                    line.quantity -= 1;
-                    onChanged();
-                  },
-                  icon: const Icon(Icons.remove_rounded),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    '${line.quantity}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-                IconButton.filledTonal(
-                  onPressed: () {
-                    line.quantity += 1;
-                    onChanged();
-                  },
-                  icon: const Icon(Icons.add_rounded),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+    return StaffProductSearchTile(
+      product: line.toProduct(),
+      quantityLabel: '${line.quantity}',
+      inCart: true,
+      onAdd: onAdd,
+      onRemove: onRemove,
     );
   }
 }

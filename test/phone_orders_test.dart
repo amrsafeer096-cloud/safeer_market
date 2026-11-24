@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:safeer_market/core/theme/app_theme.dart';
 import 'package:safeer_market/features/admin/data/repositories/supabase_phone_orders_repository.dart';
 import 'package:safeer_market/features/admin/domain/phone_order.dart';
+import 'package:safeer_market/features/admin/domain/product_search_filter.dart';
 import 'package:safeer_market/features/admin/domain/repositories/phone_orders_repository.dart';
 import 'package:safeer_market/features/admin/presentation/providers/phone_order_providers.dart';
 import 'package:safeer_market/features/admin/presentation/widgets/phone_order_column.dart';
@@ -131,6 +132,7 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
   Future<List<Product>> searchProducts(
     String query, {
     MainCategory? category,
+    ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
   }) async =>
       [_milk, _rice]
           .where((p) => p.name.contains(query) || p.barcode == query)

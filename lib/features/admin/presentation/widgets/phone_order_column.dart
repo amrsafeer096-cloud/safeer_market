@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_currency.dart';
@@ -13,14 +12,15 @@ import '../../../cart/domain/weight_options.dart';
 import '../../../cart/presentation/widgets/weight_picker_sheet.dart';
 import '../../../checkout/domain/delivery_pricing.dart';
 import '../../../home/domain/entities/product.dart';
-import '../../../home/presentation/widgets/product_image.dart';
 import '../../domain/phone_order.dart';
+import '../../domain/product_search_filter.dart';
 import '../../domain/repositories/phone_orders_repository.dart';
 import '../providers/order_alternatives_providers.dart';
 import '../providers/phone_order_providers.dart';
 import 'customer_purchase_history_dialog.dart';
 import 'new_customer_dialogs.dart';
 import 'product_details_dialog.dart';
+import 'staff_product_search_tile.dart';
 
 /// «تلقي الطلبات»: find (or add) the caller, build their cart, and place
 /// the order. [onPlaced] gets the new order's id.
@@ -689,12 +689,17 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   final _search = TextEditingController();
   Timer? _debounce;
   String _query = '';
+  var _filter = ProductSearchFilterMode.inStock;
 
   /// The cart and delivery fee panel; closed, it is one summary line so the
   /// product results keep the height.
   bool _cartOpen = false;
 
-  PhoneOrderProductQuery get _productQuery => (text: _query, category: null);
+  PhoneOrderProductQuery get _productQuery => (
+        text: _query,
+        category: null,
+        filter: _filter,
+      );
 
   @override
   void dispose() {
@@ -719,7 +724,11 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     if (code.isEmpty) return;
     try {
       final products = await ref.read(
-          phoneOrderProductsProvider((text: code, category: null)).future);
+          phoneOrderProductsProvider((
+            text: code,
+            category: null,
+            filter: _filter,
+          )).future);
       final match =
           products.where((product) => product.barcode?.trim() == code);
       if (match.length == 1 && mounted) {
@@ -763,6 +772,11 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
             decoration: InputDecoration(
               hintText: l10n.phoneOrderProductSearchHint,
               prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
+              // RTL: suffix sits on the far left (funnel + stock/+- column).
+              suffixIcon: ProductSearchFilterButton(
+                mode: _filter,
+                onChanged: (mode) => setState(() => _filter = mode),
+              ),
               border: const OutlineInputBorder(),
               isDense: true,
             ),
@@ -797,9 +811,19 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                             itemBuilder: (context, index) {
                               final product = products[index];
                               final line = state.lineOf(product.id);
-                              return _ProductTile(
+                              final countLabel = switch (line) {
+                                PhoneOrderLine(:final weightInGrams?) =>
+                                  WeightOptions.phoneOrderLabel(weightInGrams),
+                                PhoneOrderLine(:final quantity) =>
+                                  '$quantity',
+                                null => '0',
+                              };
+                              return StaffProductSearchTile(
                                 product: product,
-                                line: line,
+                                quantityLabel: countLabel,
+                                inCart: line != null,
+                                showZeroStockInRed:
+                                    _filter == ProductSearchFilterMode.allItems,
                                 onAdd: () =>
                                     _addProduct(context, ref, product),
                                 onOpen: () =>
@@ -904,232 +928,6 @@ class _LockedCustomer extends StatelessWidget {
   }
 }
 
-/// Stock at or below this is shown in orange.
-const _lowStock = 5;
-
-/// Product rows narrower than this stack the stock and − / + under the name.
-const _narrowTileWidth = 480.0;
-
-/// The barcode, tap to copy (small copy icon and «تم نسخ الباركود»).
-class _BarcodeCopy extends StatelessWidget {
-  const _BarcodeCopy({required this.productId, required this.barcode});
-
-  final String productId;
-  final String barcode;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.palette;
-    return Tooltip(
-      message: 'نسخ الباركود',
-      child: InkWell(
-        key: Key('phone-order-barcode-$productId'),
-        borderRadius: BorderRadius.circular(6),
-        onTap: () async {
-          final messenger = ScaffoldMessenger.of(context);
-          await Clipboard.setData(ClipboardData(text: barcode.trim()));
-          messenger
-            ..hideCurrentSnackBar()
-            ..showSnackBar(const SnackBar(
-              duration: Duration(seconds: 2),
-              content: Text('تم نسخ الباركود'),
-            ));
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  barcode,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: TextDirection.ltr,
-                  style: TextStyle(fontSize: 12, color: palette.muted),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.copy_rounded, size: 13, color: palette.accent),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ProductTile extends StatelessWidget {
-  const _ProductTile({
-    required this.product,
-    required this.line,
-    required this.onAdd,
-    required this.onOpen,
-    required this.onRemove,
-  });
-
-  final Product product;
-  final PhoneOrderLine? line;
-
-  /// The + button: one more.
-  final VoidCallback onAdd;
-
-  /// Anywhere else on the row: product details and bulk add.
-  final VoidCallback onOpen;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.palette;
-    final inCart = line != null;
-    final countLabel = switch (line) {
-      PhoneOrderLine(:final weightInGrams?) =>
-        WeightOptions.phoneOrderLabel(weightInGrams),
-      PhoneOrderLine(:final quantity) => '$quantity',
-      null => '0',
-    };
-
-    // RTL: image sits on the right (start).
-    final image = SizedBox.square(
-      dimension: 56,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: ColoredBox(
-          color: Colors.white,
-          child: ProductImage(
-            imageUrl: product.hasValidImageUrl ? product.imageUrl : null,
-            iconSize: 22,
-            fit: BoxFit.contain,
-            padding: const EdgeInsets.all(4),
-          ),
-        ),
-      ),
-    );
-
-    final info = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          product.name,
-          style: const TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 14,
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${AppCurrency.of(product.effectivePrice)} / '
-          '${product.displayUnit}',
-          style: TextStyle(fontSize: 12, color: palette.muted),
-        ),
-        if (product.barcode case final barcode?
-            when barcode.trim().isNotEmpty)
-          _BarcodeCopy(productId: product.id, barcode: barcode),
-      ],
-    );
-
-    // Stock on hand, right before the − / + buttons.
-    final stock = Padding(
-      padding: const EdgeInsetsDirectional.only(start: 6, end: 2),
-      child: Text(
-        'المخزون: ${product.stockQuantity}',
-        key: Key('phone-order-stock-${product.id}'),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          color: product.stockQuantity <= _lowStock
-              ? Colors.orange.shade800
-              : palette.muted,
-        ),
-      ),
-    );
-
-    // RTL: quantity controls sit on the left (end).
-    final controls = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          key: Key('phone-order-dec-product-${product.id}'),
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-          onPressed: inCart ? onRemove : null,
-          icon: Icon(
-            Icons.remove_circle_outline,
-            color: inCart ? palette.accent : palette.muted,
-          ),
-        ),
-        ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 30),
-          child: Text(
-            countLabel,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              color: inCart ? palette.accent : palette.muted,
-              fontSize: 13,
-            ),
-          ),
-        ),
-        IconButton(
-          key: Key('phone-order-add-${product.id}'),
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-          onPressed: onAdd,
-          icon: Icon(Icons.add_circle_rounded, color: palette.accent),
-        ),
-      ],
-    );
-
-    return Material(
-      color: palette.card,
-      child: InkWell(
-        key: Key('phone-order-product-${product.id}'),
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(8, 8, 4, 8),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              // Narrow column: the stock and − / + move under the name so
-              // the name and barcode keep their width.
-              if (constraints.maxWidth < _narrowTileWidth) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        image,
-                        const SizedBox(width: 10),
-                        Expanded(child: info),
-                      ],
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [stock, controls],
-                    ),
-                  ],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  image,
-                  const SizedBox(width: 10),
-                  Expanded(child: info),
-                  stock,
-                  controls,
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// The bottom bar: always the cart count, the total and «تأكيد وتسجيل الطلب»;
 /// opened, also the cart lines and the delivery fee.

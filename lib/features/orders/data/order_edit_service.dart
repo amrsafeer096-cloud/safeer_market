@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/network/postgrest_helpers.dart';
 import '../../../core/network/supabase_providers.dart';
+import '../../admin/domain/product_search_filter.dart';
+import '../../home/data/models/product_model.dart';
 import '../../home/domain/entities/product.dart';
 import '../domain/order_editability.dart';
 
@@ -25,8 +28,9 @@ class OrderEditService {
     final rows = await _client
         .from('order_items')
         .select(
-          'id, quantity, price_at_time, weight_in_grams, '
-          'product_id, products(id, name, barcode, price, discount_price)',
+          'id, quantity, price_at_time, weight_in_grams, product_id, '
+          'products(id, name, barcode, price, discount_price, image_url, '
+          'stock_quantity)',
         )
         .eq('order_id', orderId);
 
@@ -46,6 +50,12 @@ class OrderEditService {
         productId: productId,
         productName: name.isEmpty ? 'منتج' : name,
         barcode: _textOrNull(product['barcode']),
+        imageUrl: _textOrNull(product['image_url']),
+        listPrice: listPrice > 0 ? listPrice : null,
+        stockQuantity: switch (product['stock_quantity']) {
+          final num n => n.round(),
+          _ => 0,
+        },
         unitPrice: charged > 0
             ? charged
             : (discount > 0 && discount < listPrice ? discount : listPrice),
@@ -59,37 +69,35 @@ class OrderEditService {
     }).where((l) => l.productId.isNotEmpty).toList();
   }
 
-  Future<List<Product>> searchCatalog(String query) async {
+  Future<List<Product>> searchCatalog(
+    String query, {
+    ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
+  }) async {
     final q = query.trim();
     if (q.isEmpty) return const [];
-    final rows = await _client
-        .from('products')
-        .select(
+    var request = _client.from('products').select(
           'id, name, barcode, price, discount_price, image_url, '
-          'category, stock_quantity, unit',
-        )
+          'category, category_id, stock_quantity, unit, is_active, '
+          'is_weight_based',
+        );
+    request = switch (filter) {
+      ProductSearchFilterMode.inStock => request.inStock(),
+      ProductSearchFilterMode.allItems =>
+        request.not('is_active', 'is', false),
+      ProductSearchFilterMode.offers => request
+          .not('is_active', 'is', false)
+          .not('discount_price', 'is', null)
+          .gt('discount_price', 0),
+    };
+    final rows = await request
         .or('name.ilike.%$q%,barcode.ilike.%$q%')
-        .limit(30);
-    return [
-      for (final row in rows)
-        Product(
-          id: '${row['id']}',
-          name: '${row['name'] ?? 'منتج'}',
-          price: _num(row['price']),
-          discountPrice: switch (_num(row['discount_price'])) {
-            final d when d > 0 => d,
-            _ => null,
-          },
-          barcode: _textOrNull(row['barcode']),
-          imageUrl: _textOrNull(row['image_url']),
-          category: _textOrNull(row['category']),
-          stockQuantity: switch (row['stock_quantity']) {
-            final num n => n.round(),
-            _ => 0,
-          },
-          unit: '${row['unit'] ?? Product.defaultUnit}',
-        ),
-    ];
+        .order('name')
+        .limit(40);
+    var products = rows.map(ProductModel.fromJson).toList();
+    if (filter == ProductSearchFilterMode.offers) {
+      products = [for (final p in products) if (p.hasActiveOffer) p];
+    }
+    return products;
   }
 
   Future<void> beginEdit({

@@ -1,6 +1,7 @@
 import '../../../catalog/domain/main_categories.dart';
 import '../../../home/domain/entities/product.dart';
 import '../phone_order.dart';
+import '../product_search_filter.dart';
 
 /// Phone orders taken from the admin dashboard.
 abstract class PhoneOrdersRepository {
@@ -36,8 +37,13 @@ abstract class PhoneOrdersRepository {
   /// when the table has no rows (or doesn't exist yet).
   Future<List<PhoneOrderArea>> fetchAreas({String? city});
 
-  /// In-stock products by name or barcode, optionally within [category].
-  Future<List<Product>> searchProducts(String query, {MainCategory? category});
+  /// Products by name or barcode, optionally within [category].
+  /// [filter] defaults to positive stock only («المخزون الفعلي»).
+  Future<List<Product>> searchProducts(
+    String query, {
+    MainCategory? category,
+    ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
+  });
 
   /// Records the order (status pending, «جديد») and returns its id.
   ///

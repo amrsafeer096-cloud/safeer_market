@@ -9,6 +9,7 @@ import '../../../catalog/domain/main_categories.dart';
 import '../../../home/data/models/product_model.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../domain/phone_order.dart';
+import '../../domain/product_search_filter.dart';
 import '../../domain/repositories/phone_orders_repository.dart';
 
 /// Customers and orders go through the security-definer functions in
@@ -110,11 +111,21 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
   Future<List<Product>> searchProducts(
     String query, {
     MainCategory? category,
+    ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty && category == null) return const [];
 
-    var request = _client.from('products').select(_productColumns).inStock();
+    var request = _client.from('products').select(_productColumns);
+    request = switch (filter) {
+      ProductSearchFilterMode.inStock => request.inStock(),
+      ProductSearchFilterMode.allItems =>
+        request.not('is_active', 'is', false),
+      ProductSearchFilterMode.offers => request
+          .not('is_active', 'is', false)
+          .not('discount_price', 'is', null)
+          .gt('discount_price', 0),
+    };
     if (category != null) {
       request = request.inFilter('category', [
         for (final name in category.subCategories) ...[name, '$name '],
@@ -131,7 +142,13 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
 
     try {
       final rows = await request.order('name').limit(productLimit * 2);
-      final products = rows.map(ProductModel.fromJson).toList();
+      var products = rows.map(ProductModel.fromJson).toList();
+      if (filter == ProductSearchFilterMode.offers) {
+        products = [
+          for (final product in products)
+            if (product.hasActiveOffer) product,
+        ];
+      }
       // Every typed word, in any order (the query only filtered the first).
       final lowered = [for (final w in words) w.toLowerCase()];
       return products

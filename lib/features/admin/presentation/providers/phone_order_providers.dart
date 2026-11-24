@@ -10,6 +10,7 @@ import '../../../cart/domain/weight_options.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../data/repositories/supabase_phone_orders_repository.dart';
 import '../../domain/phone_order.dart';
+import '../../domain/product_search_filter.dart';
 import '../../domain/repositories/phone_orders_repository.dart';
 import 'system_admin_providers.dart';
 
@@ -23,13 +24,19 @@ final phoneOrderCustomersProvider = FutureProvider.autoDispose
   return ref.watch(phoneOrdersRepositoryProvider).searchCustomers(query);
 });
 
-typedef PhoneOrderProductQuery = ({String text, MainCategory? category});
+typedef PhoneOrderProductQuery = ({
+  String text,
+  MainCategory? category,
+  ProductSearchFilterMode filter,
+});
 
 final phoneOrderProductsProvider = FutureProvider.autoDispose
     .family<List<Product>, PhoneOrderProductQuery>((ref, query) {
-  return ref
-      .watch(phoneOrdersRepositoryProvider)
-      .searchProducts(query.text, category: query.category);
+  return ref.watch(phoneOrdersRepositoryProvider).searchProducts(
+        query.text,
+        category: query.category,
+        filter: query.filter,
+      );
 });
 
 /// Delivery zones of a city, for the new-customer address form.
