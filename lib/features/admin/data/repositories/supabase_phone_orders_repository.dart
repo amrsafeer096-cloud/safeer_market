@@ -246,10 +246,23 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     final words =
         trimmed.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     if (words.isNotEmpty) {
-      final first = _escapeLike(words.first);
-      request = RegExp(r'^\d{4,}$').hasMatch(trimmed)
-          ? request.or('barcode.ilike.$first*,name.ilike.*$first*')
-          : request.ilike('name', '%$first%');
+      if (RegExp(r'^\d{4,}$').hasMatch(trimmed)) {
+        // Pure numeric query → barcode prefix (also allow name match).
+        final code = _escapeLike(trimmed);
+        request = request.or('barcode.ilike.$code*,name.ilike.*$code*');
+      } else {
+        // AND each token across name/barcode so «جهينة 5+1» works in
+        // كل الأصناف / العروض (not only المخزون الفعلي). Filtering only the
+        // first token + a small LIMIT dropped zero-stock / offer rows that
+        // sort later alphabetically among hundreds of «جهينة» matches.
+        // PostgREST `or=` filters use `*` as the LIKE wildcard (not `%`).
+        for (final word in words) {
+          final escaped = _escapeLike(word);
+          request = request.or(
+            'name.ilike.*$escaped*,barcode.ilike.*$escaped*',
+          );
+        }
+      }
     }
 
     try {
@@ -261,9 +274,10 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
             if (product.hasActiveOffer) product,
         ];
       }
-      // Every typed word, in any order (the query only filtered the first).
+      // Client-side Arabic-normalized AND (covers alef/teh variants).
       return products
           .where((product) {
+            if (words.isEmpty) return true;
             final name = product.name;
             final barcode = product.barcode ?? '';
             return words.every(

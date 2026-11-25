@@ -758,27 +758,57 @@ def lookup_item(cursor, barcode: str) -> Optional[dict[str, Any]]:
 def fetch_active_discounts(
     cursor, barcodes: list[str]
 ) -> dict[str, dict[str, Any]]:
-    """Func_ActiveItemDiscountsOf(101, TableType_StrIds) — types 101 / 102 / 3."""
-    codes = sorted({(b or "").strip() for b in barcodes if (b or "").strip()})
-    if not codes:
+    """
+    Active item discounts (types 101=% / 102|3=fixed).
+
+    Live retail: Func_ActiveItemDiscountsOf(101, …) returns 0 because many
+    pos_promotion_items offers have no sys_discount_branchs row for branch 101.
+    Use the function's @Branch<=0 body (same as Trusty yellow-star offers).
+    """
+    wanted = {(b or "").strip() for b in barcodes if (b or "").strip()}
+    if not wanted:
         return {}
-    # Build TVP insert; PK on StrId requires uniqueness (already sorted set).
-    values_sql = ", ".join("(?)" for _ in codes)
     try:
         cursor.execute(
-            f"""
-            DECLARE @ids dbo.TableType_StrIds;
-            INSERT INTO @ids (StrId) VALUES {values_sql};
-            SELECT Barcode, DiscountValue, DiscountNo, DiscountType, DateFrom, DateTo
-            FROM dbo.Func_ActiveItemDiscountsOf(?, @ids);
-            """,
-            (*codes, BRANCH_ID),
+            """
+            SELECT
+                LTRIM(RTRIM(CAST(barcode AS NVARCHAR(50)))) AS barcode,
+                DiscountValue,
+                DiscountNo,
+                DiscountType
+            FROM (
+                SELECT
+                    i.barcode,
+                    i.discountvalue AS DiscountValue,
+                    i.discountno AS DiscountNo,
+                    d.discounttype AS DiscountType
+                FROM sys_discount d WITH (NOLOCK)
+                INNER JOIN sys_discount_items i WITH (NOLOCK)
+                    ON d.discountno = i.discountno
+                WHERE GETDATE() BETWEEN i.date_from AND i.date_to
+                  AND d.discounttype IN (101, 102)
+                  AND i.usage = 1
+
+                UNION ALL
+
+                SELECT
+                    pi.barcode,
+                    pi.sales_price - pi.prom_price,
+                    pi.prom_id,
+                    pi.prom_type
+                FROM pos_promotion_items pi WITH (NOLOCK)
+                WHERE pi.prom_type = 3
+                  AND pi.postflag = 0
+                  AND pi.sdate IS NOT NULL
+                  AND pi.edate IS NOT NULL
+                  AND GETDATE() BETWEEN pi.sdate AND pi.edate
+            ) active_discounts
+            """
         )
-        _cols, rows = _fetch_last_result(cursor)
         out: dict[str, dict[str, Any]] = {}
-        for row in rows or []:
+        for row in cursor.fetchall() or []:
             bc = str(row[0] or "").strip()
-            if not bc:
+            if not bc or bc not in wanted:
                 continue
             out[bc] = {
                 "discount_value": float(row[1] or 0),
@@ -787,7 +817,7 @@ def fetch_active_discounts(
             }
         return out
     except Exception as exc:
-        log(f"⚠️ Func_ActiveItemDiscountsOf failed: {exc}")
+        log(f"⚠️ active-discount lookup failed: {exc}")
         return {}
 
 

@@ -266,7 +266,6 @@ def sync_active_with_categories():
             e = str(r.itemean or "").strip()
             if e:
                 itemeans_raw.append(e.ljust(13))  # Fujitsu CHAR padding for TVF join
-        barcodes = [str(r.barcode or "").strip() for r in item_rows if r.barcode]
         balance_by_ean = {}
         discount_by_barcode = {}
         batch = 400
@@ -294,32 +293,71 @@ def sync_active_with_categories():
                 except (TypeError, ValueError):
                     balance_by_ean[ean] = 0
 
-        # Active discounts — DiscountType 101=% , 102/3=fixed (Trusty)
-        for i in range(0, len(barcodes), batch):
-            chunk = barcodes[i : i + batch]
-            if not chunk:
+        # Active discounts — Trusty yellow-star offers.
+        #
+        # Live retail: Func_ActiveItemDiscountsOf(101, …) returns 0 rows because
+        # pos_promotion_items promos (prom_type=3) have NO sys_discount_branchs
+        # rows for branch 101. The function's @Branch<=0 path skips that join and
+        # returns the real offers (e.g. 6222014350658 → DiscountValue 10 / type 3).
+        # Pull the full active set once (no barcode TVP / chunking).
+        cursor.execute(
+            """
+            SELECT
+                LTRIM(RTRIM(CAST(barcode AS NVARCHAR(50)))) AS barcode,
+                DiscountValue,
+                DiscountNo,
+                DiscountType
+            FROM (
+                SELECT
+                    i.barcode,
+                    i.discountvalue AS DiscountValue,
+                    i.discountno AS DiscountNo,
+                    d.discounttype AS DiscountType
+                FROM sys_discount d WITH (NOLOCK)
+                INNER JOIN sys_discount_items i WITH (NOLOCK)
+                    ON d.discountno = i.discountno
+                WHERE GETDATE() BETWEEN i.date_from AND i.date_to
+                  AND d.discounttype IN (101, 102)
+                  AND i.usage = 1
+
+                UNION ALL
+
+                SELECT
+                    pi.barcode,
+                    pi.sales_price - pi.prom_price AS DiscountValue,
+                    pi.prom_id AS DiscountNo,
+                    pi.prom_type AS DiscountType
+                FROM pos_promotion_items pi WITH (NOLOCK)
+                WHERE pi.prom_type = 3
+                  AND pi.postflag = 0
+                  AND pi.sdate IS NOT NULL
+                  AND pi.edate IS NOT NULL
+                  AND GETDATE() BETWEEN pi.sdate AND pi.edate
+            ) active_discounts
+            """
+        )
+        for row in cursor.fetchall() or []:
+            bc = str(row[0] or "").strip()
+            if not bc:
                 continue
-            placeholders = ", ".join(
-                "(N'" + s.replace("'", "''") + "')" for s in sorted(set(chunk))
-            )
-            cursor.execute(
-                f"""
-                DECLARE @ids dbo.TableType_StrIds;
-                INSERT INTO @ids (StrId) VALUES {placeholders};
-                SELECT Barcode, DiscountValue, DiscountNo, DiscountType
-                FROM dbo.Func_ActiveItemDiscountsOf({BRANCH_ID}, @ids);
-                """
-            )
-            _c, rows = _fetch_last_result(cursor)
-            for row in rows or []:
-                bc = str(row[0] or "").strip()
-                if not bc:
-                    continue
-                discount_by_barcode[bc] = {
-                    "value": float(row[1] or 0),
-                    "no": int(row[2] or 0),
-                    "type": int(row[3] or 0),
-                }
+            value = float(row[1] or 0)
+            dtype = int(row[3] or 0)
+            dno = int(row[2] or 0)
+            prev = discount_by_barcode.get(bc)
+            # Keep the larger absolute discount when several rows overlap.
+            if prev is not None:
+                if dtype in (102, 3) and prev["type"] in (102, 3):
+                    if value <= prev["value"]:
+                        continue
+                elif dtype == 101 and prev["type"] == 101:
+                    if value <= prev["value"]:
+                        continue
+            discount_by_barcode[bc] = {
+                "value": value,
+                "no": dno,
+                "type": dtype,
+            }
+        print(f"  active discounts loaded: {len(discount_by_barcode)}")
 
         data_to_upsert_dict = {}
         for row in item_rows:

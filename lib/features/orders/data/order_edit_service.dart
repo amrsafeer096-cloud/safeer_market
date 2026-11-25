@@ -89,13 +89,39 @@ class OrderEditService {
           .not('discount_price', 'is', null)
           .gt('discount_price', 0),
     };
-    final rows = await request
-        .or('name.ilike.%$q%,barcode.ilike.%$q%')
-        .order('name')
-        .limit(40);
+    final words =
+        q.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    String escapeLike(String value) => value
+        .replaceAll(r'\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_')
+        .replaceAll(',', '')
+        .replaceAll('(', '')
+        .replaceAll(')', '');
+    if (RegExp(r'^\d{4,}$').hasMatch(q)) {
+      final code = escapeLike(q);
+      // PostgREST `or=` filters use `*` as the LIKE wildcard (not `%`).
+      request = request.or('name.ilike.*$code*,barcode.ilike.*$code*');
+    } else {
+      for (final word in words) {
+        final escaped = escapeLike(word);
+        request =
+            request.or('name.ilike.*$escaped*,barcode.ilike.*$escaped*');
+      }
+    }
+    final rows = await request.order('name').limit(80);
     var products = rows.map(ProductModel.fromJson).toList();
     if (filter == ProductSearchFilterMode.offers) {
       products = [for (final p in products) if (p.hasActiveOffer) p];
+    }
+    if (words.length > 1) {
+      products = [
+        for (final p in products)
+          if (words.every((w) =>
+              arabicSearchContains(p.name, w) ||
+              arabicSearchContains(p.barcode ?? '', w)))
+            p,
+      ];
     }
     return products;
   }
