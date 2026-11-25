@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,18 +24,37 @@ final takerTodayOrdersProvider =
   Future<List<Map<String, dynamic>>> fetch() async {
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day).toUtc();
-    final rows = await client
-        .from('orders')
-        .select(
-          'id, status, created_at, updated_at, prep_completed_at, '
-          'customer_name, phone, delivery_phone, taker_name, receiver_name',
-        )
-        .ilike('taker_name', name)
-        .gte('created_at', start.toIso8601String())
-        .neq('status', 'cancelled')
-        .order('created_at', ascending: false)
-        .limit(80);
-    return List<Map<String, dynamic>>.from(rows as List);
+
+    Future<List<Map<String, dynamic>>> query(String columns) async {
+      final rows = await client
+          .from('orders')
+          .select(columns)
+          .eq('taker_name', name)
+          .gte('created_at', start.toIso8601String())
+          .neq('status', 'cancelled')
+          .order('created_at', ascending: false)
+          .limit(80);
+      return List<Map<String, dynamic>>.from(rows as List);
+    }
+
+    // Prefer updated_at for the live timer; fall back if the column is absent.
+    const withUpdated =
+        'id, status, created_at, updated_at, prep_completed_at, '
+        'customer_name, customer_phone, taker_name, driver_name, preparer_name';
+    const withoutUpdated =
+        'id, status, created_at, prep_completed_at, '
+        'customer_name, customer_phone, taker_name, driver_name, preparer_name';
+    try {
+      return await query(withUpdated);
+    } catch (error) {
+      final message = '$error'.toLowerCase();
+      if (message.contains('updated_at')) {
+        debugPrint(
+            'طلبات اليوم: updated_at missing, falling back to created_at');
+        return await query(withoutUpdated);
+      }
+      rethrow;
+    }
   }
 
   final controller =
@@ -46,6 +66,13 @@ final takerTodayOrdersProvider =
       final rows = await fetch();
       if (!closed && !controller.isClosed) controller.add(rows);
     } catch (error, stack) {
+      debugPrint('طلبات اليوم fetch failed: $error');
+      developer.log(
+        'طلبات اليوم fetch failed',
+        name: 'PhoneOrderTodayPanel',
+        error: error,
+        stackTrace: stack,
+      );
       if (!closed && !controller.isClosed) {
         controller.addError(error, stack);
       }
@@ -110,10 +137,14 @@ class PhoneOrderTodayPanel extends ConsumerWidget {
               child: orders.when(
                 loading: () =>
                     const Center(child: CircularProgressIndicator()),
-                error: (_, __) => Center(
-                  child: Text(
-                    'تعذّر التحميل',
-                    style: TextStyle(color: palette.muted, fontSize: 12),
+                error: (error, _) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Text(
+                      'تعذّر التحميل\n$error',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: palette.muted, fontSize: 11),
+                    ),
                   ),
                 ),
                 data: (list) {
@@ -154,14 +185,8 @@ class _TodayOrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final status = OrderStatus.normalize('${order['status'] ?? ''}');
-    final name = (order['customer_name'] ??
-            order['receiver_name'] ??
-            'عميل')
-        .toString()
-        .trim();
-    final phone = (order['phone'] ?? order['delivery_phone'] ?? '')
-        .toString()
-        .trim();
+    final name = (order['customer_name'] ?? 'عميل').toString().trim();
+    final phone = (order['customer_phone'] ?? '').toString().trim();
     final label = _statusLabel(status);
     final color = _statusColor(status);
 
@@ -283,6 +308,7 @@ class _StatusElapsedTimerState extends State<_StatusElapsedTimer> {
     final status = OrderStatus.normalize('${widget.order['status'] ?? ''}');
     DateTime? parse(Object? raw) => DateTime.tryParse('$raw')?.toLocal();
 
+    // `status_updated_at` does not exist — use updated_at, then prep/created.
     final updated = parse(widget.order['updated_at']);
     if (updated != null) return updated;
     if (status == OrderStatus.readyForDelivery.value) {

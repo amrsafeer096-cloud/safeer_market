@@ -264,22 +264,35 @@ class PhoneOrderColumn extends ConsumerWidget {
       ],
     );
 
-    // RTL: طلبات اليوم on the far right; search popup hides it for space.
-    Widget body = columns;
-    if (hasParked) {
-      body = Row(children: [
-        const _OpenOrdersSidebar(),
-        const VerticalDivider(width: 1),
-        Expanded(child: body),
-      ]);
-    }
-    if (!searchOpen) {
-      body = Row(children: [
-        Expanded(child: body),
-        const VerticalDivider(width: 1),
-        const PhoneOrderTodayPanel(),
-      ]);
-    }
+    // RTL Row: first child = far right.
+    // Keep this tree stable when the search popup opens so `_OrderBuilder`
+    // (and its TextEditingController / FocusNode) is not disposed mid-typing.
+    // طلبات اليوم stays mounted but collapses while searching so the
+    // popup can use the full width.
+    final body = Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Visibility(
+          visible: !searchOpen,
+          maintainState: true,
+          maintainAnimation: true,
+          maintainSize: false,
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              PhoneOrderTodayPanel(),
+              VerticalDivider(width: 1),
+            ],
+          ),
+        ),
+        if (hasParked) ...[
+          const _OpenOrdersSidebar(),
+          const VerticalDivider(width: 1),
+        ],
+        Expanded(child: columns),
+      ],
+    );
 
     return Material(
       color: palette.background,
@@ -847,6 +860,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     if (!mounted) return;
     // Keep the search field ready whenever no dialog owns focus.
     if (ModalRoute.of(context)?.isCurrent != true) return;
+    if (_searchFocus.hasFocus) return;
     _searchFocus.requestFocus();
   }
 
@@ -1202,6 +1216,9 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
             controller: _search,
             focusNode: _searchFocus,
             autofocus: true,
+            enabled: true,
+            readOnly: false,
+            enableInteractiveSelection: true,
             onChanged: _onChanged,
             onSubmitted: _onSubmitted,
             textInputAction: TextInputAction.search,

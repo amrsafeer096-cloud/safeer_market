@@ -690,8 +690,12 @@ class _UnifiedDashboardScreenState
           if (didPop) return;
           _handleEscape();
         },
+        // Do NOT autofocus / steal keys from TextFields (تلقي الطلبات search).
+        // Esc is already handled by HardwareKeyboard above; this only
+        // catches bubbling Esc and ignores every other key.
         child: Focus(
-          autofocus: true,
+          canRequestFocus: false,
+          skipTraversal: true,
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent &&
                 event.logicalKey == LogicalKeyboardKey.escape) {
