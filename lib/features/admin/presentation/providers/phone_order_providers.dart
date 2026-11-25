@@ -128,6 +128,20 @@ final phoneOrderCustomerHistoryProvider = FutureProvider.autoDispose
   return ref.watch(phoneOrdersRepositoryProvider).fetchCustomerHistory(customer);
 });
 
+/// Past order headers for the left «الطلبات السابقة» tab.
+final phoneOrderCustomerPastOrdersProvider = FutureProvider.autoDispose
+    .family<List<CustomerPastOrderSummary>, String>((ref, customerKey) async {
+  final customer = ref.watch(
+    phoneOrderControllerProvider.select((state) => state.customer),
+  );
+  if (customer == null || customer.key != customerKey) {
+    return const [];
+  }
+  return ref
+      .watch(phoneOrdersRepositoryProvider)
+      .fetchCustomerPastOrders(customer);
+});
+
 /// The order being taken over the phone: the caller, their cart and the
 /// delivery fee. Kept while staff switch between orders on the dashboard.
 class PhoneOrderController extends Notifier<PhoneOrderState> {

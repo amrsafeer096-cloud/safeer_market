@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
-import '../../../../core/widgets/resizable_columns.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../cart/domain/weight_options.dart';
 import '../../../cart/presentation/widgets/weight_picker_sheet.dart';
@@ -23,6 +22,7 @@ import 'customer_details_sheet.dart';
 import 'customer_purchase_history_dialog.dart';
 import 'new_customer_dialogs.dart';
 import 'payment_confirm_dialog.dart';
+import 'phone_order_customer_history_panel.dart';
 import 'phone_order_staged_review.dart';
 import 'phone_order_today_panel.dart';
 import 'product_details_dialog.dart';
@@ -32,8 +32,9 @@ import 'staff_product_search_tile.dart';
 /// «تلقي الطلبات»: find (or add) the caller, build their cart, and place
 /// the order. [onPlaced] gets the new order's id.
 ///
-/// When [splitLayout] is true, customer/products sit beside a full-height
-/// cart column (RTL: products on the right, cart on the left).
+/// When [splitLayout] is true (wide dashboard): RTL 3 columns —
+/// far right «طلبات اليوم», center search+cart (search overlays cart),
+/// far left customer history tabs.
 class PhoneOrderColumn extends ConsumerWidget {
   const PhoneOrderColumn({
     super.key,
@@ -222,13 +223,19 @@ class PhoneOrderColumn extends ConsumerWidget {
       );
     }
 
-    final searchOpen = ref.watch(phoneOrderSearchOpenProvider);
-    final columns = ResizableColumns(
-      layoutId: 'admin-receive-orders',
-      columns: [
-        ResizableColumn(
+    // RTL Row: first child = far right.
+    // Far right: طلبات اليوم | Center: search + cart (overlay) | Far left: history
+    final body = Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const PhoneOrderTodayPanel(),
+        const VerticalDivider(width: 1),
+        if (hasParked) ...[
+          const _OpenOrdersSidebar(),
+          const VerticalDivider(width: 1),
+        ],
+        Expanded(
           flex: 5,
-          minWidth: 320,
           child: Material(
             color: palette.card,
             child: hasCustomer
@@ -236,61 +243,33 @@ class PhoneOrderColumn extends ConsumerWidget {
                 : const _CustomerLookup(),
           ),
         ),
-        ResizableColumn(
-          flex: 4,
-          minWidth: 280,
+        const VerticalDivider(width: 1),
+        SizedBox(
+          key: const Key('phone-order-history-panel'),
+          width: 320,
           child: Material(
             color: palette.card,
             child: hasCustomer
-                ? _CartPanel(
-                    open: true,
-                    alwaysOpen: true,
-                    onToggle: () {},
-                    onPlaced: onPlaced,
+                ? PhoneOrderCustomerHistoryPanel(
+                    customer: ref.watch(phoneOrderControllerProvider).customer!,
+                    onAddProduct: (product) =>
+                        _addProduct(context, ref, product),
                   )
                 : Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(20),
                       child: Text(
                         l10n.adminSelectCustomerFirst,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, color: palette.muted),
+                          fontWeight: FontWeight.bold,
+                          color: palette.muted,
+                        ),
                       ),
                     ),
                   ),
           ),
         ),
-      ],
-    );
-
-    // RTL Row: first child = far right.
-    // Keep this tree stable when the search popup opens so `_OrderBuilder`
-    // (and its TextEditingController / FocusNode) is not disposed mid-typing.
-    // طلبات اليوم stays mounted but collapses while searching so the
-    // popup can use the full width.
-    final body = Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Visibility(
-          visible: !searchOpen,
-          maintainState: true,
-          maintainAnimation: true,
-          maintainSize: false,
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              PhoneOrderTodayPanel(),
-              VerticalDivider(width: 1),
-            ],
-          ),
-        ),
-        if (hasParked) ...[
-          const _OpenOrdersSidebar(),
-          const VerticalDivider(width: 1),
-        ],
-        Expanded(child: columns),
       ],
     );
 
@@ -700,7 +679,7 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
             onChanged: _onChanged,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              hintText: l10n.phoneOrderSearchHint,
+              hintText: 'ابحث بالهاتف أو الاسم أو رقم فوجيتسو',
               prefixIcon: const Icon(Icons.person_search_rounded),
               border: const OutlineInputBorder(),
               isDense: true,
@@ -785,6 +764,11 @@ class _CustomerTile extends StatelessWidget {
         children: [
           Text(customer.phone ?? l10n.adminNoPhoneNumber,
               textDirection: TextDirection.ltr),
+          if (customer.fujitsuCustomerNo != null)
+            Text(
+              'فوجيتسو: ${customer.fujitsuCustomerNo}',
+              style: TextStyle(fontSize: 12, color: palette.accent),
+            ),
           Text(
             customer.address ?? l10n.phoneOrderNoAddress,
             maxLines: 2,
@@ -1206,54 +1190,88 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
 
     final showClear = _popupOpen || _search.text.trim().isNotEmpty;
 
+    final searchField = Padding(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+      child: TextField(
+        key: const Key('phone-order-product-search'),
+        controller: _search,
+        focusNode: _searchFocus,
+        autofocus: true,
+        enabled: true,
+        readOnly: false,
+        enableInteractiveSelection: true,
+        onChanged: _onChanged,
+        onSubmitted: _onSubmitted,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: l10n.phoneOrderProductSearchHint,
+          prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
+          suffixIcon: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (showClear)
+                TextButton(
+                  key: const Key('phone-order-search-clear'),
+                  onPressed: _dismissSearch,
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text(
+                    'مسح',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ProductSearchFilterButton(
+                mode: _filter,
+                onChanged: (mode) => setState(() => _filter = mode),
+              ),
+            ],
+          ),
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+      ),
+    );
+
+    // Wide layout: cart is the center base; product search overlays it.
+    if (widget.splitLayout) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          searchField,
+          const SizedBox(height: 4),
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _CartPanel(
+                  open: true,
+                  alwaysOpen: true,
+                  onToggle: () {},
+                  onPlaced: widget.onPlaced,
+                  title: 'سلة العميل',
+                ),
+                if (_popupOpen)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
+                      child: searchPopup(),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
-          child: TextField(
-            key: const Key('phone-order-product-search'),
-            controller: _search,
-            focusNode: _searchFocus,
-            autofocus: true,
-            enabled: true,
-            readOnly: false,
-            enableInteractiveSelection: true,
-            onChanged: _onChanged,
-            onSubmitted: _onSubmitted,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: l10n.phoneOrderProductSearchHint,
-              prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
-              suffixIcon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showClear)
-                    TextButton(
-                      key: const Key('phone-order-search-clear'),
-                      onPressed: _dismissSearch,
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text(
-                        'مسح',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ProductSearchFilterButton(
-                    mode: _filter,
-                    onChanged: (mode) => setState(() => _filter = mode),
-                  ),
-                ],
-              ),
-              border: const OutlineInputBorder(),
-              isDense: true,
-            ),
-          ),
-        ),
+        searchField,
         const SizedBox(height: 4),
         Expanded(
           child: _popupOpen
@@ -1266,12 +1284,11 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                       style: TextStyle(color: palette.muted)),
                 ),
         ),
-        if (!widget.splitLayout)
-          _CartPanel(
-            open: _cartOpen,
-            onToggle: () => setState(() => _cartOpen = !_cartOpen),
-            onPlaced: widget.onPlaced,
-          ),
+        _CartPanel(
+          open: _cartOpen,
+          onToggle: () => setState(() => _cartOpen = !_cartOpen),
+          onPlaced: widget.onPlaced,
+        ),
       ],
     );
   }
@@ -1431,6 +1448,7 @@ class _CartPanel extends ConsumerWidget {
     required this.onToggle,
     required this.onPlaced,
     this.alwaysOpen = false,
+    this.title,
   });
 
   /// Cart lines shown before the list scrolls (collapsible bar mode).
@@ -1445,6 +1463,9 @@ class _CartPanel extends ConsumerWidget {
   final bool alwaysOpen;
   final VoidCallback onToggle;
   final ValueChanged<String>? onPlaced;
+
+  /// Optional header shown in the always-open center cart.
+  final String? title;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1663,7 +1684,7 @@ class _CartPanel extends ConsumerWidget {
         const SizedBox(width: 10),
         Expanded(
           child: Text(
-            l10n.phoneOrderCartTitle,
+            title ?? l10n.phoneOrderCartTitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),

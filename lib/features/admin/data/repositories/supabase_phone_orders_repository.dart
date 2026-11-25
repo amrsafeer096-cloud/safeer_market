@@ -432,6 +432,86 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     );
   }
 
+  @override
+  Future<List<CustomerPastOrderSummary>> fetchCustomerPastOrders(
+    PhoneOrderCustomer customer,
+  ) async {
+    final params = <String, Object?>{
+      'p_limit': 40,
+      if (customer.userId case final id?) 'p_user_id': id,
+      if (customer.posCustomerId case final id?) 'p_pos_customer_id': id,
+      if (customer.phone case final phone?
+          when phone.trim().isNotEmpty)
+        'p_customer_phone': phone.trim(),
+    };
+    final raw = await _rpc('phone_order_customer_orders', params);
+    return [
+      for (final row in _rows(raw))
+        if (_toPastOrderSummary(row) case final summary?) summary,
+    ];
+  }
+
+  @override
+  Future<CustomerPastOrderDetail> fetchCustomerPastOrderDetail(
+    String orderId,
+  ) async {
+    final raw = await _rpc('phone_order_customer_order_detail', {
+      'p_order_id': orderId,
+    });
+    final map = _asHistoryMap(raw);
+    final summary = _toPastOrderSummary({
+      'order_id': map['order_id'],
+      'fujitsu_order_id': map['fujitsu_order_id'],
+      'pos_receipt_number': map['pos_receipt_number'],
+      'created_at': map['created_at'],
+      'total_amount': map['total_amount'],
+      'delivery_fee': map['delivery_fee'],
+      'status': map['status'],
+      'taker_name': map['taker_name'],
+      'preparer_name': map['preparer_name'],
+      'driver_name': map['driver_name'],
+      'payment_method': map['payment_method'],
+      'customer_name': map['customer_name'],
+      'customer_phone': map['customer_phone'],
+    });
+    if (summary == null) {
+      throw const PhoneOrderFailure('تعذر تحميل تفاصيل الطلب');
+    }
+    return CustomerPastOrderDetail(
+      summary: summary,
+      addressDetails: map['address_details']?.toString(),
+      lines: [
+        for (final row in _rows(map['items']))
+          if (_toHistoryLine(row) case final line?) line,
+      ],
+    );
+  }
+
+  static CustomerPastOrderSummary? _toPastOrderSummary(
+    Map<String, dynamic> row,
+  ) {
+    final id = '${row['order_id'] ?? ''}'.trim();
+    if (id.isEmpty) return null;
+    final created =
+        DateTime.tryParse('${row['created_at'] ?? ''}')?.toLocal() ??
+            DateTime.now();
+    return CustomerPastOrderSummary(
+      orderId: id,
+      createdAt: created,
+      totalAmount: _asDouble(row['total_amount']) ?? 0,
+      deliveryFee: _asDouble(row['delivery_fee']) ?? 0,
+      fujitsuOrderId: row['fujitsu_order_id']?.toString(),
+      posReceiptNumber: row['pos_receipt_number']?.toString(),
+      status: row['status']?.toString(),
+      takerName: row['taker_name']?.toString(),
+      preparerName: row['preparer_name']?.toString(),
+      driverName: row['driver_name']?.toString(),
+      paymentMethod: row['payment_method']?.toString(),
+      customerName: row['customer_name']?.toString(),
+      customerPhone: row['customer_phone']?.toString(),
+    );
+  }
+
   static Map<String, dynamic> _asHistoryMap(Object? raw) {
     if (raw is Map) return Map<String, dynamic>.from(raw);
     if (raw is String) return _tryDecodeMap(raw);

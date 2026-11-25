@@ -71,7 +71,11 @@ class PrepReceipt {
 
   final List<PrepReceiptItem> items;
 
-  int get itemCount => items.fold<int>(0, (s, i) => s + i.quantity);
+  /// Piece counts + one per weighted line (matches receipt «عدد الأصناف»).
+  int get itemCount => items.fold<int>(
+        0,
+        (s, i) => s + (i.isWeightBased ? 1 : i.quantity),
+      );
 
   /// Items total without delivery (matches sample «الإجمالي» of products).
   double get itemsTotal =>
@@ -227,25 +231,50 @@ class PrepReceiptItem {
     required this.productName,
     required this.quantity,
     required this.unitPrice,
+    required this.lineTotal,
     required this.categoryName,
     this.barcode,
     this.listPrice,
+    this.weightInGrams,
+    this.isWeightBased = false,
   });
 
   final String productName;
   final String? barcode;
+
+  /// Piece count. Weighted lines keep `1`; use [weightInGrams] / [quantityLabel].
   final int quantity;
+
+  /// Charged unit: per piece, or **per kg** for weighted lines.
   final double unitPrice;
 
-  /// Shelf / list price when different from charged [unitPrice].
+  /// Exact line value (pieces: unit × qty; weight: proportional kilo total).
+  final double lineTotal;
+
+  /// Shelf / list unit price (per piece or per kg) when known.
   final double? listPrice;
   final String categoryName;
+  final int? weightInGrams;
+  final bool isWeightBased;
 
-  double get lineTotal => unitPrice * quantity;
+  /// `500 جم`, `1 كجم`, or `5 قطعة`.
+  String get quantityLabel {
+    if (isWeightBased) {
+      final grams = weightInGrams ?? 0;
+      if (grams <= 0) return '1';
+      if (grams % 1000 == 0) {
+        final kg = grams ~/ 1000;
+        return kg == 1 ? '1 كجم' : '$kg كجم';
+      }
+      return '$grams جم';
+    }
+    return '$quantity قطعة';
+  }
 
   double get displayPrice =>
       (listPrice != null && listPrice! > 0) ? listPrice! : unitPrice;
 
+  /// Real unit discount only (never treat weight fraction as a خصم).
   bool get hasDiscount =>
       listPrice != null && listPrice! > unitPrice + 0.001;
 
@@ -261,25 +290,66 @@ class PrepReceiptItem {
           _ => 0,
         };
 
-    int qty(Object? value) => switch (value) {
+    int? asInt(Object? value) => switch (value) {
+          null => null,
           final int n => n,
           final num n => n.round(),
-          final String t => int.tryParse(t) ?? 1,
-          _ => 1,
+          final String t => int.tryParse(t.trim()),
+          _ => null,
         };
 
-    final unit = money(json['unit_price']);
+    final grams = asInt(json['weight_in_grams']);
+    final flaggedWeight = json['is_weight_based'] == true ||
+        json['is_weight_based']?.toString().toLowerCase() == 'true';
+    final isWeight = (grams != null && grams > 0) || flaggedWeight;
+    final qtyRaw = asInt(json['quantity']) ?? 1;
+    final stored = money(json['unit_price'] ?? json['price_at_time']);
     final list = money(json['list_price']);
-    final discount = money(json['discount_price']);
-    final charged = discount > 0 && discount < list ? discount : unit;
+    final hasExplicitLine = json.containsKey('line_total');
+    final explicitLine = money(json['line_total']);
 
+    if (isWeight && grams != null && grams > 0) {
+      final kg = grams / 1000.0;
+      // RPC sends unit_price=per-kg + line_total=line. Raw order_items
+      // fallbacks send price_at_time as the line total with quantity=1.
+      double unit;
+      double line;
+      if (hasExplicitLine) {
+        line = explicitLine;
+        unit = stored;
+        // Guard: if unit was still the line total, recover per-kg.
+        if (kg > 0 && (unit - line).abs() < 0.05) {
+          unit = line / kg;
+        }
+      } else {
+        line = stored;
+        unit = kg > 0 ? line / kg : stored;
+      }
+      return PrepReceiptItem(
+        productName: text('product_name') ?? 'منتج',
+        barcode: text('barcode'),
+        quantity: 1,
+        unitPrice: unit,
+        lineTotal: line,
+        listPrice: list > 0 ? list : null,
+        categoryName: text('category_name') ?? 'أصناف',
+        weightInGrams: grams,
+        isWeightBased: true,
+      );
+    }
+
+    final unit = stored;
+    final line = hasExplicitLine ? explicitLine : unit * qtyRaw;
     return PrepReceiptItem(
       productName: text('product_name') ?? 'منتج',
       barcode: text('barcode'),
-      quantity: qty(json['quantity']),
-      unitPrice: charged > 0 ? charged : unit,
+      quantity: qtyRaw < 1 ? 1 : qtyRaw,
+      unitPrice: unit,
+      lineTotal: line,
       listPrice: list > 0 ? list : null,
       categoryName: text('category_name') ?? 'أصناف',
+      weightInGrams: null,
+      isWeightBased: false,
     );
   }
 }

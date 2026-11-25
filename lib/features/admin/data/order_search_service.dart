@@ -48,12 +48,17 @@ typedef OrderSearchFn = Future<List<Map<String, dynamic>>> Function(
   OrderSearchQuery query,
 );
 
-/// Whether [order]'s number («#a1b2c3», the start of its id) contains
+/// Whether [order]'s number («#a1b2c3», Fujitsu id, or POS receipt) contains
 /// [needle].
 bool orderMatchesNumber(Map<String, dynamic> order, String needle) {
   final text = needle.trim().replaceAll('#', '').toLowerCase();
   if (text.isEmpty) return true;
-  return '${order['id']}'.toLowerCase().contains(text);
+  final id = '${order['id']}'.toLowerCase();
+  final fujitsu = '${order['fujitsu_order_id'] ?? ''}'.toLowerCase();
+  final receipt = '${order['pos_receipt_number'] ?? ''}'.toLowerCase();
+  return id.contains(text) ||
+      fujitsu.contains(text) ||
+      receipt.contains(text);
 }
 
 /// The values `orders.status` may hold for [status]: the app and warehouse
@@ -88,16 +93,29 @@ Future<List<Map<String, dynamic>>> searchOrdersInSupabase(
   }
   if (phone.isNotEmpty) {
     // Phone orders store the number on the order; app orders only have it
-    // on the customer's profile.
+    // on the customer's profile. Digit needles also match Fujitsu customer nos.
     final profiles = await client
         .from('profiles')
         .select('id')
         .ilike('phone', '%$phone%')
         .limit(200);
     final ids = [for (final row in profiles) '${row['id']}'];
+    final posCustomers = await client
+        .from('pos_customers')
+        .select('id')
+        .or(
+          'fujitsu_customer_no.eq.$phone,'
+          'phone.ilike.%$phone%,'
+          'phone2.ilike.%$phone%,'
+          'phone3.ilike.%$phone%',
+        )
+        .limit(200);
+    final posIds = [for (final row in posCustomers) '${row['id']}'];
     request = request.or([
       'customer_phone.ilike.%$phone%',
+      'fujitsu_customer_no.eq.$phone',
       if (ids.isNotEmpty) 'user_id.in.(${ids.join(',')})',
+      if (posIds.isNotEmpty) 'pos_customer_id.in.(${posIds.join(',')})',
     ].join(','));
   }
 
@@ -128,6 +146,16 @@ Future<List<Map<String, dynamic>>> searchOrdersInSupabase(
   }
   if ((query.status ?? '').isNotEmpty) {
     request = request.inFilter('status', orderStatusSpellings(query.status!));
+  }
+
+  // Fujitsu / POS receipt numbers are searchable server-side (digits).
+  final orderNo = query.orderNumber.trim().replaceAll('#', '');
+  final digitsOnly = orderNo.replaceAll(RegExp(r'\D'), '');
+  if (digitsOnly.length >= 6 && RegExp(r'^\d+$').hasMatch(digitsOnly)) {
+    request = request.or(
+      'fujitsu_order_id.ilike.%$digitsOnly%,'
+      'pos_receipt_number.ilike.%$digitsOnly%',
+    );
   }
 
   final rows = await request.order('created_at', ascending: false).limit(limit);

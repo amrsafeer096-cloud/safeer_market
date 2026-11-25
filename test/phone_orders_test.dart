@@ -250,6 +250,19 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     PhoneOrderCustomer customer,
   ) async =>
       history;
+
+  @override
+  Future<List<CustomerPastOrderSummary>> fetchCustomerPastOrders(
+    PhoneOrderCustomer customer,
+  ) async =>
+      const [];
+
+  @override
+  Future<CustomerPastOrderDetail> fetchCustomerPastOrderDetail(
+    String orderId,
+  ) async {
+    throw UnimplementedError();
+  }
 }
 
 Future<void> _confirmCustomerDetails(WidgetTester tester) async {

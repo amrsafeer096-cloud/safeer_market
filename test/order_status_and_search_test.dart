@@ -159,6 +159,13 @@ void main() {
       expect(orderMatchesNumber(order, 'B2C3'), isTrue);
       expect(orderMatchesNumber(order, 'zzz'), isFalse);
       expect(orderMatchesNumber(order, ''), isTrue);
+      expect(
+        orderMatchesNumber(
+          {'id': 'x', 'fujitsu_order_id': '261126000001'},
+          '261126000001',
+        ),
+        isTrue,
+      );
     });
 
     test('status is searched in both spellings', () {

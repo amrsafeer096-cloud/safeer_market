@@ -42,13 +42,13 @@ Future<void> _pumpDashboard(WidgetTester tester,
 }
 
 void main() {
-  testWidgets('تلقي الطلبات: wide split of products | cart', (tester) async {
+  testWidgets('تلقي الطلبات: wide 3-column RTL layout', (tester) async {
     await _pumpDashboard(tester, width: 1400);
 
-    expect(find.byKey(const Key('admin-receive-orders')), findsOneWidget);
     expect(find.byType(PhoneOrderColumn), findsOneWidget);
-    expect(find.byKey(const Key('admin-receive-orders-handle-0')),
-        findsOneWidget);
+    expect(find.text('طلبات اليوم'), findsOneWidget);
+    expect(find.text('الطلبات السابقة'), findsOneWidget);
+    expect(find.text('أصناف العميل'), findsOneWidget);
     expect(find.text('حالة الطلب'), findsOneWidget);
     expect(find.text('تلقي الطلبات'), findsWidgets);
   });
@@ -68,19 +68,19 @@ void main() {
     expect(find.text('متأخر'), findsOneWidget);
   });
 
-  testWidgets('☰ hides and shows the sidebar, giving the columns its width', (
+  testWidgets('☰ hides and shows the sidebar, giving content its width', (
     tester,
   ) async {
     await _pumpDashboard(tester, width: 1400);
     final sidebar = find.byKey(const Key('admin-sidebar'));
-    final columns = find.byType(ResizableColumns);
+    final content = find.byType(PhoneOrderColumn);
     expect(tester.getSize(sidebar).width, 220);
-    final before = tester.getSize(columns).width;
+    final before = tester.getSize(content).width;
 
     await tester.tap(find.byKey(const Key('admin-menu-toggle')));
     await tester.pumpAndSettle();
     expect(tester.getSize(sidebar).width, 0);
-    expect(tester.getSize(columns).width, before + 220);
+    expect(tester.getSize(content).width, before + 220);
 
     await tester.tap(find.byKey(const Key('admin-menu-toggle')));
     await tester.pumpAndSettle();

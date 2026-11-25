@@ -62,6 +62,7 @@ TERMINAL_NO = 0
 ORDER_VERSION = 0
 APP_VERSION = "1.0.0.56"
 POLL_SECONDS = 5
+PICKER_SYNC_INTERVAL_SECONDS = 300
 DEFAULT_PICKER_ID = 10
 DEFAULT_PICKER_NAME = "محضر"
 STAFF_USER_ID = 7
@@ -153,6 +154,31 @@ def item_count_of(qty: float) -> int:
     except (TypeError, ValueError):
         pass
     return 1
+
+
+def line_qty_and_unit_price(item: dict[str, Any]) -> tuple[float, float]:
+    """Return (Qty, charged unit price).
+
+    Weight lines store price_at_time as the *line total* with quantity=1 and
+    weight_in_grams set → Qty is kg fraction, unit is per-kg charged.
+    Piece lines store unit price × quantity.
+    """
+    grams_raw = item.get("weight_in_grams")
+    try:
+        grams = int(grams_raw) if grams_raw is not None else 0
+    except (TypeError, ValueError):
+        grams = 0
+    stored = float(item.get("price_at_time") or 0)
+    if grams > 0:
+        qty = grams / 1000.0
+        if qty <= 0:
+            qty = 1.0
+        unit = stored / qty if qty else stored
+        return qty, unit
+    qty = float(item.get("quantity") or 1)
+    if qty <= 0:
+        qty = 1.0
+    return qty, stored
 
 
 def unit_discount_value(
@@ -650,6 +676,166 @@ def match_picker(cursor, preparer_name: str) -> tuple[int, str]:
     return DEFAULT_PICKER_ID, DEFAULT_PICKER_NAME
 
 
+def _staff_picker_no(preparer_name: str) -> Optional[int]:
+    """Exact PickerNo stored on Supabase staff after hd_pickers sync."""
+    name = (preparer_name or "").strip()
+    if not name:
+        return None
+    try:
+        res = (
+            supabase.table("staff")
+            .select("fujitsu_picker_no, name")
+            .eq("role", "preparer")
+            .eq("name", name)
+            .not_.is_("fujitsu_picker_no", "null")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            # Trim / soft match on name (Fujitsu names often have trailing spaces).
+            res = (
+                supabase.table("staff")
+                .select("fujitsu_picker_no, name")
+                .eq("role", "preparer")
+                .not_.is_("fujitsu_picker_no", "null")
+                .limit(200)
+                .execute()
+            )
+            needle = name.casefold()
+            rows = [
+                r
+                for r in (res.data or [])
+                if str(r.get("name") or "").strip().casefold() == needle
+            ]
+        if not rows:
+            return None
+        raw = rows[0].get("fujitsu_picker_no")
+        return int(raw) if raw is not None else None
+    except Exception as exc:
+        log(f"⚠️ staff fujitsu_picker_no lookup failed: {exc}")
+        return None
+
+
+def resolve_picker(cursor, preparer_name: str) -> tuple[int, str]:
+    """Prefer synced staff.fujitsu_picker_no, else match hd_pickers by name."""
+    name = (preparer_name or "").strip() or DEFAULT_PICKER_NAME
+    picker_no = _staff_picker_no(name)
+    if picker_no is not None:
+        cursor.execute(
+            """
+            SELECT TOP 1 picker_id, picker_arabic_name
+            FROM hd_pickers
+            WHERE picker_id = ?
+            """,
+            (picker_no,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return int(row[0]), truncate(
+                str(row[1] or name).strip(), 150, DEFAULT_PICKER_NAME
+            )
+        return picker_no, truncate(name, 150, DEFAULT_PICKER_NAME)
+    return match_picker(cursor, name)
+
+
+def sync_fujitsu_pickers(cursor) -> int:
+    """Upsert active/inactive hd_pickers into public.staff (role=preparer).
+
+    Manual dashboard preparers (no fujitsu_picker_no) are kept. Matching names
+    without a Fujitsu id get fujitsu_picker_no attached when possible.
+    """
+    cursor.execute(
+        """
+        SELECT
+            picker_id,
+            LTRIM(RTRIM(picker_arabic_name)) AS picker_name,
+            LTRIM(RTRIM(ISNULL(Phone, N''))) AS phone,
+            CAST(ISNULL(active, 0) AS INT) AS is_active
+        FROM hd_pickers
+        WHERE picker_arabic_name IS NOT NULL
+          AND LTRIM(RTRIM(picker_arabic_name)) <> N''
+        """
+    )
+    rows = cursor.fetchall() or []
+    if not rows:
+        return 0
+
+    changed = 0
+    for picker_id, picker_name, phone, is_active in rows:
+        name = (picker_name or "").strip()
+        if not name:
+            continue
+        pid = int(picker_id)
+        active = int(is_active or 0) == 1
+        phone_val = (phone or "").strip()
+        # Keep only plausible Egyptian mobiles; junk ('0', '010') → null.
+        if not re.fullmatch(r"01[0125]\d{8}", phone_val):
+            phone_val = None
+
+        try:
+            by_id = (
+                supabase.table("staff")
+                .select("id, name, phone, is_active")
+                .eq("fujitsu_picker_no", pid)
+                .limit(1)
+                .execute()
+            )
+            existing = (by_id.data or [None])[0]
+            if existing:
+                patch: dict[str, Any] = {}
+                if str(existing.get("name") or "").strip() != name:
+                    patch["name"] = name
+                if phone_val and str(existing.get("phone") or "").strip() != phone_val:
+                    patch["phone"] = phone_val
+                if bool(existing.get("is_active", True)) != active:
+                    patch["is_active"] = active
+                if patch:
+                    supabase.table("staff").update(patch).eq(
+                        "id", existing["id"]
+                    ).execute()
+                    changed += 1
+                continue
+
+            # Attach Fujitsu id to a manually added preparer with the same name.
+            by_name = (
+                supabase.table("staff")
+                .select("id")
+                .eq("role", "preparer")
+                .eq("name", name)
+                .is_("fujitsu_picker_no", "null")
+                .limit(1)
+                .execute()
+            )
+            named = (by_name.data or [None])[0]
+            if named:
+                patch = {"fujitsu_picker_no": pid, "is_active": active}
+                if phone_val:
+                    patch["phone"] = phone_val
+                supabase.table("staff").update(patch).eq(
+                    "id", named["id"]
+                ).execute()
+                changed += 1
+                continue
+
+            if not active:
+                continue
+
+            payload: dict[str, Any] = {
+                "name": name,
+                "role": "preparer",
+                "fujitsu_picker_no": pid,
+                "is_active": True,
+            }
+            if phone_val:
+                payload["phone"] = phone_val
+            supabase.table("staff").insert(payload).execute()
+            changed += 1
+        except Exception as exc:
+            log(f"⚠️ picker upsert {pid}/{name} failed: {exc}")
+    return changed
+
+
 def lookup_item(cursor, barcode: str) -> Optional[dict[str, Any]]:
     """Prefer v_hd_items (Trusty item cache) then fall back to sys_item_units."""
     code = (barcode or "").strip()
@@ -1064,11 +1250,7 @@ def insert_hd_order_item(
     product = product_of(item)
     barcode = truncate(str(product.get("barcode") or ""), 20)
     item_name = truncate(str(product.get("name") or "صنف"), 150, "صنف")
-    qty = float(item.get("quantity") or 1)
-    if qty <= 0:
-        qty = 1.0
-
-    charged_unit = float(item.get("price_at_time") or 0)
+    qty, charged_unit = line_qty_and_unit_price(item)
     list_price = float(product.get("price") or charged_unit)
 
     fj = lookup_item(cursor, barcode) if barcode else None
@@ -1256,7 +1438,7 @@ def sync_one_order(order: dict[str, Any]) -> None:
         fujitsu_order_id_str = f"{order_day}{str(seq).zfill(6)}"
         fujitsu_order_id = int(fujitsu_order_id_str)
 
-        picker_id, picker_name = match_picker(cursor, preparer)
+        picker_id, picker_name = resolve_picker(cursor, preparer)
         created_at = order.get("created_at")
         try:
             order_date = (
@@ -1286,8 +1468,7 @@ def sync_one_order(order: dict[str, Any]) -> None:
             disc = discounts.get(bc)
             # Approximate merchandise with the same insert math (lookup retail).
             fj = lookup_item(cursor, bc) if bc else None
-            qty = float(item.get("quantity") or 1) or 1.0
-            charged = float(item.get("price_at_time") or 0)
+            qty, charged = line_qty_and_unit_price(item)
             list_price = float(product.get("price") or charged)
             retail = float((fj or {}).get("retail_price") or list_price or charged)
             if disc:
@@ -1438,7 +1619,7 @@ def _rebuild_fujitsu_items(
             )
         except Exception:
             order_date = datetime.now()
-        picker_id, picker_name = match_picker(cursor, preparer_name)
+        picker_id, picker_name = resolve_picker(cursor, preparer_name)
 
         cursor.execute(
             "DELETE FROM hd_order_items WHERE OrderId = ?",
@@ -1845,8 +2026,24 @@ def main() -> None:
         "🚀 sync_orders_to_fujitsu started (Trusty parity loop every "
         f"{POLL_SECONDS}s) → {SQL_SERVER}/{SQL_DATABASE}"
     )
+    last_picker_sync = 0.0
     while True:
         try:
+            now_ts = time.time()
+            if now_ts - last_picker_sync >= PICKER_SYNC_INTERVAL_SECONDS:
+                try:
+                    conn = connect_sql()
+                    try:
+                        cur = conn.cursor()
+                        n = sync_fujitsu_pickers(cur)
+                        if n:
+                            log(f"👷 synced/updated {n} Fujitsu preparer(s)")
+                    finally:
+                        conn.close()
+                except Exception as exc:
+                    log(f"⚠️ hd_pickers sync failed: {exc}")
+                last_picker_sync = now_ts
+
             pending = fetch_pending_orders()
             if pending:
                 log(f"Found {len(pending)} order(s) awaiting Fujitsu sync")

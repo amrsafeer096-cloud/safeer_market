@@ -113,7 +113,7 @@ abstract final class PrepReceiptPdf {
                         textAlign: pw.TextAlign.center,
                         style: pw.TextStyle(font: bold, fontSize: 8))),
                 pw.SizedBox(
-                    width: 28,
+                    width: 42,
                     child: pw.Text('الكمية',
                         textAlign: pw.TextAlign.center,
                         style: pw.TextStyle(font: bold, fontSize: 8))),
@@ -165,10 +165,10 @@ abstract final class PrepReceiptPdf {
                               style: pw.TextStyle(font: font, fontSize: 8)),
                         ),
                         pw.SizedBox(
-                          width: 28,
-                          child: pw.Text('${item.quantity}',
+                          width: 42,
+                          child: pw.Text(item.quantityLabel,
                               textAlign: pw.TextAlign.center,
-                              style: pw.TextStyle(font: font, fontSize: 8)),
+                              style: pw.TextStyle(font: font, fontSize: 7.5)),
                         ),
                         pw.SizedBox(
                           width: 40,

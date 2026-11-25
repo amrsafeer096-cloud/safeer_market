@@ -106,6 +106,14 @@ abstract class PhoneOrdersRepository {
   Future<CustomerPurchaseHistory> fetchCustomerHistory(
     PhoneOrderCustomer customer,
   );
+
+  /// Past orders for the left «الطلبات السابقة» tab.
+  Future<List<CustomerPastOrderSummary>> fetchCustomerPastOrders(
+    PhoneOrderCustomer customer,
+  );
+
+  /// One past order + its lines (repeat-order modal).
+  Future<CustomerPastOrderDetail> fetchCustomerPastOrderDetail(String orderId);
 }
 
 class PhoneOrderFailure implements Exception {

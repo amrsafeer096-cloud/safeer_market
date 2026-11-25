@@ -324,6 +324,62 @@ class CustomerPurchaseHistory {
   }
 }
 
+/// One past order row for the left «الطلبات السابقة» tab.
+class CustomerPastOrderSummary {
+  const CustomerPastOrderSummary({
+    required this.orderId,
+    required this.createdAt,
+    required this.totalAmount,
+    this.fujitsuOrderId,
+    this.posReceiptNumber,
+    this.status,
+    this.takerName,
+    this.preparerName,
+    this.driverName,
+    this.paymentMethod,
+    this.deliveryFee = 0,
+    this.customerName,
+    this.customerPhone,
+  });
+
+  final String orderId;
+  final DateTime createdAt;
+  final double totalAmount;
+  final String? fujitsuOrderId;
+  final String? posReceiptNumber;
+  final String? status;
+  final String? takerName;
+  final String? preparerName;
+  final String? driverName;
+  final String? paymentMethod;
+  final double deliveryFee;
+  final String? customerName;
+  final String? customerPhone;
+
+  /// Prefer Fujitsu / POS receipt number, else a short internal id.
+  String get displayNumber {
+    final fj = fujitsuOrderId?.trim();
+    if (fj != null && fj.isNotEmpty) return fj;
+    final pos = posReceiptNumber?.trim();
+    if (pos != null && pos.isNotEmpty) return pos;
+    final id = orderId.replaceAll('-', '');
+    return id.length <= 8 ? id : id.substring(0, 8);
+  }
+}
+
+/// Full past-order detail (header + lines) for the repeat-order modal.
+class CustomerPastOrderDetail {
+  const CustomerPastOrderDetail({
+    required this.summary,
+    this.lines = const [],
+    this.addressDetails,
+  });
+
+  final CustomerPastOrderSummary summary;
+  final List<PhoneOrderLine> lines;
+  final String? addressDetails;
+}
+
 class PhoneOrderState {
   const PhoneOrderState({
     this.customer,

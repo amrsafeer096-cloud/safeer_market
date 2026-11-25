@@ -391,7 +391,8 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
                             TextStyle(fontSize: 12, color: palette.muted)),
                   if (item.hasDiscount)
                     Text(
-                      'السعر: ${AppCurrency.of(item.displayPrice)}  ← بعد الخصم: ${AppCurrency.of(item.unitPrice)}',
+                      'السعر: ${AppCurrency.of(item.displayPrice)}  ← بعد الخصم: ${AppCurrency.of(item.unitPrice)}'
+                      '${item.isWeightBased ? ' / كجم' : ''}',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -400,11 +401,12 @@ class _PrepReceiptSheetState extends ConsumerState<_PrepReceiptSheet> {
                     )
                   else
                     Text(
-                      'السعر: ${AppCurrency.of(item.unitPrice)}',
+                      'السعر: ${AppCurrency.of(item.unitPrice)}'
+                      '${item.isWeightBased ? ' / كجم' : ''}',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                   Text(
-                    'الكمية: ${item.quantity}  •  القيمة: ${AppCurrency.of(item.lineTotal)}',
+                    'الكمية: ${item.quantityLabel}  •  القيمة: ${AppCurrency.of(item.lineTotal)}',
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ],

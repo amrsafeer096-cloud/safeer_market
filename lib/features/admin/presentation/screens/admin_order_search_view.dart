@@ -242,7 +242,10 @@ class _AdminOrderSearchViewState extends ConsumerState<AdminOrderSearchView> {
             textDirection: TextDirection.ltr,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _search(),
-            decoration: decoration('رقم العميل', icon: Icons.phone),
+            decoration: decoration(
+              'رقم العميل / فوجيتسو',
+              icon: Icons.phone,
+            ),
           )),
           dropdown<OrderSearchSource>(
             key: const Key('search-source'),
@@ -326,7 +329,10 @@ class _AdminOrderSearchViewState extends ConsumerState<AdminOrderSearchView> {
             textDirection: TextDirection.ltr,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _search(),
-            decoration: decoration('رقم الطلب', icon: Icons.tag),
+            decoration: decoration(
+              'رقم الطلب / فوجيتسو',
+              icon: Icons.tag,
+            ),
           )),
           SizedBox(
             height: 44,

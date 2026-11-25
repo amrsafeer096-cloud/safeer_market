@@ -1909,21 +1909,25 @@ class _OrderDetailsView extends ConsumerWidget {
         content: FutureBuilder<List<Map<String, dynamic>>>(
             future: Supabase.instance.client
                 .from('staff')
-                .select('name')
-                .eq('role', 'preparer'),
+                .select('name, is_active')
+                .eq('role', 'preparer')
+                .order('name'),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const SizedBox(
                     height: 100,
                     child: Center(child: CircularProgressIndicator()));
               }
-              final preparers = snapshot.data ?? [];
+              final preparers = [
+                for (final p in snapshot.data ?? const <Map<String, dynamic>>[])
+                  if (p['is_active'] != false) p,
+              ];
               if (preparers.isEmpty) return Text(l10n.adminNoPreparers);
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: preparers
                     .map((p) => ListTile(
-                          title: Text(p['name'],
+                          title: Text('${p['name']}',
                               style:
                                   const TextStyle(fontWeight: FontWeight.bold)),
                           trailing:
