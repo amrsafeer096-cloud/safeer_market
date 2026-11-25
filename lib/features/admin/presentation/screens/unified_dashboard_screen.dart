@@ -1537,16 +1537,28 @@ class _OrderDetailsView extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Receipt only after a preparer is chosen (admin + preparer).
+        // Preparers must check off every item before printing / scanning.
         if (!isDriver && !isStaffDriver) ...[
           if (hasPreparer)
-            _ActionCard(
-              key: const Key('action-print-prep-receipt'),
-              title: 'طباعة إيصال التحضير',
-              desc: 'QR للكاشير • $preparerName',
-              icon: Icons.receipt_long_rounded,
-              color: const Color(0xFF1565C0),
-              onTap: () => showPrepReceiptSheet(context, orderId: orderId),
-            )
+            Builder(builder: (context) {
+              final checkedIds = ref.watch(orderPrepChecklistProvider);
+              final itemsAsync = ref.watch(adminOrderItemsProvider(orderId));
+              final totalItems = itemsAsync.valueOrNull?.length ?? 0;
+              final allItemsPrepared =
+                  prepDone || (totalItems > 0 && checkedIds.length == totalItems);
+              final lockPrint = isStaffPreparer && !allItemsPrepared;
+              return _ActionCard(
+                key: const Key('action-print-prep-receipt'),
+                title: 'طباعة إيصال التحضير',
+                desc: lockPrint
+                    ? 'أكمل تجهيز جميع الأصناف أولاً'
+                    : 'QR للكاشير • $preparerName',
+                icon: Icons.receipt_long_rounded,
+                color: const Color(0xFF1565C0),
+                enabled: !lockPrint,
+                onTap: () => showPrepReceiptSheet(context, orderId: orderId),
+              );
+            })
           else
             _StatusBanner(
               key: const Key('prep-receipt-need-preparer'),
@@ -2498,39 +2510,49 @@ class _ActionCard extends StatelessWidget {
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
+  final bool enabled;
   const _ActionCard(
       {super.key,
       required this.title,
       required this.desc,
       required this.icon,
       required this.color,
-      required this.onTap});
+      required this.onTap,
+      this.enabled = true});
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-            borderRadius: BorderRadius.circular(16)),
-        child: Row(children: [
-          Icon(icon, color: color, size: 40),
-          const SizedBox(width: 16),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(title,
-                    style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 18,
-                        color: color)),
-                Text(desc, style: TextStyle(color: context.palette.muted))
-              ]))
-        ]),
+    final effective = enabled ? color : Colors.blueGrey;
+    return Opacity(
+      opacity: enabled ? 1 : 0.55,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+              color: effective.withValues(alpha: 0.1),
+              border: Border.all(color: effective.withValues(alpha: 0.3)),
+              borderRadius: BorderRadius.circular(16)),
+          child: Row(children: [
+            Icon(
+              enabled ? icon : Icons.lock_rounded,
+              color: effective,
+              size: 40,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                          color: effective)),
+                  Text(desc, style: TextStyle(color: context.palette.muted))
+                ]))
+          ]),
+        ),
       ),
     );
   }

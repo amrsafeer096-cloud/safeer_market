@@ -88,10 +88,12 @@ class ProductBarcodeCopyRow extends StatelessWidget {
     super.key,
     required this.productId,
     required this.barcode,
+    this.keyPrefix = 'staff-product',
   });
 
   final String productId;
   final String barcode;
+  final String keyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -99,7 +101,7 @@ class ProductBarcodeCopyRow extends StatelessWidget {
     return Tooltip(
       message: 'نسخ الباركود',
       child: InkWell(
-        key: Key('staff-product-barcode-$productId'),
+        key: Key('$keyPrefix-barcode-$productId'),
         borderRadius: BorderRadius.circular(6),
         onTap: () async {
           final messenger = ScaffoldMessenger.of(context);
@@ -150,8 +152,10 @@ class StaffProductSearchTile extends StatelessWidget {
     required this.onAdd,
     required this.onRemove,
     this.onOpen,
+    this.openOnDoubleTap = false,
     this.inCart = false,
     this.showZeroStockInRed = false,
+    this.keyPrefix = 'staff-product',
   });
 
   final Product product;
@@ -159,10 +163,16 @@ class StaffProductSearchTile extends StatelessWidget {
   final VoidCallback onAdd;
   final VoidCallback onRemove;
   final VoidCallback? onOpen;
+
+  /// When true (تلقي الطلبات), open details on double-tap instead of tap.
+  final bool openOnDoubleTap;
   final bool inCart;
 
   /// When filter is «كل الأصناف», force red styling for `stock <= 0`.
   final bool showZeroStockInRed;
+
+  /// Widget key namespace: `phone-order` for تلقي الطلبات tests/UI.
+  final String keyPrefix;
 
   static const _narrowWidth = 480.0;
 
@@ -209,7 +219,11 @@ class StaffProductSearchTile extends StatelessWidget {
         ProductOfferBadge(product: product),
         if (product.barcode case final barcode?
             when barcode.trim().isNotEmpty)
-          ProductBarcodeCopyRow(productId: product.id, barcode: barcode),
+          ProductBarcodeCopyRow(
+            productId: product.id,
+            barcode: barcode,
+            keyPrefix: keyPrefix,
+          ),
       ],
     );
 
@@ -217,7 +231,7 @@ class StaffProductSearchTile extends StatelessWidget {
       padding: const EdgeInsetsDirectional.only(start: 6, end: 2),
       child: Text(
         'المخزون: $stockQty',
-        key: Key('staff-product-stock-${product.id}'),
+        key: Key('$keyPrefix-stock-${product.id}'),
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w800,
@@ -230,7 +244,7 @@ class StaffProductSearchTile extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          key: Key('staff-product-dec-${product.id}'),
+          key: Key('$keyPrefix-dec-${product.id}'),
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints.tightFor(width: 34, height: 34),
@@ -253,7 +267,7 @@ class StaffProductSearchTile extends StatelessWidget {
           ),
         ),
         IconButton(
-          key: Key('staff-product-add-${product.id}'),
+          key: Key('$keyPrefix-add-${product.id}'),
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints.tightFor(width: 34, height: 34),
@@ -263,11 +277,17 @@ class StaffProductSearchTile extends StatelessWidget {
       ],
     );
 
+    // phone-order uses «product» in the row key for existing widget tests.
+    final rowKey = keyPrefix == 'phone-order'
+        ? 'phone-order-product-${product.id}'
+        : '$keyPrefix-row-${product.id}';
+
     return Material(
       color: palette.card,
       child: InkWell(
-        key: Key('staff-product-row-${product.id}'),
-        onTap: onOpen,
+        key: Key(rowKey),
+        onTap: openOnDoubleTap ? null : onOpen,
+        onDoubleTap: openOnDoubleTap ? onOpen : null,
         child: Padding(
           padding: const EdgeInsetsDirectional.fromSTEB(8, 8, 4, 8),
           child: LayoutBuilder(

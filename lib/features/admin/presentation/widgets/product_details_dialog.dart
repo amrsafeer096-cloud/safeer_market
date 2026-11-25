@@ -50,13 +50,27 @@ class ProductDetailsDialog extends StatefulWidget {
 }
 
 class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
-  final _quantity = TextEditingController();
+  final _quantity = TextEditingController(text: '1');
   final _quantityFocus = FocusNode();
   var _busy = false;
   String? _error;
 
   Product get _product => widget.product;
   String? get _imageUrl => _product.hasValidImageUrl ? _product.imageUrl : null;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill «1» fully selected so Enter adds 1, or typing replaces it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _product.isWeightBased) return;
+      _quantity.selection = const TextSelection(
+        baseOffset: 0,
+        extentOffset: 1,
+      );
+      _quantityFocus.requestFocus();
+    });
+  }
 
   @override
   void dispose() {

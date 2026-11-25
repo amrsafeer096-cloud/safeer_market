@@ -378,11 +378,9 @@ class PhoneOrderState {
 
   bool get hasReceipt => receipt != null;
 
+  /// Receipt for InstaPay is attached in the confirm dialog, not the cart body.
   bool get canSubmit =>
-      customer != null &&
-      lines.isNotEmpty &&
-      !submitting &&
-      (!paymentMethod.needsReceipt || hasReceipt);
+      customer != null && lines.isNotEmpty && !submitting;
 
   /// Every open order — the parked ones and this one — by creation.
   List<PhoneOrderState> get openOrders =>

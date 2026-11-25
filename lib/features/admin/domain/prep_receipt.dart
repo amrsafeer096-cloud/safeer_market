@@ -18,6 +18,7 @@ class PrepReceipt {
     this.fujitsuSyncError,
     this.takerName,
     this.preparerName,
+    this.driverName,
     this.customerName,
     this.customerPhone,
     this.customerPhone2,
@@ -37,6 +38,7 @@ class PrepReceipt {
   final DateTime createdAt;
   final String? takerName;
   final String? preparerName;
+  final String? driverName;
   final String? customerName;
   final String? customerPhone;
   final String? customerPhone2;
@@ -156,6 +158,7 @@ class PrepReceipt {
       fujitsuSyncError: text('fujitsu_sync_error'),
       takerName: text('taker_name'),
       preparerName: text('preparer_name'),
+      driverName: text('driver_name'),
       customerName: text('customer_name'),
       customerPhone: text('customer_phone'),
       customerPhone2: text('customer_phone2'),

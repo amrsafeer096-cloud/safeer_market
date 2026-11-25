@@ -267,6 +267,23 @@ Future<void> _confirmAndPlaceOrder(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Stage via `+`, then Enter → review → confirm into the cart.
+Future<void> _stageAddAndCommit(
+  WidgetTester tester,
+  Key addKey, {
+  int times = 1,
+}) async {
+  for (var i = 0; i < times; i++) {
+    await tester.tap(find.byKey(addKey));
+    await tester.pump();
+  }
+  await tester.testTextInput.receiveAction(TextInputAction.search);
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('phone-order-staged-review')), findsOneWidget);
+  await tester.tap(find.byKey(const Key('staged-review-confirm')));
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pickCustomer(
   WidgetTester tester,
   PhoneOrderCustomer customer,
@@ -457,7 +474,8 @@ void main() {
       expect(read().paymentMethod, PhoneOrderPayment.cash);
     });
 
-    test('InstaPay needs the receipt; leaving InstaPay drops it', () {
+    test('InstaPay receipt clears when leaving InstaPay; canSubmit stays open',
+        () {
       final c = container();
       final orders = c.read(phoneOrderControllerProvider.notifier)
         ..selectCustomer(_mona)
@@ -466,8 +484,9 @@ void main() {
           PhoneOrderPayment.cash);
       expect(c.read(phoneOrderControllerProvider).canSubmit, isTrue);
 
+      // Receipt is attached in the confirm dialog — cart can still submit.
       orders.setPayment(PhoneOrderPayment.instaPay);
-      expect(c.read(phoneOrderControllerProvider).canSubmit, isFalse);
+      expect(c.read(phoneOrderControllerProvider).canSubmit, isTrue);
 
       orders.setReceipt(PaymentReceiptImage(
         bytes: Uint8List.fromList([1, 2, 3]),
@@ -817,8 +836,8 @@ void main() {
           find.byKey(const Key('phone-order-locked-customer')), findsOneWidget);
 
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'));
       await tester.tap(find.byKey(const Key('phone-order-cart-toggle')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('phone-order-inc-p-milk')));
@@ -1095,10 +1114,9 @@ void main() {
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
       await _pickCustomer(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'),
+          times: 2);
       await tester.tap(find.byKey(const Key('phone-order-cart-toggle')));
       await tester.pumpAndSettle();
 
@@ -1208,8 +1226,8 @@ void main() {
       await _type(tester, const Key('phone-order-customer-search'), '0101234');
       await _pickCustomer(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'));
 
       await _confirmAndPlaceOrder(tester);
       await tester.tap(find.byKey(const Key('phone-order-cart-toggle')));
@@ -1232,14 +1250,20 @@ void main() {
     String qty(WidgetTester tester, String id) =>
         tester.widget<Text>(find.byKey(Key('phone-order-qty-$id'))).data!;
 
-    testWidgets('only + adds one; the row opens details with bulk add', (
+    testWidgets('double-tap opens details; + stages until Enter confirms', (
       tester,
     ) async {
       await _pumpColumn(tester);
       await pick(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
 
-      // Tapping the row opens the dialog and adds nothing.
+      // Single tap does not open details.
+      await tester.tap(find.byKey(const Key('phone-order-product-p-milk')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('product-details-dialog')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('phone-order-product-p-milk')));
+      await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byKey(const Key('phone-order-product-p-milk')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('product-details-dialog')), findsOneWidget);
@@ -1273,57 +1297,60 @@ void main() {
       await openCart(tester);
       expect(qty(tester, 'p-milk'), '3');
 
-      // The button adds 2 more on top.
+      // Double-tap again to add 2 more.
+      await _type(tester, const Key('phone-order-product-search'), 'لبن');
+      await tester.tap(find.byKey(const Key('phone-order-product-p-milk')));
+      await tester.pump(const Duration(milliseconds: 50));
       await tester.tap(find.byKey(const Key('phone-order-product-p-milk')));
       await tester.pumpAndSettle();
       await tester.enterText(
           find.byKey(const Key('product-dialog-quantity')), '2');
       await tester.tap(find.byKey(const Key('product-dialog-add')));
       await tester.pumpAndSettle();
+      await openCart(tester);
       expect(qty(tester, 'p-milk'), '5');
 
-      // + is one at a time and never opens the dialog; close just closes.
+      // + stages only; cart stays at 5 until Enter confirms.
+      await _type(tester, const Key('phone-order-product-search'), 'لبن');
       await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('product-details-dialog')), findsNothing);
-      expect(qty(tester, 'p-milk'), '6');
-      await tester.tap(find.byKey(const Key('phone-order-product-p-milk')));
+      expect(qty(tester, 'p-milk'), '5');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('product-dialog-close')));
+      expect(find.byKey(const Key('phone-order-staged-review')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('staged-review-confirm')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('product-details-dialog')), findsNothing);
+      await openCart(tester);
       expect(qty(tester, 'p-milk'), '6');
     });
 
-    testWidgets('payment: cash by default, visa only flags the order', (
+    testWidgets('payment lives in confirm dialog; visa flags the order', (
       tester,
     ) async {
       final (:repository, placedIds: _) = await _pumpColumn(tester);
       await pick(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'));
       await openCart(tester);
 
-      expect(
-        tester
-            .widget<ChoiceChip>(
-                find.byKey(const Key('phone-order-payment-cash')))
-            .selected,
-        isTrue,
-      );
+      expect(find.byKey(const Key('phone-order-payment-cash')), findsNothing);
       expect(find.byKey(const Key('phone-order-receipt-pick')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('phone-order-payment-visa_on_delivery')));
+      await tester.tap(find.byKey(const Key('phone-order-confirm')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('payment-confirm-dialog')), findsOneWidget);
+      await tester.tap(
+          find.byKey(const Key('payment-confirm-visa_on_delivery')));
       await tester.pump();
-      expect(find.byKey(const Key('phone-order-receipt-pick')), findsNothing);
-
-      await _confirmAndPlaceOrder(tester);
+      await tester.tap(find.byKey(const Key('payment-confirm-submit')));
+      await tester.pumpAndSettle();
       expect(repository.payments.single, PhoneOrderPayment.visaOnDelivery);
       expect(repository.receipts.single, isNull);
     });
 
-    testWidgets('InstaPay needs the transfer image, shown as a thumbnail', (
+    testWidgets('InstaPay asks for receipt after confirm payment choice', (
       tester,
     ) async {
       final png = base64Decode(
@@ -1344,29 +1371,19 @@ void main() {
       );
       await pick(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'));
       await openCart(tester);
 
-      await tester.tap(find.byKey(const Key('phone-order-payment-instapay')));
-      await tester.pump();
-      expect(find.text('إرفاق صورة التحويل'), findsOneWidget);
-      expect(find.byKey(const Key('phone-order-receipt-required')),
-          findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const Key('phone-order-confirm')))
-            .onPressed,
-        isNull,
-        reason: 'no receipt yet',
-      );
+      expect(find.byKey(const Key('phone-order-payment-instapay')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('phone-order-receipt-pick')));
+      await tester.tap(find.byKey(const Key('phone-order-confirm')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('phone-order-receipt-thumb')), findsOneWidget);
-      expect(find.byKey(const Key('phone-order-receipt-required')), findsNothing);
+      await tester.tap(find.byKey(const Key('payment-confirm-instapay')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('payment-confirm-submit')));
+      await tester.pumpAndSettle();
 
-      await _confirmAndPlaceOrder(tester);
       expect(repository.payments.single, PhoneOrderPayment.instaPay);
       expect(repository.receipts.single!.fileName, 'receipt.png');
     });
@@ -1377,8 +1394,8 @@ void main() {
       await _pumpColumn(tester);
       await pick(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'));
 
       await tester.tap(find.byKey(const Key('phone-order-cancel')));
       await tester.pumpAndSettle();
@@ -1404,8 +1421,8 @@ void main() {
       await _pumpColumn(tester);
       await pick(tester, _mona);
       await _type(tester, const Key('phone-order-product-search'), 'لبن');
-      await tester.tap(find.byKey(const Key('phone-order-add-p-milk')));
-      await tester.pump();
+      await _stageAddAndCommit(
+          tester, const Key('phone-order-add-p-milk'));
       expect(find.byKey(const Key('phone-order-open-orders')), findsNothing,
           reason: 'one order needs no list');
 

@@ -10,6 +10,7 @@ import '../../domain/reports.dart';
 import '../providers/staff_session_providers.dart';
 import '../providers/system_admin_providers.dart';
 import '../widgets/admin_section_widgets.dart';
+import '../widgets/report_invoice_search.dart';
 
 const _reportIcons = {
   ReportKind.deliveryOrders: Icons.delivery_dining_rounded,
@@ -141,6 +142,8 @@ class _AdminReportsViewState extends ConsumerState<AdminReportsView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const ReportInvoiceSearch(),
+              const SizedBox(height: 14),
               AdminSectionHeader(title: kind.label),
               _buildFilters(
                 visible: visible,
