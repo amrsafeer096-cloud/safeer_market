@@ -223,7 +223,7 @@ class _CartLineEditDialog extends StatefulWidget {
 
 class _CartLineEditDialogState extends State<_CartLineEditDialog> {
   late final TextEditingController _qty;
-  final _focus = FocusNode();
+  late final FocusNode _focus;
   late int? _weight;
 
   bool get _isWeight => widget.line.weightInGrams != null;
@@ -236,14 +236,11 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
         ? WeightOptions.phoneOrderLabel(_weight!)
         : '${widget.line.quantity}';
     _qty = TextEditingController(text: _isWeight ? '$_weight' : text);
+    // Handle +/- on the FocusNode so the focused TextField cannot swallow them.
+    _focus = FocusNode(onKeyEvent: _onQtyKeyEvent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (!_isWeight) {
-        _qty.selection = TextSelection(
-          baseOffset: 0,
-          extentOffset: _qty.text.length,
-        );
-      }
+      _selectAll();
       _focus.requestFocus();
     });
   }
@@ -253,6 +250,50 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
     _qty.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  void _selectAll() {
+    _qty.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _qty.text.length,
+    );
+  }
+
+  KeyEventResult _onQtyKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+    final ch = event.character;
+
+    final isInc = ch == '+' ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd ||
+        key == LogicalKeyboardKey.arrowUp ||
+        // Shift+= on many layouts produces '+' via equal without character.
+        (key == LogicalKeyboardKey.equal && ch == '+');
+    if (isInc) {
+      _bump(1);
+      return KeyEventResult.handled;
+    }
+
+    final isDec = ch == '-' ||
+        key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract ||
+        key == LogicalKeyboardKey.arrowDown;
+    if (isDec) {
+      _bump(-1);
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      _save();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
   }
 
   void _bump(int delta) {
@@ -265,6 +306,7 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
           _weight = prev <= 0 ? _weight : prev;
         }
         _qty.text = '$_weight';
+        _selectAll();
       });
       return;
     }
@@ -272,10 +314,7 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
     final next = (current + delta).clamp(1, PhoneOrderState.maxQuantity);
     setState(() {
       _qty.text = '$next';
-      _qty.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: _qty.text.length,
-      );
+      _selectAll();
     });
   }
 
@@ -305,90 +344,78 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.enter): _save,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter): _save,
-        const SingleActivator(LogicalKeyboardKey.equal): () => _bump(1),
-        const SingleActivator(LogicalKeyboardKey.add): () => _bump(1),
-        const SingleActivator(LogicalKeyboardKey.minus): () => _bump(-1),
-        const SingleActivator(LogicalKeyboardKey.numpadAdd): () => _bump(1),
-        const SingleActivator(LogicalKeyboardKey.numpadSubtract): () =>
-            _bump(-1),
-      },
-      child: AlertDialog(
-        key: const Key('phone-order-cart-edit'),
-        title: Text(
-          widget.line.product.name,
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                IconButton(
-                  key: const Key('cart-edit-dec'),
-                  onPressed: () => _bump(-1),
-                  icon: const Icon(Icons.remove_circle_outline),
-                ),
-                Expanded(
-                  child: TextField(
-                    key: const Key('cart-edit-qty'),
-                    controller: _qty,
-                    focusNode: _focus,
-                    autofocus: true,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(5),
-                    ],
-                    onSubmitted: (_) => _save(),
-                    decoration: InputDecoration(
-                      labelText: _isWeight ? 'الوزن (جم)' : 'الكمية',
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
+    return AlertDialog(
+      key: const Key('phone-order-cart-edit'),
+      title: Text(
+        widget.line.product.name,
+        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                key: const Key('cart-edit-dec'),
+                onPressed: () => _bump(-1),
+                icon: const Icon(Icons.remove_circle_outline),
+              ),
+              Expanded(
+                child: TextField(
+                  key: const Key('cart-edit-qty'),
+                  controller: _qty,
+                  focusNode: _focus,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(5),
+                  ],
+                  onSubmitted: (_) => _save(),
+                  decoration: InputDecoration(
+                    labelText: _isWeight ? 'الوزن (جم)' : 'الكمية',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
                   ),
                 ),
-                IconButton(
-                  key: const Key('cart-edit-inc'),
-                  onPressed: () => _bump(1),
-                  icon: const Icon(Icons.add_circle_outline),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                key: const Key('cart-edit-remove'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.secondary,
-                ),
-                onPressed: _cancelItem,
-                icon: const Icon(Icons.delete_outline_rounded),
-                label: const Text(
-                  'إلغاء الصنف',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
+              ),
+              IconButton(
+                key: const Key('cart-edit-inc'),
+                onPressed: () => _bump(1),
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('cart-edit-remove'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.secondary,
+              ),
+              onPressed: _cancelItem,
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text(
+                'إلغاء الصنف',
+                style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('إغلاق'),
-          ),
-          FilledButton(
-            key: const Key('cart-edit-save'),
-            onPressed: _save,
-            child: const Text('حفظ'),
           ),
         ],
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إغلاق'),
+        ),
+        FilledButton(
+          key: const Key('cart-edit-save'),
+          onPressed: _save,
+          child: const Text('حفظ'),
+        ),
+      ],
     );
   }
 }
