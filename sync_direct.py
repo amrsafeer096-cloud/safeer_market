@@ -147,209 +147,251 @@ def get_exact_app_category(subcat_raw, sec_raw):
 
     return 'معلبات'
 
+BRANCH_ID = 101
+
+
+def _fetch_last_result(cursor):
+    cols, rows = None, []
+    while True:
+        try:
+            if cursor.description:
+                cols = [d[0] for d in cursor.description]
+                rows = cursor.fetchall()
+        except Exception:
+            pass
+        if not cursor.nextset():
+            break
+    return cols, rows
+
+
+def _unit_discount(retail, discount_value, discount_type):
+    """Trusty ItemDiscount: 101=% , 102/3=fixed amount."""
+    try:
+        retail = float(retail or 0)
+        discount_value = float(discount_value or 0)
+        discount_type = int(discount_type or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if discount_type in (102, 3):
+        return discount_value
+    if discount_type == 101:
+        return retail * discount_value / 100.0
+    return 0.0
+
+
 def sync_active_with_categories():
-    print(f"\n[{datetime.now().strftime('%I:%M:%S %p')}] جاري سحب الأصناف النشطة ذات المخزون الفعلي...")
-    
+    """Trusty SyncItemCache parity: v_hd_items + Func_ItemBalanceOf + Func_ActiveItemDiscountsOf."""
+    print(f"\n[{datetime.now().strftime('%I:%M:%S %p')}] جاري سحب الأصناف من v_hd_items + الرصيد + الخصومات...")
+
     try:
         conn = pyodbc.connect(connection_string)
         cursor = conn.cursor()
 
-        # سحب قاموس الأقسام والمجموعات
-        sec_map = {}
-        try:
-            cursor.execute("SELECT CAST(section AS VARCHAR), a_name FROM sys_section WHERE a_name IS NOT NULL")
-            for row in cursor.fetchall():
-                sec_map[str(row[0]).strip()] = str(row[1]).strip()
-        except: pass
-
-        grp_map = {}
-        try:
-            cursor.execute("SELECT CAST(itemgroup AS VARCHAR), a_name FROM sys_group WHERE a_name IS NOT NULL")
-            for row in cursor.fetchall():
-                grp_map[str(row[0]).strip()] = str(row[1]).strip()
-        except: pass
-
-        # سحب قاموس الوحدات (علبة، قطعة، كيلو، إلخ)
         unit_map = {}
         try:
             cursor.execute("SELECT CAST(unit AS VARCHAR), a_name FROM sys_unit WHERE a_name IS NOT NULL")
             for row in cursor.fetchall():
                 unit_map[str(row[0]).strip()] = str(row[1]).strip()
-        except: pass
+        except Exception:
+            pass
 
-        # استعلام الرصيد الفعلي لفرع 101 (رصيد أول الشهر + صافي الحركات المرحلة والغير مرحلة)
-        sql_query = """
-        SET NOCOUNT ON;
+        # Master from v_hd_items (Trusty SyncItemCache) + live stock calc (same math as
+        # Func_ItemBalanceOf opening+movements). Overlay Func_ItemBalanceOf when it
+        # returns a row; the TVF often omits items with no current-month MTD row.
+        cursor.execute(
+            f"""
+            SET NOCOUNT ON;
+            DECLARE @branchId INT = {BRANCH_ID};
+            DECLARE @companyId INT = 1;
+            DECLARE @sectionId INT = 0;
+            DECLARE @expiryDate SMALLDATETIME = '1900-01-01';
+            DECLARE @toDate DATETIME = GETDATE();
+            DECLARE @transYear INT, @transMonth INT;
+            EXEC sp_get_max_closing_mnoth_year @branchId, @toDate, @transYear OUT, @transMonth OUT;
+            DECLARE @fromDate DATETIME = DATEFROMPARTS(@transYear, @transMonth, 1);
 
-        DECLARE @branchId INT = 101;
-        DECLARE @companyId INT = 1;
-        DECLARE @sectionId INT = 0;
-        DECLARE @expiryDate SMALLDATETIME = '1900-01-01';
-        DECLARE @toDate DATETIME = GETDATE();
-        DECLARE @transYear INT, @transMonth INT;
-
-        EXEC sp_get_max_closing_mnoth_year @branchId, @toDate, @transYear OUT, @transMonth OUT;
-        DECLARE @fromDate DATETIME = DATEFROMPARTS(@transYear, @transMonth, 1);
-
-        SELECT 
-            LTRIM(RTRIM(CAST(u.barcode AS NVARCHAR(50)))) AS barcode,
-            i.a_name AS base_name,
-            u.flavour AS unit_flavour,
-            u.retailprice AS price,
-            (ISNULL(op.opening_qty, 0) + ISNULL(mv.net_qty, 0)) AS stock_quantity,
-            p.prom_price AS offer_price,
-            CAST(i.section AS NVARCHAR(100)) AS section_id,
-            CAST(i.itemgroup AS NVARCHAR(100)) AS group_id,
-            CAST(u.unit AS NVARCHAR(50)) AS uom_code
-        FROM sys_item_units u
-        JOIN sys_item i ON u.itemean = i.itemean 
-        LEFT JOIN (
-            SELECT itemean, SUM(item_qtyin) AS opening_qty
-            FROM stk_mtod
-            WHERE doctype = 0
-              AND transyear = @transYear
-              AND transmonth = @transMonth
-              AND company = @companyId
-              AND branch = @branchId
-              AND section = @sectionId
-              AND expirydate = @expiryDate
-            GROUP BY itemean
-        ) op ON u.itemean = op.itemean
-        LEFT JOIN (
             SELECT
-                oi.itemean,
-                SUM(
-                    CASE
-                        WHEN o.doctype < 2050 THEN (oi.actual_qty + oi.free_qty) * oi.peices
-                        ELSE -1 * (oi.actual_qty + oi.free_qty) * oi.peices
-                    END
-                ) AS net_qty
-            FROM stk_order o
-            JOIN stk_order_items oi
-              ON o.company = oi.company
-             AND o.sector = oi.sector
-             AND o.region = oi.region
-             AND o.branch = oi.branch
-             AND o.section = oi.section
-             AND o.transtype = oi.transtype
-             AND o.doctype = oi.doctype
-             AND o.orderno = oi.orderno
-             AND o.orderdate = oi.orderdate
-            WHERE o.posting IN (0, 1)
-              AND o.orderdate BETWEEN @fromDate AND @toDate
-              AND o.company = @companyId
-              AND o.branch = @branchId
-              AND o.section = @sectionId
-              AND oi.expirydate = @expiryDate
-            GROUP BY oi.itemean
-        ) mv ON u.itemean = mv.itemean
-        LEFT JOIN (
-            SELECT 
-                LTRIM(RTRIM(CAST(pi.barcode AS NVARCHAR(50)))) AS clean_barcode,
-                MIN(pi.prom_price) AS prom_price
-            FROM pos_promotion_items pi
-            LEFT JOIN pos_promotion pr ON (pi.prom_id = pr.prom_id OR pi.promid = pr.prom_id)
-            WHERE pi.prom_price > 0
-              AND pi.stoped_date IS NULL
-              AND (pi.qty_std_price IS NULL OR pi.qty_std_price <= 1)
-              AND (
-                  (pi.sdate IS NOT NULL AND pi.edate IS NOT NULL AND GETDATE() BETWEEN pi.sdate AND DATEADD(day, 1, pi.edate))
-                  OR 
-                  (pr.prom_sdate IS NOT NULL AND pr.prom_edate IS NOT NULL AND GETDATE() BETWEEN pr.prom_sdate AND DATEADD(day, 1, pr.prom_edate))
-              )
-            GROUP BY LTRIM(RTRIM(CAST(pi.barcode AS NVARCHAR(50))))
-        ) p ON LTRIM(RTRIM(CAST(u.barcode AS NVARCHAR(50)))) = p.clean_barcode
-        WHERE u.barcode IS NOT NULL 
-          AND LTRIM(RTRIM(CAST(u.barcode AS NVARCHAR(50)))) != '' 
-          AND u.retailprice > 0
-          AND i.status = 1
-          AND u.transid = 1
-          -- Include zero / negative stock so «كل الأصناف» can list them.
-          -- (Do NOT filter stock_quantity > 0 here — that deleted OOS rows
-          -- on the next sync via barcodes_to_delete.)
-        """
-        
-        cursor.execute(sql_query)
-        rows = cursor.fetchall()
-        
+                LTRIM(RTRIM(CAST(v.Barcode AS NVARCHAR(50)))) AS barcode,
+                LTRIM(RTRIM(CAST(v.ItemEan AS NVARCHAR(50)))) AS itemean,
+                v.AName AS a_name,
+                v.RetailPrice AS retail_price,
+                v.Unit AS unit_code,
+                ISNULL(v.Pieces, 1) AS pieces,
+                ISNULL(v.ItemSectionName, N'') AS section_name,
+                ISNULL(v.ItemGroupName, N'') AS group_name,
+                (ISNULL(op.opening_qty, 0) + ISNULL(mv.net_qty, 0)) AS stock_quantity
+            FROM dbo.v_hd_items v
+            LEFT JOIN (
+                SELECT itemean, SUM(item_qtyin) AS opening_qty
+                FROM stk_mtod
+                WHERE doctype = 0
+                  AND transyear = @transYear AND transmonth = @transMonth
+                  AND company = @companyId AND branch = @branchId
+                  AND section = @sectionId AND expirydate = @expiryDate
+                GROUP BY itemean
+            ) op ON LTRIM(RTRIM(op.itemean)) = LTRIM(RTRIM(v.ItemEan))
+            LEFT JOIN (
+                SELECT
+                    oi.itemean,
+                    SUM(
+                        CASE
+                            WHEN o.doctype < 2050 THEN (oi.actual_qty + oi.free_qty) * oi.peices
+                            ELSE -1 * (oi.actual_qty + oi.free_qty) * oi.peices
+                        END
+                    ) AS net_qty
+                FROM stk_order o
+                JOIN stk_order_items oi
+                  ON o.company = oi.company AND o.sector = oi.sector
+                 AND o.region = oi.region AND o.branch = oi.branch
+                 AND o.section = oi.section AND o.transtype = oi.transtype
+                 AND o.doctype = oi.doctype AND o.orderno = oi.orderno
+                 AND o.orderdate = oi.orderdate
+                WHERE o.posting IN (0, 1)
+                  AND o.orderdate BETWEEN @fromDate AND @toDate
+                  AND o.company = @companyId AND o.branch = @branchId
+                  AND o.section = @sectionId AND oi.expirydate = @expiryDate
+                GROUP BY oi.itemean
+            ) mv ON LTRIM(RTRIM(mv.itemean)) = LTRIM(RTRIM(v.ItemEan))
+            WHERE v.Barcode IS NOT NULL
+              AND LTRIM(RTRIM(CAST(v.Barcode AS NVARCHAR(50)))) <> ''
+              AND v.RetailPrice > 0
+              AND ISNULL(v.NotForSale, 0) = 0
+            """
+        )
+        item_rows = cursor.fetchall()
+        print(f"  v_hd_items rows: {len(item_rows)}")
+
+        itemeans_raw = []
+        for r in item_rows:
+            e = str(r.itemean or "").strip()
+            if e:
+                itemeans_raw.append(e.ljust(13))  # Fujitsu CHAR padding for TVF join
+        barcodes = [str(r.barcode or "").strip() for r in item_rows if r.barcode]
+        balance_by_ean = {}
+        discount_by_barcode = {}
+        batch = 400
+
+        for i in range(0, len(itemeans_raw), batch):
+            chunk = itemeans_raw[i : i + batch]
+            if not chunk:
+                continue
+            placeholders = ", ".join(
+                "(N'" + s.replace("'", "''") + "')" for s in sorted(set(chunk))
+            )
+            cursor.execute(
+                f"""
+                DECLARE @ids dbo.TableType_StrIds;
+                INSERT INTO @ids (StrId) VALUES {placeholders};
+                SELECT LTRIM(RTRIM(ItemEan)), ItemBalance
+                FROM dbo.Func_ItemBalanceOf({BRANCH_ID}, @ids);
+                """
+            )
+            _c, rows = _fetch_last_result(cursor)
+            for row in rows or []:
+                ean = str(row[0] or "").strip()
+                try:
+                    balance_by_ean[ean] = int(float(row[1] or 0))
+                except (TypeError, ValueError):
+                    balance_by_ean[ean] = 0
+
+        # Active discounts — DiscountType 101=% , 102/3=fixed (Trusty)
+        for i in range(0, len(barcodes), batch):
+            chunk = barcodes[i : i + batch]
+            if not chunk:
+                continue
+            placeholders = ", ".join(
+                "(N'" + s.replace("'", "''") + "')" for s in sorted(set(chunk))
+            )
+            cursor.execute(
+                f"""
+                DECLARE @ids dbo.TableType_StrIds;
+                INSERT INTO @ids (StrId) VALUES {placeholders};
+                SELECT Barcode, DiscountValue, DiscountNo, DiscountType
+                FROM dbo.Func_ActiveItemDiscountsOf({BRANCH_ID}, @ids);
+                """
+            )
+            _c, rows = _fetch_last_result(cursor)
+            for row in rows or []:
+                bc = str(row[0] or "").strip()
+                if not bc:
+                    continue
+                discount_by_barcode[bc] = {
+                    "value": float(row[1] or 0),
+                    "no": int(row[2] or 0),
+                    "type": int(row[3] or 0),
+                }
+
         data_to_upsert_dict = {}
-        for row in rows:
-            barcode_val = str(row.barcode).strip()
-            regular_price = float(row.price) if row.price else 0
-            
-            base_name = str(row.base_name or '').strip()
-            unit_flavour = str(row.unit_flavour or '').strip()
-            
-            if unit_flavour and unit_flavour != base_name:
-                full_item_name = f"{base_name} - {unit_flavour}" if base_name else unit_flavour
-            else:
-                full_item_name = base_name if base_name else f"صنف {barcode_val}"
-
-            # ---------------------------------------------
-            # استخراج الوحدة الفعلية من الداتابيز مباشرة
-            # ---------------------------------------------
-            uom_code = str(row.uom_code).strip() if row.uom_code else ""
-            db_unit = unit_map.get(uom_code, uom_code)
-            
-            if db_unit and db_unit != "None" and db_unit != "":
-                final_unit = db_unit.strip()
-            else:
-                final_unit = "قطعة"
-            # ---------------------------------------------
-
-            raw_promo = float(row.offer_price) if row.offer_price else 0
-            promo_price = raw_promo if (raw_promo > 0 and raw_promo < regular_price and raw_promo > (regular_price * 0.2)) else None
-            
-            section_id = str(row.section_id).strip() if row.section_id else ""
-            group_id = str(row.group_id).strip() if row.group_id else ""
-            
-            raw_sec = sec_map.get(section_id, "")
-            raw_grp = grp_map.get(group_id, "")
-            
-            if raw_grp in UNLISTED_CATEGORIES or raw_sec in UNLISTED_CATEGORIES:
+        for row in item_rows:
+            barcode_val = str(row.barcode or "").strip()
+            if not barcode_val:
+                continue
+            itemean = str(row.itemean or "").strip()
+            regular_price = float(row.retail_price or 0)
+            if regular_price <= 0:
                 continue
 
+            full_item_name = str(row.a_name or "").strip() or f"صنف {barcode_val}"
+
+            uom_code = str(row.unit_code).strip() if row.unit_code is not None else ""
+            db_unit = unit_map.get(uom_code, uom_code)
+            final_unit = db_unit.strip() if db_unit and db_unit != "None" else "قطعة"
+
+            raw_sec = str(row.section_name or "").strip()
+            raw_grp = str(row.group_name or "").strip()
+            if raw_grp in UNLISTED_CATEGORIES or raw_sec in UNLISTED_CATEGORIES:
+                continue
             exact_app_cat = get_exact_app_category(raw_grp, raw_sec)
 
-            # Keep exact Fujitsu stock, including 0 and negative balances.
             try:
-                real_stock = int(float(row.stock_quantity)) if row.stock_quantity is not None else 0
+                calc_stock = int(float(row.stock_quantity)) if row.stock_quantity is not None else 0
             except (TypeError, ValueError):
-                real_stock = 0
+                calc_stock = 0
+            real_stock = balance_by_ean.get(itemean, calc_stock)
+
+            disc = discount_by_barcode.get(barcode_val)
+            promo_price = None
+            if disc:
+                unit_disc = _unit_discount(
+                    regular_price, disc["value"], disc["type"]
+                )
+                offered = regular_price - unit_disc
+                if offered > 0 and offered < regular_price and offered > (regular_price * 0.2):
+                    promo_price = round(offered, 3)
 
             item_data = {
                 "barcode": barcode_val,
+                "pos_item_ean": itemean or None,
                 "name": full_item_name,
                 "price": regular_price,
                 "stock_quantity": real_stock,
                 "discount_price": promo_price,
-                "category": exact_app_cat,      
+                "category": exact_app_cat,
                 "subcategory": exact_app_cat,
-                "unit": final_unit
+                "unit": final_unit,
             }
             data_to_upsert_dict[barcode_val] = item_data
-
         data_to_upsert = list(data_to_upsert_dict.values())
         conn.close()
-        
-        print(f"[{datetime.now().strftime('%I:%M:%S %p')}] جاري رفع أصناف المخزون الفعلي ({len(data_to_upsert)}) صنف لسوبابيز...")
+
+        print(
+            f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+            f"جاري رفع أصناف Trusty ({len(data_to_upsert)}) صنف لسوبابيز "
+            f"(خصومات نشطة: {len(discount_by_barcode)})..."
+        )
 
         batch_size = 1000
         for i in range(0, len(data_to_upsert), batch_size):
-            batch = data_to_upsert[i:i + batch_size]
+            batch = data_to_upsert[i : i + batch_size]
             supabase.table("products").upsert(batch, on_conflict="barcode").execute()
-            
-        print(f"[{datetime.now().strftime('%I:%M:%S %p')}] ✅ تمت مزامنة المخزون الفعلي والأصناف بنجاح!")
 
-        # ==========================================
-        # تنظيف سوبابيز 
-        # ==========================================
+        print(f"[{datetime.now().strftime('%I:%M:%S %p')}] ✅ تمت مزامنة الأصناف/الرصيد/الخصومات بنجاح!")
+
         print(f"[{datetime.now().strftime('%I:%M:%S %p')}] جاري فحص جميع صفحات سوبابيز بالكامل لحذف الأصناف القديمة...")
-        
+
         supabase_barcodes = set()
         start = 0
         step = 1000
-        
         while True:
             res = supabase.table("products").select("barcode").range(start, start + step - 1).execute()
             if not res.data:
@@ -358,15 +400,15 @@ def sync_active_with_categories():
             if len(res.data) < step:
                 break
             start += step
-        
+
         fujitsu_barcodes = set(data_to_upsert_dict.keys())
         barcodes_to_delete = list(supabase_barcodes - fujitsu_barcodes)
-        
+
         if barcodes_to_delete:
             print(f"🧹 تم العثور على ({len(barcodes_to_delete)}) صنف زيادة سيتم حذفهم بالكامل لتنظيف الداتابيز...")
             delete_batch_size = 200
             for i in range(0, len(barcodes_to_delete), delete_batch_size):
-                batch = barcodes_to_delete[i:i + delete_batch_size]
+                batch = barcodes_to_delete[i : i + delete_batch_size]
                 supabase.table("products").delete().in_("barcode", batch).execute()
             print(f"[{datetime.now().strftime('%I:%M:%S %p')}] ✅ تم تنظيف سوبابيز بالكامل ليتطابق 100% مع المحل!")
         else:

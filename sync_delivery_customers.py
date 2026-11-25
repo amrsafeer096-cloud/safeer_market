@@ -273,6 +273,11 @@ def push_supabase_to_fujitsu(table_name):
                 # حجز الأرقام من hd_sequence الرسمي لفوجيتسو
                 new_cust_no, new_addr_id = get_next_fujitsu_ids(cursor)
 
+                phone3 = clean_phone(cust.get("phone3") or "")
+                notes = str(cust.get("notes") or "").strip() or None
+                phone_blob = " - ".join(p for p in (phone1, phone2, phone3) if p)
+
+                # Trusty AddNewCustomer column mapping (phones on Customers row).
                 cursor.execute(
                     """
                     INSERT INTO Customers (
@@ -280,13 +285,13 @@ def push_supabase_to_fujitsu(table_name):
                         IsDisabled, RegistrationDate, CreatedFrom, CreatedBy, ModifiedBy,
                         AppVersion, DateCreated, DateModified, SourceRowVersion,
                         CreatedRowVersion, CreatedAt, ModifiedAt, last_modified_time,
-                        Mobile, Phone1, DefaultAddressId
+                        Mobile, Phone1, Phone2, Phone3, Notes, DefaultAddressId
                     ) VALUES (
-                        ?, ?, ?, 1, 0, 101,
+                        ?, ?, ?, 1, 0, 0,
                         0, ?, 1, 8, 8,
                         '1.0.0.56', ?, ?, 0,
                         0, 0, 0, ?,
-                        ?, ?, ?
+                        ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -298,7 +303,10 @@ def push_supabase_to_fujitsu(table_name):
                         now,
                         now,
                         phone1,
+                        phone1,  # Phone1
                         phone2 if phone2 else None,
+                        phone3 if phone3 else None,
+                        notes,
                         new_addr_id,
                     ),
                 )
@@ -306,19 +314,19 @@ def push_supabase_to_fujitsu(table_name):
                 cursor.execute(
                     """
                     INSERT INTO CustomerAddresses (
-                        AddressId, CustomerNo, CountryId, CountryName,
+                        AddressId, CustomerNo, Title, CountryId, CountryName,
                         GovId, GovName, TownId, TownName,
                         CityId, CityName, Building, Floor, Apartment,
-                        Landmark, StreetAddress, FullAddress, Lon, Lat,
+                        Landmark, StreetAddress, FullAddress, AddressPhones, Lon, Lat,
                         IsPrimary, BranchId, AddedFrom, IsDisabled,
                         NeedsConfirmation, IsConfirmed, AppVersion,
                         DateCreated, DateModified, SourceRowVersion,
                         CreatedRowVersion, CreatedAt, ModifiedAt, last_modified_time
                     ) VALUES (
-                        ?, ?, 0, N'مصر',
+                        ?, ?, N'افتراضي', 0, N'مصر',
                         1, ?, 1, ?,
                         ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?,
                         1, 101, 0, 0,
                         0, 0, '1.0.0.56',
                         ?, ?, 0,
@@ -338,6 +346,7 @@ def push_supabase_to_fujitsu(table_name):
                         landmark,
                         street,
                         full_addr,
+                        phone_blob if phone_blob else None,
                         lon_str,
                         lat_str,
                         now,
@@ -345,7 +354,6 @@ def push_supabase_to_fujitsu(table_name):
                         now,
                     ),
                 )
-
                 conn.commit()
 
                 supabase.table(table_name).update(
@@ -371,8 +379,23 @@ def push_supabase_to_fujitsu(table_name):
 # ==========================================
 # الاتجاه الثاني: من فوجيتسو ---> إلى سوبابيز (pos_customers)
 # ==========================================
-def get_last_synced_fujitsu_no():
-    """جلب آخر رقم عميل فوجيتسو متزامن من أحدث الصفوف بدون إعادة سحب القديم"""
+def get_last_synced_customer_rowversion():
+    """Trusty SyncCustomerCache watermark: max IntRowVersion already pulled."""
+    try:
+        res = (
+            supabase.table("pos_customers")
+            .select("fujitsu_row_version")
+            .not_.is_("fujitsu_row_version", "null")
+            .order("fujitsu_row_version", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if rows and rows[0].get("fujitsu_row_version") is not None:
+            return int(rows[0]["fujitsu_row_version"])
+    except Exception:
+        pass
+    # Fallback for DBs that don't have the column yet: CustomerNo watermark.
     try:
         res = (
             supabase.table("pos_customers")
@@ -394,64 +417,85 @@ def get_last_synced_fujitsu_no():
         return 0
 
 
-def pull_fujitsu_to_supabase(last_no):
+def pull_fujitsu_to_supabase(min_row_version):
+    """
+    Trusty SyncCustomerCache: v_customers WHERE
+      RowVersion >= Convert(RowVersion, Convert(bigint, {minVersion}))
+    """
     conn = pyodbc.connect(connection_string)
     cursor = conn.cursor()
 
+    # Prefer IntRowVersion incremental (exact Trusty pattern). Fall back to CustomerNo.
     query = """
         SELECT TOP 500
-            c.CustomerNo,
-            ISNULL(NULLIF(LTRIM(RTRIM(c.ArabicName)), ''), c.EnglishName) AS Name,
-            LTRIM(RTRIM(ISNULL(c.Mobile, ''))) AS Mobile,
-            LTRIM(RTRIM(ISNULL(c.Phone1, ''))) AS Phone1,
-            a.GovName,
-            a.TownName,
-            a.CityId,
-            a.CityName,
-            a.Building,
-            a.Floor,
-            a.Apartment,
-            a.StreetAddress,
-            a.FullAddress,
-            a.Lat,
-            a.Lon
-        FROM Customers c
-        OUTER APPLY (
-            SELECT TOP 1 *
-            FROM CustomerAddresses ca
-            WHERE ca.CustomerNo = c.CustomerNo
-            ORDER BY CASE WHEN ca.AddressId = c.DefaultAddressId THEN 0 ELSE 1 END, ca.AddressId DESC
-        ) a
-        WHERE c.CustomerNo > ?
-          AND c.IsDisabled = 0
-        ORDER BY c.CustomerNo ASC
+            CustomerNo,
+            ISNULL(NULLIF(LTRIM(RTRIM(ArabicName)), ''), EnglishName) AS Name,
+            LTRIM(RTRIM(ISNULL(Mobile, ''))) AS Mobile,
+            LTRIM(RTRIM(ISNULL(Phone1, ''))) AS Phone1,
+            LTRIM(RTRIM(ISNULL(Phone2, ''))) AS Phone2,
+            LTRIM(RTRIM(ISNULL(Phone3, ''))) AS Phone3,
+            Notes,
+            DefaultAddressId,
+            AddressId,
+            Title,
+            GovName,
+            TownName,
+            CityId,
+            CityName,
+            Building,
+            Floor,
+            Apartment,
+            Landmark,
+            StreetAddress,
+            FullAddress,
+            AddressPhones,
+            Lat,
+            Lon,
+            IsPrimary,
+            BranchId,
+            ISNULL(IntRowVersion, 0) AS IntRowVersion
+        FROM dbo.v_customers
+        WHERE IsDisabled = 0
+          AND (
+                IntRowVersion >= ?
+             OR (ISNULL(IntRowVersion, 0) = 0 AND CustomerNo > ?)
+          )
+        ORDER BY IntRowVersion ASC, CustomerNo ASC
     """
 
     try:
-        cursor.execute(query, (last_no,))
+        cursor.execute(query, (min_row_version, min_row_version))
         rows = cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
 
     if not rows:
-        return last_no
+        return min_row_version
 
+    first_no = getattr(rows[0], "CustomerNo", rows[0][0])
     print(
         f"[{datetime.now().strftime('%I:%M:%S %p')}] "
-        f"⬇️ جاري سحب ({len(rows)}) عميل من فوجيتسو إلى سوبابيز (بدءاً من رقم {rows[0].CustomerNo})..."
+        f"⬇️ جاري سحب ({len(rows)}) عميل من v_customers "
+        f"(RowVersion>={min_row_version}, أول رقم {first_no})..."
     )
 
     batch = []
-    new_max_no = last_no
+    new_max_rv = min_row_version
 
     for r in rows:
         c_no = int(r.CustomerNo)
-        if c_no > new_max_no:
-            new_max_no = c_no
+        rv = int(getattr(r, "IntRowVersion", 0) or 0)
+        if rv > new_max_rv:
+            new_max_rv = rv
+        if c_no > new_max_rv and rv == 0:
+            new_max_rv = c_no
 
         phone1 = clean_phone(r.Mobile) or clean_phone(r.Phone1)
-        phone2 = clean_phone(r.Phone1) if clean_phone(r.Mobile) else ""
+        phone2 = clean_phone(r.Phone2) or (
+            clean_phone(r.Phone1) if clean_phone(r.Mobile) else ""
+        )
+        phone3 = clean_phone(r.Phone3)
         if not phone1:
             continue
 
@@ -468,33 +512,36 @@ def pull_fujitsu_to_supabase(last_no):
         lat_val = to_float(r.Lat)
         lon_val = to_float(r.Lon)
 
-        batch.append(
-            {
-                "fujitsu_customer_id": str(c_no),
-                "full_name": full_name,
-                "phone": phone1,
-                "phone2": phone2 if phone2 else None,
-                "customer_type": "regular",
-                "address": full_addr,
-                "full_address": full_addr,
-                "street": (r.StreetAddress or "").strip() or None,
-                "street_address": (r.StreetAddress or "").strip() or None,
-                "building": (r.Building or "").strip() or None,
-                "floor": (r.Floor or "").strip() or None,
-                "apartment": (r.Apartment or "").strip() or None,
-                "governorate": (r.GovName or "القاهرة").strip(),
-                "city": (r.TownName or "مدينة نصر").strip(),
-                "zone": zone_txt,
-                "zone_name": zone_txt,
-                "fujitsu_zone_id": int(r.CityId) if r.CityId is not None else None,
-                "lat": lat_val,
-                "lng": lon_val,
-                "latitude": lat_val,
-                "longitude": lon_val,
-                "source_system": "fujitsu",
-                "synced_to_fujitsu": True,
-            }
-        )
+        row_payload = {
+            "fujitsu_customer_id": str(c_no),
+            "fujitsu_customer_no": c_no,
+            "full_name": full_name,
+            "phone": phone1,
+            "phone2": phone2 if phone2 else None,
+            "phone3": phone3 if phone3 else None,
+            "notes": (str(r.Notes or "").strip() or None),
+            "customer_type": "regular",
+            "address": full_addr,
+            "full_address": full_addr,
+            "street": (r.StreetAddress or "").strip() or None,
+            "street_address": (r.StreetAddress or "").strip() or None,
+            "building": (r.Building or "").strip() or None,
+            "floor": (r.Floor or "").strip() or None,
+            "apartment": (r.Apartment or "").strip() or None,
+            "governorate": (r.GovName or "القاهرة").strip(),
+            "city": (r.TownName or "مدينة نصر").strip(),
+            "zone": zone_txt,
+            "zone_name": zone_txt,
+            "fujitsu_zone_id": int(r.CityId) if r.CityId is not None else None,
+            "lat": lat_val,
+            "lng": lon_val,
+            "latitude": lat_val,
+            "longitude": lon_val,
+            "source_system": "fujitsu",
+            "synced_to_fujitsu": True,
+            "fujitsu_row_version": rv if rv else None,
+        }
+        batch.append(row_payload)
 
     if batch:
         try:
@@ -503,14 +550,33 @@ def pull_fujitsu_to_supabase(last_no):
             ).execute()
             print(
                 f"[{datetime.now().strftime('%I:%M:%S %p')}] "
-                f"✅ تم رفع ({len(batch)}) عميل إلى سوبابيز بنجاح (آخر رقم: {new_max_no})."
+                f"✅ تم رفع ({len(batch)}) عميل إلى سوبابيز بنجاح "
+                f"(آخر RowVersion: {new_max_rv})."
             )
         except Exception as e:
-            print(f"❌ خطأ أثناء رفع العملاء لسوبابيز: {e}")
-            return last_no
+            # Column fujitsu_row_version may not exist until migration is applied.
+            if "fujitsu_row_version" in str(e):
+                for row in batch:
+                    row.pop("fujitsu_row_version", None)
+                    row.pop("fujitsu_customer_no", None)
+                    row.pop("phone3", None)
+                    row.pop("notes", None)
+                try:
+                    supabase.table("pos_customers").upsert(
+                        batch, on_conflict="fujitsu_customer_id"
+                    ).execute()
+                    print(
+                        f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+                        f"✅ تم رفع ({len(batch)}) عميل (بدون أعمدة RowVersion الجديدة)."
+                    )
+                except Exception as e2:
+                    print(f"❌ خطأ أثناء رفع العملاء لسوبابيز: {e2}")
+                    return min_row_version
+            else:
+                print(f"❌ خطأ أثناء رفع العملاء لسوبابيز: {e}")
+                return min_row_version
 
-    return new_max_no
-
+    return new_max_rv
 
 # ==========================================
 # مزامنة المحذوفين/المعطلين من فوجيتسو (كل 5 دقائق)
@@ -578,8 +644,8 @@ if __name__ == "__main__":
     print("🚀 خدمة المزامنة الثنائية لعملاء سفير ماركت (التطبيق <-> فوجيتسو)")
     print("=" * 65)
 
-    last_fujitsu_no = get_last_synced_fujitsu_no()
-    print(f"📌 آخر رقم عميل فوجيتسو متزامن في سوبابيز: {last_fujitsu_no}")
+    last_row_version = get_last_synced_customer_rowversion()
+    print(f"📌 آخر Customer IntRowVersion متزامن في سوبابيز: {last_row_version}")
     print("⏳ جاري تشغيل المزامنة اللحظية في الاتجاهين (مع تنظيف المحذوفين كل 5 دقائق)...\n")
 
     last_deleted_sync = 0.0
@@ -590,10 +656,10 @@ if __name__ == "__main__":
             push_supabase_to_fujitsu("pos_customers")
             push_supabase_to_fujitsu("profiles")
 
-            # 2) سحب العملاء الجداد من فوجيتسو إلى سوبابيز
-            new_no = pull_fujitsu_to_supabase(last_fujitsu_no)
-            if new_no > last_fujitsu_no:
-                last_fujitsu_no = new_no
+            # 2) سحب العملاء من v_customers (Trusty SyncCustomerCache / RowVersion)
+            new_rv = pull_fujitsu_to_supabase(last_row_version)
+            if new_rv > last_row_version:
+                last_row_version = new_rv
                 continue
 
             # 3) فحص ومسح العملاء المحذوفين/المعطلين كل 5 دقائق

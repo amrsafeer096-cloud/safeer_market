@@ -1,12 +1,18 @@
 """
 Two-way delivery-order bridge: Supabase → Fujitsu POS (retail).
 
+Parity target: TrustyDelivery (hd_orders / hd_order_items / hd_order_log /
+Customers / CustomerAddresses / hd_sequence) + PosPrintouts QR.
+
 Picks up orders that already have preparer_name assigned, creates/matches the
 customer in Fujitsu, allocates a real daily OrderId (YYMMDD######), inserts
-hd_orders + hd_order_items, then writes the Fujitsu ids back to Supabase so
-the Flutter prep-receipt QR can be scanned at the cashier.
+hd_orders + hd_order_items, writes hd_order_log, then writes Fujitsu ids back
+to Supabase so the Flutter prep-receipt QR can be scanned at the cashier.
 
-Also reapplies approved item substitutions onto hd_order_items.
+Also:
+  - rebuilds hd_order_items after edits / substitutions (barcode merge)
+  - syncs cancellations → StatusCode 200 + audit log
+  - syncs lifecycle status transitions + audit log
 
 Reuse the same SQL Server + Supabase config as sync_direct.py.
 Run next to sync_direct.py:  python sync_orders_to_fujitsu.py
@@ -50,18 +56,50 @@ connection_string = (
 )
 
 BRANCH_ID = 101
+# Live TrustyDelivery writes TerminalNo=0 / OrderVersion=0 despite config.txt
+# TerminalNo=19 — match the production write path, not the unused config value.
+TERMINAL_NO = 0
+ORDER_VERSION = 0
 APP_VERSION = "1.0.0.56"
 POLL_SECONDS = 5
 DEFAULT_PICKER_ID = 10
 DEFAULT_PICKER_NAME = "محضر"
-STATUS_WAITING_PREP = 2
-STATUS_WAITING_PREP_NAME = "فى إنتظار التجهيز"
 STAFF_USER_ID = 7
+STAFF_USER_NAME = "سفير ماركت"
 
 # DocType codes in hd_sequence
 DOC_CUSTOMER = 101
 DOC_ADDRESS = 105
-DOC_ORDER = 4
+DOC_ORDER = 4  # OrderTaking
+
+# TrustyDelivery.OrderStatus
+STATUS = {
+    1: "جارى تلقى الطلب",
+    2: "فى إنتظار التجهيز",
+    3: "جارى تجهيز الطلب",
+    4: "تم تجهيز الطلب",
+    5: "جارى توصيل الطلب",
+    6: "تم توصيل الطلب",
+    7: "جارى إعادة تلقى الطلب",
+    101: "تم رد الطلب للتلقى",
+    102: "تم رد الطلب للتجهيز",
+    200: "تم إلغاء الطلب",
+    201: "تم طلب الإلغاء",
+}
+STATUS_WAITING_PREP = 2
+STATUS_CANCELLED = 200
+
+# Supabase orders.status → Fujitsu StatusCode
+STATUS_MAP = {
+    "pending": 2,  # we sync after preparer assigned → WaitingPicking
+    "preparing": 3,
+    "processing": 3,
+    "ready_for_delivery": 4,
+    "out_for_delivery": 5,
+    "delivered": 6,
+    "cancelled": 200,
+    "canceled": 200,
+}
 
 
 def log(msg: str) -> None:
@@ -99,6 +137,53 @@ def payment_code(method: Optional[str]) -> int:
     return 1  # نقدي / cash_on_delivery
 
 
+def fujitsu_order_source(raw: Optional[str]) -> int:
+    """Trusty OrderSource: 0=call center, 1=online."""
+    v = (raw or "").strip().lower()
+    if v in ("app", "online", "1"):
+        return 1
+    return 0
+
+
+def item_count_of(qty: float) -> int:
+    """Trusty: (Qty == (int)Qty) ? (int)Qty : 1"""
+    try:
+        if float(qty) == float(int(qty)):
+            return int(qty)
+    except (TypeError, ValueError):
+        pass
+    return 1
+
+
+def unit_discount_value(
+    retail: float, discount_value: float, discount_type: int
+) -> float:
+    """Trusty ItemDiscount.CalculateItemDiscount."""
+    if discount_type in (102, 3):
+        return float(discount_value or 0)
+    if discount_type == 101:
+        return float(retail or 0) * float(discount_value or 0) / 100.0
+    return 0.0
+
+
+def build_qr(
+    *,
+    order_id: str | int,
+    order_source: int,
+    commit_prices: int,
+    customer_no: int | str,
+    address_id: int | str,
+    pilot_no: int,
+    delivery_fees: float,
+) -> str:
+    """Exact TrustyDelivery Order.GetQrCodeString."""
+    fee = f"{float(delivery_fees):.2f}"
+    return (
+        f"DlvOrd,001,01,{order_id},{order_source},{commit_prices},"
+        f"{customer_no},{address_id},{pilot_no},{fee}"
+    )
+
+
 def _fetch_first_row(cursor):
     """Skip non-result batches (IF/INSERT) until OUTPUT row appears."""
     while True:
@@ -112,12 +197,24 @@ def _fetch_first_row(cursor):
             return None
 
 
+def _fetch_last_result(cursor):
+    cols, rows = None, []
+    while True:
+        try:
+            if cursor.description:
+                cols = [d[0] for d in cursor.description]
+                rows = cursor.fetchall()
+        except Exception:
+            pass
+        if not cursor.nextset():
+            break
+    return cols, rows
+
+
 def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
     """Atomically increment hd_sequence and return the new Sequence value."""
     today = date.today()
     if daily:
-        # Ensure today's row exists, then increment in a separate statement so
-        # pyodbc can reliably read OUTPUT INSERTED.Sequence.
         cursor.execute(
             """
             IF NOT EXISTS (
@@ -205,28 +302,49 @@ def update_customer_phones(
     phone: str,
     phone2: Optional[str] = None,
     phone3: Optional[str] = None,
+    name: Optional[str] = None,
+    notes: Optional[str] = None,
 ) -> None:
-    """Sync Mobile / Phone1 / Phone2 / Phone3 on Fujitsu Customers."""
+    """Match Trusty Update Customers phone / name / notes mapping."""
     mobile = truncate(phone, 20) or None
+    p1 = mobile  # Phone1 mirrors primary mobile when no separate landline
     p2 = truncate(phone2 or "", 20) or None
     p3 = truncate(phone3 or "", 20) or None
+    display = truncate(name or "", 200) or None
+    comments = truncate(notes or "", 500) or None
     try:
         cursor.execute(
             """
             UPDATE Customers
-            SET Mobile = COALESCE(?, Mobile),
+            SET ArabicName = COALESCE(?, ArabicName),
+                EnglishName = COALESCE(?, EnglishName),
+                Mobile = COALESCE(?, Mobile),
                 Phone1 = COALESCE(?, Phone1),
                 Phone2 = CASE WHEN ? IS NULL THEN Phone2 ELSE ? END,
                 Phone3 = CASE WHEN ? IS NULL THEN Phone3 ELSE ? END,
+                Notes = CASE WHEN ? IS NULL THEN Notes ELSE ? END,
                 ModifiedBy = ?,
                 DateModified = GETDATE(),
                 last_modified_time = GETDATE()
             WHERE CustomerNo = ?
             """,
-            (mobile, mobile, p2, p2, p3, p3, STAFF_USER_ID, customer_no),
+            (
+                display,
+                display,
+                mobile,
+                p1,
+                p2,
+                p2,
+                p3,
+                p3,
+                comments,
+                comments,
+                STAFF_USER_ID,
+                customer_no,
+            ),
         )
     except Exception as exc:
-        log(f"⚠️ could not update phones for customer {customer_no}: {exc}")
+        log(f"⚠️ could not update customer {customer_no}: {exc}")
 
 
 def insert_customer_address(
@@ -235,38 +353,67 @@ def insert_customer_address(
     address_id: int,
     customer_no: int,
     address: str,
+    phones: str = "",
+    is_primary: int = 0,
+    zone_id: int = 2,
+    zone_name: str = "الحى السابع",
+    town_name: str = "مدينة نصر",
+    gov_name: str = "القاهرة",
+    building: str = "",
+    floor: str = "",
+    apartment: str = "",
+    landmark: str = "",
+    title: str = "",
 ) -> None:
     street = truncate(address, 2000, "بدون عنوان")
     full = truncate(address, 3000, street)
     cursor.execute(
         """
         INSERT INTO CustomerAddresses (
-            AddressId, CustomerNo,
+            AddressId, CustomerNo, Title,
             CountryId, CountryName,
             GovId, GovName, TownId, TownName,
             CityId, CityName,
-            Building, Floor, Apartment,
-            StreetAddress, FullAddress,
+            Building, Floor, Apartment, Landmark,
+            StreetAddress, FullAddress, AddressPhones,
             IsPrimary, BranchId, AddedFrom, IsDisabled,
             NeedsConfirmation, IsConfirmed,
             AppVersion, DateCreated, DateModified,
             SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
             last_modified_time
         ) VALUES (
-            ?, ?,
+            ?, ?, ?,
             0, N'مصر',
-            1, N'القاهرة', 1, N'مدينة نصر',
-            2, N'الحى السابع',
-            N'', N'', N'',
+            1, ?, 1, ?,
             ?, ?,
-            0, ?, 0, 0,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, 0, 0,
             0, 0,
             ?, GETDATE(), GETDATE(),
             0, 0, 0, 0,
             GETDATE()
         )
         """,
-        (address_id, customer_no, street, full, BRANCH_ID, APP_VERSION),
+        (
+            address_id,
+            customer_no,
+            truncate(title, 100) or None,
+            gov_name,
+            town_name,
+            zone_id,
+            zone_name,
+            truncate(building, 50) or None,
+            truncate(floor, 50) or None,
+            truncate(apartment, 50) or None,
+            truncate(landmark, 200) or None,
+            street,
+            full,
+            truncate(phones, 100) or None,
+            int(is_primary),
+            BRANCH_ID,
+            APP_VERSION,
+        ),
     )
 
 
@@ -278,6 +425,7 @@ def create_customer(
     address: str,
     phone2: Optional[str] = None,
     phone3: Optional[str] = None,
+    notes: Optional[str] = None,
 ) -> tuple[int, int]:
     seq_cust = next_hd_sequence(cursor, DOC_CUSTOMER, daily=False)
     customer_no = 2000000 + seq_cust
@@ -288,6 +436,7 @@ def create_customer(
     mobile = truncate(phone, 20) or None
     p2 = truncate(phone2 or "", 20) or None
     p3 = truncate(phone3 or "", 20) or None
+    phone_blob = " - ".join(p for p in (mobile, p2, p3) if p)
 
     cursor.execute(
         """
@@ -296,7 +445,7 @@ def create_customer(
             CustomerType, CompanyId, BranchId,
             IsDisabled, RegistrationDate, CreatedFrom,
             Mobile, Phone1, Phone2, Phone3, DefaultAddressId, CustomerCategory,
-            CreatedBy, ModifiedBy, AppVersion,
+            Notes, CreatedBy, ModifiedBy, AppVersion,
             DateCreated, DateModified,
             SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
             last_modified_time
@@ -305,7 +454,7 @@ def create_customer(
             1, 0, 0,
             0, GETDATE(), 1,
             ?, ?, ?, ?, ?, 0,
-            ?, ?, ?,
+            ?, ?, ?, ?,
             GETDATE(), GETDATE(),
             0, 0, 0, 0,
             GETDATE()
@@ -316,10 +465,11 @@ def create_customer(
             display_name,
             display_name,
             mobile,
-            mobile,
+            mobile,  # Phone1
             p2,
             p3,
             address_id,
+            truncate(notes or "", 500) or None,
             STAFF_USER_ID,
             STAFF_USER_ID,
             APP_VERSION,
@@ -330,6 +480,9 @@ def create_customer(
         address_id=address_id,
         customer_no=customer_no,
         address=address,
+        phones=phone_blob,
+        is_primary=1,
+        title="افتراضي",
     )
     return customer_no, address_id
 
@@ -337,7 +490,6 @@ def create_customer(
 def find_matching_address(
     cursor, *, customer_no: int, address: str
 ) -> Optional[int]:
-    """Return an existing CustomerAddresses.AddressId when the text matches."""
     full = truncate(address, 3000, "").strip()
     if not full:
         return None
@@ -345,7 +497,7 @@ def find_matching_address(
         """
         SELECT AddressId, FullAddress, StreetAddress
         FROM CustomerAddresses
-        WHERE CustomerNo = ?
+        WHERE CustomerNo = ? AND ISNULL(IsDisabled, 0) = 0
         ORDER BY AddressId DESC
         """,
         (customer_no,),
@@ -363,9 +515,9 @@ def ensure_address(
     customer_no: int,
     address_id: Optional[int],
     address: str,
+    phones: str = "",
 ) -> int:
     full = truncate(address, 3000, "بدون عنوان")
-    # Prefer an explicit AddressId already known on the Supabase order.
     if address_id:
         cursor.execute(
             "SELECT FullAddress, StreetAddress FROM CustomerAddresses WHERE AddressId = ?",
@@ -390,6 +542,8 @@ def ensure_address(
         address_id=new_id,
         customer_no=customer_no,
         address=address,
+        phones=phones,
+        is_primary=0,
     )
     try:
         cursor.execute(
@@ -406,28 +560,31 @@ def ensure_address(
     return new_id
 
 
-def load_pos_customer_phones(pos_customer_id: Any) -> tuple[Optional[str], Optional[str]]:
-    """phone2 / phone3 from Supabase pos_customers for Fujitsu Phone2/Phone3."""
+def load_pos_customer_extras(
+    pos_customer_id: Any,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """phone2 / phone3 / notes from Supabase pos_customers."""
     if not pos_customer_id:
-        return None, None
+        return None, None, None
     try:
         res = (
             supabase.table("pos_customers")
-            .select("phone2, phone3")
+            .select("phone2, phone3, notes")
             .eq("id", pos_customer_id)
             .limit(1)
             .execute()
         )
         rows = res.data or []
         if not rows:
-            return None, None
+            return None, None, None
         row = rows[0]
         p2 = normalize_phone(row.get("phone2")) or None
         p3 = normalize_phone(row.get("phone3")) or None
-        return p2, p3
+        notes = (str(row.get("notes") or "").strip() or None)
+        return p2, p3, notes
     except Exception as exc:
-        log(f"⚠️ pos_customers phones lookup failed: {exc}")
-        return None, None
+        log(f"⚠️ pos_customers extras lookup failed: {exc}")
+        return None, None, None
 
 
 def write_back_customer_link(
@@ -437,7 +594,6 @@ def write_back_customer_link(
     address_id: int,
     address: str,
 ) -> None:
-    """Persist Fujitsu ids onto pos_customers / customer_addresses."""
     if not pos_customer_id:
         return
     try:
@@ -450,7 +606,6 @@ def write_back_customer_link(
     except Exception as exc:
         log(f"⚠️ pos_customers fujitsu_customer_no write-back failed: {exc}")
     try:
-        # Match by exact address text for this customer.
         res = (
             supabase.table("customer_addresses")
             .select("id, address")
@@ -496,9 +651,68 @@ def match_picker(cursor, preparer_name: str) -> tuple[int, str]:
 
 
 def lookup_item(cursor, barcode: str) -> Optional[dict[str, Any]]:
+    """Prefer v_hd_items (Trusty item cache) then fall back to sys_item_units."""
     code = (barcode or "").strip()
     if not code:
         return None
+
+    cursor.execute(
+        """
+        SELECT TOP 1
+            LTRIM(RTRIM(CAST(ItemEan AS NVARCHAR(50)))) AS itemean,
+            LTRIM(RTRIM(CAST(Barcode AS NVARCHAR(50)))) AS barcode,
+            AName AS item_name,
+            RetailPrice AS retail_price,
+            Unit AS unit_code,
+            ISNULL(Pieces, 1) AS pieces,
+            CAST(ISNULL(ItemClass, 0) AS INT) AS class_id,
+            ISNULL(ItemClassName, N'') AS class_name,
+            CAST(ISNULL(ItemSection, 0) AS INT) AS section_id,
+            ISNULL(ItemSectionName, N'') AS section_name,
+            CAST(ISNULL(ItemGroup, 0) AS INT) AS group_id,
+            ISNULL(ItemGroupName, N'') AS group_name,
+            CAST(ISNULL(Department, 0) AS INT) AS department_id,
+            ISNULL(DepartmentName, N'') AS department_name
+        FROM dbo.v_hd_items
+        WHERE LTRIM(RTRIM(CAST(Barcode AS NVARCHAR(50)))) = ?
+        """,
+        (code,),
+    )
+    row = cursor.fetchone()
+    cost = 0.0
+    if row:
+        try:
+            cursor.execute(
+                """
+                SELECT TOP 1 ISNULL(costprice, 0)
+                FROM sys_item_units
+                WHERE LTRIM(RTRIM(CAST(barcode AS NVARCHAR(50)))) = ?
+                """,
+                (code,),
+            )
+            crow = cursor.fetchone()
+            if crow:
+                cost = float(crow[0] or 0)
+        except Exception:
+            cost = 0.0
+        return {
+            "itemean": str(row.itemean or code).strip(),
+            "barcode": str(row.barcode or code).strip(),
+            "item_name": str(row.item_name or "").strip(),
+            "retail_price": float(row.retail_price or 0),
+            "cost_price": cost,
+            "unit": int(row.unit_code or 1001),
+            "pieces": int(row.pieces or 1),
+            "class_id": int(row.class_id or 0),
+            "class_name": str(row.class_name or "").strip(),
+            "section_id": int(row.section_id or 0),
+            "section_name": str(row.section_name or "").strip(),
+            "group_id": int(row.group_id or 0),
+            "group_name": str(row.group_name or "").strip(),
+            "department_id": int(row.department_id or 0),
+            "department_name": str(row.department_name or "").strip(),
+        }
+
     cursor.execute(
         """
         SELECT TOP 1
@@ -531,23 +745,151 @@ def lookup_item(cursor, barcode: str) -> Optional[dict[str, Any]]:
         "unit": int(row.unit_code or 1001),
         "pieces": int(row.pieces or 1),
         "class_id": int(row.class_id or 0),
+        "class_name": "",
         "section_id": int(row.section_id or 0),
+        "section_name": "",
         "group_id": int(row.group_id or 0),
+        "group_name": "",
         "department_id": int(row.department_id or 0),
+        "department_name": "",
     }
 
 
+def fetch_active_discounts(
+    cursor, barcodes: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Func_ActiveItemDiscountsOf(101, TableType_StrIds) — types 101 / 102 / 3."""
+    codes = sorted({(b or "").strip() for b in barcodes if (b or "").strip()})
+    if not codes:
+        return {}
+    # Build TVP insert; PK on StrId requires uniqueness (already sorted set).
+    values_sql = ", ".join("(?)" for _ in codes)
+    try:
+        cursor.execute(
+            f"""
+            DECLARE @ids dbo.TableType_StrIds;
+            INSERT INTO @ids (StrId) VALUES {values_sql};
+            SELECT Barcode, DiscountValue, DiscountNo, DiscountType, DateFrom, DateTo
+            FROM dbo.Func_ActiveItemDiscountsOf(?, @ids);
+            """,
+            (*codes, BRANCH_ID),
+        )
+        _cols, rows = _fetch_last_result(cursor)
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows or []:
+            bc = str(row[0] or "").strip()
+            if not bc:
+                continue
+            out[bc] = {
+                "discount_value": float(row[1] or 0),
+                "discount_no": int(row[2] or 0),
+                "discount_type": int(row[3] or 0),
+            }
+        return out
+    except Exception as exc:
+        log(f"⚠️ Func_ActiveItemDiscountsOf failed: {exc}")
+        return {}
+
+
+def product_of(item: dict[str, Any]) -> dict[str, Any]:
+    p = item.get("products")
+    if isinstance(p, list) and p:
+        p = p[0]
+    return p if isinstance(p, dict) else {}
+
+
+def merge_items_by_barcode(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Trusty: same barcode on one order → Qty += addedQty."""
+    merged: dict[str, dict[str, Any]] = {}
+    passthrough: list[dict[str, Any]] = []
+    for item in items:
+        product = product_of(item)
+        barcode = str(product.get("barcode") or "").strip()
+        qty = float(item.get("quantity") or 1)
+        if qty <= 0:
+            qty = 1.0
+        if not barcode:
+            passthrough.append(item)
+            continue
+        if barcode in merged:
+            prev = merged[barcode]
+            prev["quantity"] = float(prev.get("quantity") or 0) + qty
+            # Keep first price_at_time (Trusty keeps original line price).
+        else:
+            copy = dict(item)
+            copy["quantity"] = qty
+            merged[barcode] = copy
+    return list(merged.values()) + passthrough
+
+
+def insert_hd_order_log(
+    cursor,
+    *,
+    order_id: int,
+    order_date: datetime,
+    order_no: int,
+    old_status: int,
+    new_status: int,
+    notes: str = "",
+) -> None:
+    """Trusty writes hd_order_log on every meaningful status change."""
+    now = datetime.now()
+    order_day = datetime(order_date.year, order_date.month, order_date.day)
+    old_name = STATUS.get(old_status, "")
+    new_name = STATUS.get(new_status, "")
+    cursor.execute(
+        """
+        INSERT INTO hd_order_log (
+            OrderId, OrderDate, OrderNo, SessionNo, TransTime,
+            TransTerminalNo, TransBranch, TransUserCode, TransUserName,
+            TransType, TransName,
+            OldOrderBranch, NewOrderBranch, OldVersion, NewVersion,
+            OldStatusCode, OldStatusName, NewStatusCode, NewStatusName,
+            ReasonCode, ReasonName, Notes, TransData, ModifiedTime,
+            SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
+            DateCreated, DateModified
+        ) VALUES (
+            ?, ?, ?, 0, ?,
+            ?, ?, ?, ?,
+            0, N'',
+            ?, ?, ?, ?,
+            ?, ?, ?, ?,
+            NULL, NULL, ?, NULL, ?,
+            0, 0, 0, 0,
+            GETDATE(), GETDATE()
+        )
+        """,
+        (
+            order_id,
+            order_day,
+            order_no,
+            now,
+            TERMINAL_NO,
+            BRANCH_ID,
+            STAFF_USER_ID,
+            STAFF_USER_NAME,
+            BRANCH_ID,
+            BRANCH_ID,
+            ORDER_VERSION,
+            ORDER_VERSION,
+            old_status,
+            old_name,
+            new_status,
+            new_name,
+            truncate(notes, 500) or None,
+            now,
+        ),
+    )
+
+
 def fetch_pending_orders() -> list[dict[str, Any]]:
-    # Real orders columns (no preparer_id): preparer_name, taker_name,
-    # customer_name/phone, address_details, delivery_fee, total_amount,
-    # payment_method, pos_customer_id + fujitsu_* write-back fields.
     res = (
         supabase.table("orders")
         .select(
             "id, created_at, status, preparer_name, taker_name, "
             "customer_name, customer_phone, address_details, delivery_fee, "
-            "total_amount, payment_method, pos_customer_id, fujitsu_order_id, "
-            "fujitsu_address_id, fujitsu_synced_at"
+            "total_amount, payment_method, order_source, pos_customer_id, "
+            "fujitsu_order_id, fujitsu_address_id, fujitsu_synced_at"
         )
         .not_.is_("preparer_name", "null")
         .is_("fujitsu_order_id", "null")
@@ -573,13 +915,6 @@ def fetch_order_items(order_id: str) -> list[dict[str, Any]]:
     return res.data or []
 
 
-def product_of(item: dict[str, Any]) -> dict[str, Any]:
-    p = item.get("products")
-    if isinstance(p, list) and p:
-        p = p[0]
-    return p if isinstance(p, dict) else {}
-
-
 def insert_hd_order(
     cursor,
     *,
@@ -596,11 +931,22 @@ def insert_hd_order(
     address_id: int,
     payment_method: int,
     delivery_fees: float,
-    total_value: float,
+    merchandise_total: float,
+    order_discount: float,
+    additional_fees: float,
     line_count: int,
-) -> None:
+    order_source: int,
+    commit_prices: int = 0,
+) -> float:
+    """Insert header. Persisted TotalValue = NetTotalValue (Trusty)."""
     now = datetime.now()
     order_day = datetime(order_date.year, order_date.month, order_date.day)
+    net_total = (
+        float(merchandise_total)
+        - float(order_discount)
+        + float(delivery_fees)
+        + float(additional_fees)
+    )
     cursor.execute(
         """
         INSERT INTO hd_orders (
@@ -610,36 +956,38 @@ def insert_hd_order(
             PickingDocPrintCount, PickerNo, PickerName,
             DeliveryDocPrintCount, IsReturned,
             CustomerNo, CustomerName, CustomerPhone, ShippingAddress,
-            OrderLineCount, DiscountValue, PaymentMethod,
-            DeliveryFees, AdditionalFees, TotalValue,
+            OrderLineCount, DiscountValue, DiscountNo, DiscountType, DiscountCoupon,
+            PaymentMethod, DeliveryFees, AdditionalFees, TotalValue,
             OrderSource, CreatedTime, ModifiedTime, AddressId,
             GovId, GovName, TownId, TownName, CityId, CityName,
             IsFirstOrder, NeedsConfirmation, IsConfirmed, IsReviewed, CommitPrices,
             AppVersion, SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
             DateCreated, DateModified, Reserved1
         ) VALUES (
-            ?, 0, ?, ?, 0, ?,
+            ?, ?, ?, ?, ?, ?,
             ?, ?, 0, ?, 0,
             ?, ?, ?, ?, 0,
             0, ?, ?,
             0, 0,
             ?, ?, ?, ?,
-            ?, 0, ?,
-            ?, 0, ?,
-            0, ?, ?, ?,
+            ?, ?, 0, 0, NULL,
+            ?, ?, ?, ?,
+            ?, ?, ?, ?,
             1, N'القاهرة', 1, N'مدينة نصر', 2, N'الحى السابع',
-            0, 0, 0, 0, 0,
+            0, 0, 0, 0, ?,
             ?, 0, 0, 0, 0,
             GETDATE(), GETDATE(), ?
         )
         """,
         (
             order_id,
+            ORDER_VERSION,
             order_day,
             order_no,
+            TERMINAL_NO,
             BRANCH_ID,
             STATUS_WAITING_PREP,
-            STATUS_WAITING_PREP_NAME,
+            STATUS[STATUS_WAITING_PREP],
             now,
             STAFF_USER_ID,
             truncate(taker_name, 150, "التطبيق"),
@@ -652,16 +1000,21 @@ def insert_hd_order(
             truncate(customer_phone, 200, "0"),
             truncate(shipping_address, 1000, "بدون عنوان"),
             line_count,
+            float(order_discount),
             payment_method,
             delivery_fees,
-            total_value,
+            additional_fees,
+            net_total,
+            order_source,
             now,
             now,
             address_id,
+            commit_prices,
             APP_VERSION,
             APP_VERSION,
         ),
     )
+    return net_total
 
 
 def insert_hd_order_item(
@@ -675,36 +1028,63 @@ def insert_hd_order_item(
     picker_id: int,
     picker_name: str,
     item: dict[str, Any],
-) -> None:
+    discount_info: Optional[dict[str, Any]] = None,
+) -> float:
+    """Insert one line. Returns line TotalValue (after discount)."""
     product = product_of(item)
     barcode = truncate(str(product.get("barcode") or ""), 20)
     item_name = truncate(str(product.get("name") or "صنف"), 150, "صنف")
     qty = float(item.get("quantity") or 1)
     if qty <= 0:
         qty = 1.0
-    unit_price = float(item.get("price_at_time") or 0)
-    list_price = float(product.get("price") or unit_price)
-    discount = max(0.0, (list_price - unit_price) * qty)
-    line_total = unit_price * qty
+
+    charged_unit = float(item.get("price_at_time") or 0)
+    list_price = float(product.get("price") or charged_unit)
 
     fj = lookup_item(cursor, barcode) if barcode else None
     itemean = truncate((fj or {}).get("itemean") or barcode or f"UNK{line_no}", 20, "0")
     barcode = truncate(barcode or itemean, 20, itemean)
-    retail = float((fj or {}).get("retail_price") or list_price or unit_price)
+    retail = float((fj or {}).get("retail_price") or list_price or charged_unit)
     cost = float((fj or {}).get("cost_price") or 0)
     unit = int((fj or {}).get("unit") or 1001)
     pieces = int((fj or {}).get("pieces") or 1)
     if fj and fj.get("item_name"):
         item_name = truncate(fj["item_name"], 150, item_name)
 
+    # Prefer active Fujitsu discount; else derive from charged vs retail.
+    disc_no = 0
+    disc_type = 0
+    if discount_info:
+        disc_no = int(discount_info.get("discount_no") or 0)
+        disc_type = int(discount_info.get("discount_type") or 0)
+        unit_disc = unit_discount_value(
+            retail,
+            float(discount_info.get("discount_value") or 0),
+            disc_type,
+        )
+    else:
+        unit_disc = max(0.0, retail - charged_unit) if charged_unit > 0 else 0.0
+
+    discount_value = qty * unit_disc
+    line_total = qty * retail - discount_value
+    # If we only know charged price and no retail delta, keep charged math.
+    if retail <= 0 and charged_unit > 0:
+        line_total = charged_unit * qty
+        discount_value = 0.0
+
     class_id = int((fj or {}).get("class_id") or 0)
     section_id = int((fj or {}).get("section_id") or 0)
     group_id = int((fj or {}).get("group_id") or 0)
     department_id = int((fj or {}).get("department_id") or 0)
+    class_name = truncate((fj or {}).get("class_name") or "", 100)
+    section_name = truncate((fj or {}).get("section_name") or "", 100)
+    group_name = truncate((fj or {}).get("group_name") or "", 100)
+    department_name = truncate((fj or {}).get("department_name") or "", 100)
 
     order_item_id = int(f"{order_id}{str(line_no).zfill(4)}")
     order_day = datetime(order_date.year, order_date.month, order_date.day)
     now = datetime.now()
+    count = item_count_of(qty)
 
     cursor.execute(
         """
@@ -714,6 +1094,7 @@ def insert_hd_order_item(
             ItemEan, Barcode, ItemName, IsOpenItem,
             Qty, ItemCount, RetailPrice, CostPrice,
             DiscountValue, TotalValue, TaxValue, TaxRate,
+            DiscountNo, DiscountType, DiscountCoupon,
             Unit, Pieces, TakerNo, IsPicked, PickerNo, PickerName,
             IsReturned, CustomerNo,
             ItemClass, ItemClassName, ItemSection, ItemSectionName,
@@ -723,15 +1104,16 @@ def insert_hd_order_item(
             SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
             DateCreated, DateModified
         ) VALUES (
-            ?, 0, ?, 0,
-            ?, ?, 0, 0, ?, 2080,
+            ?, ?, ?, ?,
+            ?, ?, ?, 0, ?, 2080,
             ?, ?, ?, 0,
             ?, ?, ?, ?,
             ?, ?, 0, 0,
-            ?, ?, 0, 0, ?, ?,
+            ?, ?, NULL,
+            ?, ?, ?, 0, ?, ?,
             0, ?,
-            ?, N'', ?, N'',
-            ?, N'', ?, N'',
+            ?, ?, ?, ?,
+            ?, ?, ?, ?,
             3, 0,
             ?, ?,
             0, 0, 0, 0,
@@ -740,32 +1122,43 @@ def insert_hd_order_item(
         """,
         (
             order_item_id,
+            ORDER_VERSION,
             order_id,
+            ORDER_VERSION,
             order_day,
             order_no,
+            TERMINAL_NO,
             line_no,
             itemean,
             barcode,
             item_name,
             qty,
-            int(round(qty)) if qty >= 1 else 1,
+            count,
             retail,
             cost,
-            discount,
+            discount_value,
             line_total,
+            disc_no,
+            disc_type,
             unit,
             pieces,
+            STAFF_USER_ID,
             picker_id,
             truncate(picker_name, 150, DEFAULT_PICKER_NAME),
             customer_no,
             class_id,
+            class_name,
             section_id,
+            section_name,
             group_id,
+            group_name,
             department_id,
+            department_name,
             now,
             now,
         ),
     )
+    return float(line_total)
 
 
 def sync_one_order(order: dict[str, Any]) -> None:
@@ -776,8 +1169,8 @@ def sync_one_order(order: dict[str, Any]) -> None:
     preparer = (order.get("preparer_name") or "").strip()
     taker = (order.get("taker_name") or "").strip() or "التطبيق"
     delivery_fee = float(order.get("delivery_fee") or 0)
-    total_value = float(order.get("total_amount") or 0)
     pay = payment_code(order.get("payment_method"))
+    order_source = fujitsu_order_source(order.get("order_source"))
     pos_customer_id = order.get("pos_customer_id")
     preferred_address_id = order.get("fujitsu_address_id")
     try:
@@ -787,11 +1180,13 @@ def sync_one_order(order: dict[str, Any]) -> None:
     except (TypeError, ValueError):
         preferred_address_id = None
 
-    phone2, phone3 = load_pos_customer_phones(pos_customer_id)
+    phone2, phone3, notes = load_pos_customer_extras(pos_customer_id)
+    phone_blob = " - ".join(p for p in (phone, phone2, phone3) if p)
 
-    items = fetch_order_items(order_id)
-    if not items:
+    raw_items = fetch_order_items(order_id)
+    if not raw_items:
         raise RuntimeError("order has no items")
+    items = merge_items_by_barcode(raw_items)
 
     conn = connect_sql()
     cursor = conn.cursor()
@@ -805,12 +1200,15 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 phone=phone,
                 phone2=phone2,
                 phone3=phone3,
+                name=name,
+                notes=notes,
             )
             address_id = ensure_address(
                 cursor,
                 customer_no=customer_no,
                 address_id=preferred_address_id or default_address_id,
                 address=address,
+                phones=phone_blob,
             )
         else:
             customer_no, address_id = create_customer(
@@ -820,6 +1218,7 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 address=address,
                 phone2=phone2,
                 phone3=phone3,
+                notes=notes,
             )
 
         seq = next_hd_sequence(cursor, DOC_ORDER, daily=True)
@@ -839,7 +1238,43 @@ def sync_one_order(order: dict[str, Any]) -> None:
         except Exception:
             order_date = datetime.now()
 
-        insert_hd_order(
+        barcodes = [
+            str(product_of(it).get("barcode") or "").strip() for it in items
+        ]
+        discounts = fetch_active_discounts(cursor, barcodes)
+
+        # Insert lines first in memory totals, then header with NetTotalValue.
+        # Actually Trusty saves header then items; we need merchandise sum first.
+        # Compute using the same formulas without writing, then write header+items.
+        # Simpler: write header with placeholder, update after lines — but
+        # Trusty writes NetTotal in one shot. We pre-calc via a dry pass of math.
+        merchandise = 0.0
+        line_payloads: list[tuple[dict[str, Any], Optional[dict[str, Any]]]] = []
+        for item in items:
+            product = product_of(item)
+            bc = str(product.get("barcode") or "").strip()
+            disc = discounts.get(bc)
+            # Approximate merchandise with the same insert math (lookup retail).
+            fj = lookup_item(cursor, bc) if bc else None
+            qty = float(item.get("quantity") or 1) or 1.0
+            charged = float(item.get("price_at_time") or 0)
+            list_price = float(product.get("price") or charged)
+            retail = float((fj or {}).get("retail_price") or list_price or charged)
+            if disc:
+                unit_disc = unit_discount_value(
+                    retail,
+                    float(disc.get("discount_value") or 0),
+                    int(disc.get("discount_type") or 0),
+                )
+            else:
+                unit_disc = max(0.0, retail - charged) if charged > 0 else 0.0
+            line_total = qty * retail - qty * unit_disc
+            if retail <= 0 and charged > 0:
+                line_total = charged * qty
+            merchandise += line_total
+            line_payloads.append((item, disc))
+
+        net_total = insert_hd_order(
             cursor,
             order_id=fujitsu_order_id,
             order_date=order_date,
@@ -854,12 +1289,15 @@ def sync_one_order(order: dict[str, Any]) -> None:
             address_id=address_id,
             payment_method=pay,
             delivery_fees=delivery_fee,
-            total_value=total_value,
-            line_count=len(items),
+            merchandise_total=merchandise,
+            order_discount=0.0,
+            additional_fees=0.0,
+            line_count=len(line_payloads),
+            order_source=order_source,
+            commit_prices=0,
         )
 
-        # Fujitsu samples use 0-based OrderLineNo / OrderItemId suffix.
-        for line_no, item in enumerate(items):
+        for line_no, (item, disc) in enumerate(line_payloads):
             insert_hd_order_item(
                 cursor,
                 order_id=fujitsu_order_id,
@@ -870,20 +1308,48 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 picker_id=picker_id,
                 picker_name=picker_name,
                 item=item,
+                discount_info=disc,
             )
+
+        # EndOrder → WaitingPicking (2). Log Taking(1) → WaitingPicking(2).
+        insert_hd_order_log(
+            cursor,
+            order_id=fujitsu_order_id,
+            order_date=order_date,
+            order_no=seq,
+            old_status=1,
+            new_status=STATUS_WAITING_PREP,
+            notes="safeer_market sync",
+        )
 
         conn.commit()
 
-        supabase.table("orders").update(
-            {
-                "fujitsu_order_id": fujitsu_order_id_str,
-                "fujitsu_customer_no": customer_no,
-                "fujitsu_address_id": address_id,
-                "fujitsu_synced_at": datetime.utcnow().isoformat() + "Z",
-                "fujitsu_sync_error": None,
-                "pos_receipt_number": fujitsu_order_id_str,
-            }
-        ).eq("id", order_id).execute()
+        qr = build_qr(
+            order_id=fujitsu_order_id_str,
+            order_source=order_source,
+            commit_prices=0,
+            customer_no=customer_no,
+            address_id=address_id,
+            pilot_no=0,
+            delivery_fees=delivery_fee,
+        )
+
+        write_back = {
+            "fujitsu_order_id": fujitsu_order_id_str,
+            "fujitsu_customer_no": customer_no,
+            "fujitsu_address_id": address_id,
+            "fujitsu_synced_at": datetime.utcnow().isoformat() + "Z",
+            "fujitsu_sync_error": None,
+            "pos_receipt_number": fujitsu_order_id_str,
+            "fujitsu_status_code": STATUS_WAITING_PREP,
+            "fujitsu_status_synced_at": datetime.utcnow().isoformat() + "Z",
+        }
+        try:
+            supabase.table("orders").update(write_back).eq("id", order_id).execute()
+        except Exception:
+            write_back.pop("fujitsu_status_code", None)
+            write_back.pop("fujitsu_status_synced_at", None)
+            supabase.table("orders").update(write_back).eq("id", order_id).execute()
 
         write_back_customer_link(
             pos_customer_id=pos_customer_id,
@@ -894,7 +1360,7 @@ def sync_one_order(order: dict[str, Any]) -> None:
 
         log(
             f"✅ synced order {order_id[:8]}… → Fujitsu {fujitsu_order_id_str} "
-            f"(customer {customer_no}, address {address_id})"
+            f"(customer {customer_no}, address {address_id}, net={net_total:.2f}, qr={qr})"
         )
     except Exception as exc:
         conn.rollback()
@@ -919,12 +1385,15 @@ def _rebuild_fujitsu_items(
     customer_no: Any,
     preparer_name: str,
     created_at: Any,
-    total_value: float | None = None,
+    delivery_fee: float = 0.0,
+    order_discount: float = 0.0,
+    additional_fees: float = 0.0,
 ) -> None:
-    """Replace hd_order_items for an already-synced Fujitsu order."""
+    """Replace hd_order_items and recalc header TotalValue = NetTotalValue."""
     if not fujitsu_order_id_str or fujitsu_order_id_str.upper() == "SKIPPED":
         return
-    items = fetch_order_items(order_id)
+    raw_items = fetch_order_items(order_id)
+    items = merge_items_by_barcode(raw_items)
     conn = connect_sql()
     cursor = conn.cursor()
     try:
@@ -945,9 +1414,16 @@ def _rebuild_fujitsu_items(
             "DELETE FROM hd_order_items WHERE OrderId = ?",
             (fujitsu_order_id,),
         )
-        line_total_sum = 0.0
+
+        barcodes = [
+            str(product_of(it).get("barcode") or "").strip() for it in items
+        ]
+        discounts = fetch_active_discounts(cursor, barcodes)
+
+        merchandise = 0.0
         for line_no, item in enumerate(items):
-            insert_hd_order_item(
+            bc = str(product_of(item).get("barcode") or "").strip()
+            merchandise += insert_hd_order_item(
                 cursor,
                 order_id=fujitsu_order_id,
                 order_no=order_no,
@@ -957,27 +1433,35 @@ def _rebuild_fujitsu_items(
                 picker_id=picker_id,
                 picker_name=picker_name,
                 item=item,
+                discount_info=discounts.get(bc),
             )
-            product = product_of(item)
-            qty = float(item.get("quantity") or 1)
-            unit_price = float(item.get("price_at_time") or 0)
-            line_total_sum += unit_price * qty
 
-        header_total = (
-            float(total_value)
-            if total_value is not None
-            else line_total_sum
+        net_total = (
+            merchandise
+            - float(order_discount)
+            + float(delivery_fee)
+            + float(additional_fees)
         )
         cursor.execute(
             """
             UPDATE hd_orders
             SET OrderLineCount = ?,
+                DeliveryFees = ?,
+                DiscountValue = ?,
+                AdditionalFees = ?,
                 TotalValue = ?,
                 ModifiedTime = GETDATE(),
                 DateModified = GETDATE()
             WHERE OrderId = ?
             """,
-            (len(items), header_total, fujitsu_order_id),
+            (
+                len(items),
+                float(delivery_fee),
+                float(order_discount),
+                float(additional_fees),
+                net_total,
+                fujitsu_order_id,
+            ),
         )
         conn.commit()
         now_iso = datetime.utcnow().isoformat() + "Z"
@@ -988,7 +1472,7 @@ def _rebuild_fujitsu_items(
                 "fujitsu_sync_error": None,
             }
         ).eq("id", order_id).execute()
-        log(f"🔁 Fujitsu items rebuilt for {fujitsu_order_id_str}")
+        log(f"🔁 Fujitsu items rebuilt for {fujitsu_order_id_str} net={net_total:.2f}")
     except Exception:
         conn.rollback()
         raise
@@ -998,11 +1482,10 @@ def _rebuild_fujitsu_items(
 
 
 def sync_edited_fujitsu_items() -> None:
-    """Re-sync hd_order_items when Supabase items changed after Fujitsu sync."""
     res = (
         supabase.table("orders")
         .select(
-            "id, created_at, preparer_name, total_amount, "
+            "id, created_at, preparer_name, total_amount, delivery_fee, "
             "fujitsu_order_id, fujitsu_customer_no, "
             "items_updated_at, fujitsu_items_synced_at, is_being_edited"
         )
@@ -1029,21 +1512,20 @@ def sync_edited_fujitsu_items() -> None:
                 customer_no=order.get("fujitsu_customer_no"),
                 preparer_name=str(order.get("preparer_name") or ""),
                 created_at=order.get("created_at"),
-                total_value=float(order.get("total_amount") or 0),
+                delivery_fee=float(order.get("delivery_fee") or 0),
             )
         except Exception as exc:
             log(f"⚠️ edited-items sync failed for {fujitsu_order_id}: {exc}")
 
 
 def sync_substitutions() -> None:
-    """Push approved alternatives onto already-synced Fujitsu order lines."""
     alts = (
         supabase.table("order_item_alternatives")
         .select(
             "id, order_id, status, created_at, "
             "orders!inner(fujitsu_order_id, fujitsu_customer_no, fujitsu_synced_at, "
             "fujitsu_items_synced_at, preparer_name, created_at, total_amount, "
-            "is_being_edited)"
+            "delivery_fee, is_being_edited)"
         )
         .in_("status", ["selected", "removed"])
         .not_.is_("orders.fujitsu_order_id", "null")
@@ -1083,17 +1565,254 @@ def sync_substitutions() -> None:
                 customer_no=order_wrap.get("fujitsu_customer_no"),
                 preparer_name=str(order_wrap.get("preparer_name") or ""),
                 created_at=order_wrap.get("created_at"),
-                total_value=float(order_wrap.get("total_amount") or 0)
-                if order_wrap.get("total_amount") is not None
-                else None,
+                delivery_fee=float(order_wrap.get("delivery_fee") or 0),
             )
         except Exception as exc:
             log(f"⚠️ substitution sync failed for {fujitsu_order_id_str}: {exc}")
 
 
+def _apply_fujitsu_status(
+    *,
+    order_id: str,
+    fujitsu_order_id_str: str,
+    new_status: int,
+    old_status: Optional[int],
+    created_at: Any,
+    cancel_reason: Optional[str] = None,
+) -> None:
+    if not fujitsu_order_id_str or fujitsu_order_id_str.upper() == "SKIPPED":
+        return
+    if old_status is not None and int(old_status) == int(new_status):
+        return
+
+    fujitsu_order_id = int(fujitsu_order_id_str)
+    order_no = int(fujitsu_order_id_str[-6:])
+    try:
+        order_date = (
+            datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            .replace(tzinfo=None)
+            if created_at
+            else datetime.now()
+        )
+    except Exception:
+        order_date = datetime.now()
+
+    prev = int(old_status) if old_status is not None else STATUS_WAITING_PREP
+    prev_name = STATUS.get(prev, "")
+    new_name = STATUS.get(new_status, "")
+    now = datetime.now()
+
+    conn = connect_sql()
+    cursor = conn.cursor()
+    try:
+        if new_status == STATUS_CANCELLED:
+            cursor.execute(
+                """
+                UPDATE hd_orders
+                SET PreviousStatusCode = StatusCode,
+                    PreviousStatusName = StatusName,
+                    StatusCode = ?,
+                    StatusName = ?,
+                    CancelledBy = ?,
+                    CancelledByName = ?,
+                    CancelledAtStatusCode = StatusCode,
+                    CancelReasonName = ?,
+                    CancelTime = ?,
+                    ModifiedTime = GETDATE(),
+                    DateModified = GETDATE()
+                WHERE OrderId = ?
+                """,
+                (
+                    STATUS_CANCELLED,
+                    STATUS[STATUS_CANCELLED],
+                    STAFF_USER_ID,
+                    STAFF_USER_NAME,
+                    truncate(cancel_reason or "إلغاء من سفير ماركت", 200),
+                    now,
+                    fujitsu_order_id,
+                ),
+            )
+        elif new_status == 3:
+            cursor.execute(
+                """
+                UPDATE hd_orders
+                SET PreviousStatusCode = StatusCode,
+                    PreviousStatusName = StatusName,
+                    StatusCode = ?, StatusName = ?,
+                    PickingStartedBy = ?, PickingStartedByName = ?,
+                    PickingStartTime = COALESCE(PickingStartTime, ?),
+                    ModifiedTime = GETDATE(), DateModified = GETDATE()
+                WHERE OrderId = ?
+                """,
+                (new_status, new_name, STAFF_USER_ID, STAFF_USER_NAME, now, fujitsu_order_id),
+            )
+        elif new_status == 4:
+            cursor.execute(
+                """
+                UPDATE hd_orders
+                SET PreviousStatusCode = StatusCode,
+                    PreviousStatusName = StatusName,
+                    StatusCode = ?, StatusName = ?,
+                    PickingEndTime = ?,
+                    ModifiedTime = GETDATE(), DateModified = GETDATE()
+                WHERE OrderId = ?
+                """,
+                (new_status, new_name, now, fujitsu_order_id),
+            )
+        elif new_status == 5:
+            cursor.execute(
+                """
+                UPDATE hd_orders
+                SET PreviousStatusCode = StatusCode,
+                    PreviousStatusName = StatusName,
+                    StatusCode = ?, StatusName = ?,
+                    DeliveryStartedBy = ?, DeliveryStartedByName = ?,
+                    DeliveryStartTime = COALESCE(DeliveryStartTime, ?),
+                    ModifiedTime = GETDATE(), DateModified = GETDATE()
+                WHERE OrderId = ?
+                """,
+                (new_status, new_name, STAFF_USER_ID, STAFF_USER_NAME, now, fujitsu_order_id),
+            )
+        elif new_status == 6:
+            cursor.execute(
+                """
+                UPDATE hd_orders
+                SET PreviousStatusCode = StatusCode,
+                    PreviousStatusName = StatusName,
+                    StatusCode = ?, StatusName = ?,
+                    DeliveryEndTime = ?, EndTime = ?,
+                    ClosedBy = ?, ClosedByName = ?,
+                    ModifiedTime = GETDATE(), DateModified = GETDATE()
+                WHERE OrderId = ?
+                """,
+                (
+                    new_status,
+                    new_name,
+                    now,
+                    now,
+                    STAFF_USER_ID,
+                    STAFF_USER_NAME,
+                    fujitsu_order_id,
+                ),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE hd_orders
+                SET PreviousStatusCode = StatusCode,
+                    PreviousStatusName = StatusName,
+                    StatusCode = ?, StatusName = ?,
+                    ModifiedTime = GETDATE(), DateModified = GETDATE()
+                WHERE OrderId = ?
+                """,
+                (new_status, new_name, fujitsu_order_id),
+            )
+
+        insert_hd_order_log(
+            cursor,
+            order_id=fujitsu_order_id,
+            order_date=order_date,
+            order_no=order_no,
+            old_status=prev,
+            new_status=new_status,
+            notes=cancel_reason or "safeer_market status sync",
+        )
+        conn.commit()
+
+        supabase.table("orders").update(
+            {
+                "fujitsu_status_code": new_status,
+                "fujitsu_status_synced_at": datetime.utcnow().isoformat() + "Z",
+                "fujitsu_sync_error": None,
+            }
+        ).eq("id", order_id).execute()
+        log(
+            f"📦 status {fujitsu_order_id_str}: {prev}({prev_name}) → "
+            f"{new_status}({new_name})"
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+_STATUS_SYNC_DISABLED = False
+
+
+def sync_status_and_cancellations() -> None:
+    """Push Supabase status / cancel onto hd_orders + hd_order_log."""
+    global _STATUS_SYNC_DISABLED
+    if _STATUS_SYNC_DISABLED:
+        return
+    # Requires fujitsu_status_code watermark (migration 20261125230000).
+    try:
+        res = (
+            supabase.table("orders")
+            .select(
+                "id, status, created_at, "
+                "fujitsu_order_id, fujitsu_status_code"
+            )
+            .not_.is_("fujitsu_order_id", "null")
+            .neq("fujitsu_order_id", "SKIPPED")
+            .order("created_at", desc=True)
+            .limit(40)
+            .execute()
+        )
+    except Exception as exc:
+        if "fujitsu_status_code" in str(exc):
+            _STATUS_SYNC_DISABLED = True
+            log(
+                "⚠️ status sync disabled until migration "
+                "20261125230000_trusty_qr_parity.sql is applied"
+            )
+            return
+        log(f"⚠️ status sync query failed: {exc}")
+        return
+    for order in res.data or []:
+        fujitsu_id = str(order.get("fujitsu_order_id") or "").strip()
+        if not fujitsu_id:
+            continue
+        status_raw = str(order.get("status") or "").strip().lower()
+        mapped = STATUS_MAP.get(status_raw)
+        if mapped is None:
+            continue
+        prev = order.get("fujitsu_status_code")
+        try:
+            prev_i = int(prev) if prev is not None else None
+        except (TypeError, ValueError):
+            prev_i = None
+        if prev_i is not None and prev_i == mapped:
+            continue
+        # Fresh sync leaves status at WaitingPicking(2); don't force pending→2 again.
+        if prev_i is None and mapped == STATUS_WAITING_PREP:
+            try:
+                supabase.table("orders").update(
+                    {
+                        "fujitsu_status_code": STATUS_WAITING_PREP,
+                        "fujitsu_status_synced_at": datetime.utcnow().isoformat() + "Z",
+                    }
+                ).eq("id", str(order["id"])).execute()
+            except Exception:
+                pass
+            continue
+        try:
+            _apply_fujitsu_status(
+                order_id=str(order["id"]),
+                fujitsu_order_id_str=fujitsu_id,
+                new_status=mapped,
+                old_status=prev_i if prev_i is not None else STATUS_WAITING_PREP,
+                created_at=order.get("created_at"),
+                cancel_reason=None,
+            )
+        except Exception as exc:
+            log(f"⚠️ status sync failed for {fujitsu_id}: {exc}")
+
+
 def main() -> None:
     log(
-        "🚀 sync_orders_to_fujitsu started (loop every "
+        "🚀 sync_orders_to_fujitsu started (Trusty parity loop every "
         f"{POLL_SECONDS}s) → {SQL_SERVER}/{SQL_DATABASE}"
     )
     while True:
@@ -1112,6 +1831,10 @@ def main() -> None:
                 traceback.print_exc()
             try:
                 sync_substitutions()
+            except Exception:
+                traceback.print_exc()
+            try:
+                sync_status_and_cancellations()
             except Exception:
                 traceback.print_exc()
         except Exception as exc:

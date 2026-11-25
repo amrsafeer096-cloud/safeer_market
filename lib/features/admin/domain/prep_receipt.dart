@@ -27,6 +27,9 @@ class PrepReceipt {
     this.paymentMethod,
     this.posCustomerId,
     this.fujitsuZoneId,
+    this.orderSource = 0,
+    this.commitPrices = 0,
+    this.pilotNo = 0,
   });
 
   final String orderId;
@@ -50,6 +53,15 @@ class PrepReceipt {
   final String? posCustomerId;
   final String? fujitsuZoneId;
 
+  /// TrustyDelivery `OrderSource`: 0 = call center, 1 = online/app.
+  final int orderSource;
+
+  /// TrustyDelivery `CommitPrices` flag embedded in the cashier QR.
+  final int commitPrices;
+
+  /// TrustyDelivery `PilotNo` (0 until a driver is assigned).
+  final int pilotNo;
+
   /// True while the local Python bridge has not yet written [fujitsuOrderId].
   final bool waitingFujitsu;
   final String? fujitsuOrderId;
@@ -71,10 +83,25 @@ class PrepReceipt {
       (fujitsuAddressId?.trim().isNotEmpty ?? false);
 
   /// Exact cashier QR from Fujitsu ids when available.
+  ///
+  /// TrustyDelivery `Order.GetQrCodeString`:
+  /// `DlvOrd,001,01,{OrderId},{OrderSource},{CommitPrices},{CustomerNo},{AddressId},{PilotNo},{DeliveryFees:N2}`
   String get cashierQrPayload {
     if (!hasFujitsuIds) return qrPayload;
     final fee = deliveryFee.toStringAsFixed(2);
-    return 'DlvOrd,001,0,$fujitsuOrderId,0,0,$fujitsuCustomerNo,$fujitsuAddressId,0,$fee';
+    return 'DlvOrd,001,01,$fujitsuOrderId,$orderSource,$commitPrices,'
+        '$fujitsuCustomerNo,$fujitsuAddressId,$pilotNo,$fee';
+  }
+
+  /// Maps Supabase `orders.order_source` → Fujitsu OrderSource int.
+  static int fujitsuOrderSource(String? raw) {
+    final v = (raw ?? '').trim().toLowerCase();
+    if (v == 'phone' || v == 'call' || v == 'call_center' || v == '0') {
+      return 0;
+    }
+    if (v == 'app' || v == 'online' || v == '1') return 1;
+    // Default phone/call-center (matches existing Trusty HD traffic).
+    return 0;
   }
 
   String get phonesLabel {
@@ -135,11 +162,29 @@ class PrepReceipt {
     final fujitsuCustomerNo = text('fujitsu_customer_no');
     final fujitsuAddressId = text('fujitsu_address_id');
     final fee = money(json['delivery_fee']);
+    final orderSource = switch (json['order_source_code']) {
+      final num n => n.toInt(),
+      final String t when int.tryParse(t.trim()) != null =>
+        int.parse(t.trim()),
+      _ => fujitsuOrderSource(text('order_source')),
+    };
+    final commitPrices = switch (json['commit_prices']) {
+      final num n => n.toInt(),
+      final String t => int.tryParse(t.trim()) ?? 0,
+      _ => 0,
+    };
+    final pilotNo = switch (json['pilot_no']) {
+      final num n => n.toInt(),
+      final String t => int.tryParse(t.trim()) ?? 0,
+      _ => 0,
+    };
     final hasFujitsu = fujitsuOrderId != null &&
         fujitsuCustomerNo != null &&
         fujitsuAddressId != null;
     final builtQr = hasFujitsu
-        ? 'DlvOrd,001,0,$fujitsuOrderId,0,0,$fujitsuCustomerNo,$fujitsuAddressId,0,${fee.toStringAsFixed(2)}'
+        ? 'DlvOrd,001,01,$fujitsuOrderId,$orderSource,$commitPrices,'
+            '$fujitsuCustomerNo,$fujitsuAddressId,$pilotNo,'
+            '${fee.toStringAsFixed(2)}'
         : (text('qr_payload') ?? '');
 
     return PrepReceipt(
@@ -169,6 +214,9 @@ class PrepReceipt {
       totalAmount: money(json['total_amount']),
       posCustomerId: text('pos_customer_id'),
       fujitsuZoneId: text('fujitsu_zone_id'),
+      orderSource: orderSource,
+      commitPrices: commitPrices,
+      pilotNo: pilotNo,
       items: items,
     );
   }

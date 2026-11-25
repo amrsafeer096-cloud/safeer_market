@@ -170,6 +170,9 @@ PrepReceipt _withDriverNoQr(
     paymentMethod: receipt.paymentMethod,
     posCustomerId: receipt.posCustomerId,
     fujitsuZoneId: receipt.fujitsuZoneId,
+    orderSource: receipt.orderSource,
+    commitPrices: receipt.commitPrices,
+    pilotNo: receipt.pilotNo,
   );
 }
 
@@ -257,5 +260,6 @@ Future<PrepReceipt> _buildFromOrderRow(
     paymentMethod: text(order['payment_method']),
     posCustomerId: text(order['pos_customer_id']?.toString()),
     fujitsuZoneId: text(order['fujitsu_zone_id']),
+    orderSource: PrepReceipt.fujitsuOrderSource(text(order['order_source'])),
   );
 }
