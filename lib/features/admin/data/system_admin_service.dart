@@ -12,6 +12,9 @@ class AdminCustomer {
     required this.name,
     this.phone,
     this.phone2,
+    this.phone3,
+    this.phone4,
+    this.phone5,
     this.address,
     this.zone,
     this.isVip = false,
@@ -31,6 +34,9 @@ class AdminCustomer {
   final String name;
   final String? phone;
   final String? phone2;
+  final String? phone3;
+  final String? phone4;
+  final String? phone5;
   final String? address;
   final String? zone;
   final bool isVip;
@@ -44,6 +50,8 @@ class AdminCustomer {
   final int ordersCount;
   final double totalSpent;
   final DateTime? lastOrderAt;
+
+  List<String?> get phoneSlots => [phone, phone2, phone3, phone4, phone5];
 
   bool get hasPin => latitude != null && longitude != null;
 }
@@ -277,6 +285,9 @@ class SupabaseSystemAdminService implements SystemAdminService {
               name: _text(row['full_name']) ?? '—',
               phone: _text(row['phone']),
               phone2: _text(row['phone2']),
+              phone3: _text(row['phone3']),
+              phone4: _text(row['phone4']),
+              phone5: _text(row['phone5']),
               address: _text(row['address']),
               zone: _text(row['zone']),
               isVip: row['customer_type'] == 'vip',

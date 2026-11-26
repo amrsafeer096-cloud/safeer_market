@@ -1,3 +1,5 @@
+import '../../auth/domain/customer_phone.dart';
+
 /// Data for «إيصال تحضير طلب توصيل» + cashier QR (`DlvOrd,…`).
 class PrepReceipt {
   const PrepReceipt({
@@ -116,14 +118,10 @@ class PrepReceipt {
     return 0;
   }
 
-  String get phonesLabel {
-    final a = customerPhone?.trim();
-    final b = customerPhone2?.trim();
-    if (a != null && a.isNotEmpty && b != null && b.isNotEmpty) {
-      return '$a - $b';
-    }
-    return a ?? b ?? '—';
-  }
+  String get phonesLabel => CustomerPhone.formatPhones(
+        [customerPhone, customerPhone2],
+        separator: ' - ',
+      );
 
   String get paymentLabel => switch (paymentMethod) {
         'cash' || 'cash_on_delivery' => 'نقدي',
@@ -244,11 +242,18 @@ class PrepReceiptItem {
     this.barcode,
     this.listPrice,
     this.weightInGrams,
+    this.notes,
     this.isWeightBased = false,
   });
 
   final String productName;
   final String? barcode;
+  final String? notes;
+
+  String? get trimmedNotes {
+    final t = notes?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
 
   /// Piece count. Weighted lines keep `1`; use [weightInGrams] / [quantityLabel].
   final int quantity;
@@ -350,6 +355,7 @@ class PrepReceiptItem {
         listPrice: list > 0 ? list : null,
         categoryName: text('category_name') ?? 'أصناف',
         weightInGrams: grams,
+        notes: text('notes'),
         isWeightBased: true,
       );
     }
@@ -365,6 +371,7 @@ class PrepReceiptItem {
       listPrice: list > 0 ? list : null,
       categoryName: text('category_name') ?? 'أصناف',
       weightInGrams: null,
+      notes: text('notes'),
       isWeightBased: false,
     );
   }

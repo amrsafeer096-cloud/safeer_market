@@ -265,7 +265,8 @@ class _CustomerList extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w800)),
             subtitle: Text(
               [
-                if (customer.phone != null) customer.phone!,
+                for (final p in customer.phoneSlots)
+                  if ((p ?? '').trim().isNotEmpty) p!,
                 if (customer.address != null) customer.address!,
               ].join(' • '),
               maxLines: 1,
@@ -359,8 +360,14 @@ class _CustomerDetails extends StatelessWidget {
             ],
           ),
           const Divider(height: 24),
-          row('الهاتف', customer.phone, ltr: true),
-          row('هاتف آخر', customer.phone2, ltr: true),
+          row(
+            'الهواتف',
+            [
+              for (final p in customer.phoneSlots)
+                if ((p ?? '').trim().isNotEmpty) p!,
+            ].toSet().join(' / '),
+            ltr: true,
+          ),
           row('العنوان', customer.address),
           row('المحافظة', customer.governorate),
           row('المدينة', customer.city),

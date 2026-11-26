@@ -189,8 +189,8 @@ class _StagedReviewDialogState extends State<_StagedReviewDialog> {
 Future<void> showCartLineEditDialog(
   BuildContext context, {
   required PhoneOrderLine line,
-  required ValueChanged<int> onSetQuantity,
-  required ValueChanged<int> onSetWeightGrams,
+  required void Function(int quantity, String? notes) onSetQuantity,
+  required void Function(int grams, String? notes) onSetWeightGrams,
   required VoidCallback onRemove,
 }) {
   return showDialog<void>(
@@ -213,8 +213,8 @@ class _CartLineEditDialog extends StatefulWidget {
   });
 
   final PhoneOrderLine line;
-  final ValueChanged<int> onSetQuantity;
-  final ValueChanged<int> onSetWeightGrams;
+  final void Function(int quantity, String? notes) onSetQuantity;
+  final void Function(int grams, String? notes) onSetWeightGrams;
   final VoidCallback onRemove;
 
   @override
@@ -223,10 +223,16 @@ class _CartLineEditDialog extends StatefulWidget {
 
 class _CartLineEditDialogState extends State<_CartLineEditDialog> {
   late final TextEditingController _qty;
+  late final TextEditingController _notes;
   late final FocusNode _focus;
   late int? _weight;
 
   bool get _isWeight => widget.line.weightInGrams != null;
+
+  String? get _trimmedNotes {
+    final t = _notes.text.trim();
+    return t.isEmpty ? null : t;
+  }
 
   @override
   void initState() {
@@ -236,6 +242,7 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
         ? WeightOptions.phoneOrderLabel(_weight!)
         : '${widget.line.quantity}';
     _qty = TextEditingController(text: _isWeight ? '$_weight' : text);
+    _notes = TextEditingController(text: widget.line.notes ?? '');
     // Handle +/- on the FocusNode so the focused TextField cannot swallow them.
     _focus = FocusNode(onKeyEvent: _onQtyKeyEvent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -248,6 +255,7 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
   @override
   void dispose() {
     _qty.dispose();
+    _notes.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -319,19 +327,23 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
   }
 
   void _save() {
+    final notes = _trimmedNotes;
     if (_isWeight) {
       final grams = int.tryParse(_qty.text.trim()) ?? _weight ?? 0;
       if (grams <= 0) {
         widget.onRemove();
       } else {
-        widget.onSetWeightGrams(grams);
+        widget.onSetWeightGrams(grams, notes);
       }
     } else {
       final q = int.tryParse(_qty.text.trim()) ?? 0;
       if (q <= 0) {
         widget.onRemove();
       } else {
-        widget.onSetQuantity(q.clamp(1, PhoneOrderState.maxQuantity));
+        widget.onSetQuantity(
+          q.clamp(1, PhoneOrderState.maxQuantity),
+          notes,
+        );
       }
     }
     Navigator.of(context).pop();
@@ -386,6 +398,18 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
                 icon: const Icon(Icons.add_circle_outline),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('cart-edit-item-notes'),
+            controller: _notes,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'ملاحظة للصنف',
+              hintText: 'مثال: على ربعين، تقطيع رفيع...',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
           ),
           const SizedBox(height: 12),
           SizedBox(

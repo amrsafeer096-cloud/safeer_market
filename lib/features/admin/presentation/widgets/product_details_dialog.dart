@@ -15,13 +15,14 @@ import 'draggable_product_image.dart';
 /// «تفاصيل المنتج» for the order taker: a large image (copy / share it to
 /// send to a customer), barcode and stock, and a bulk «إضافة كمية بالجملة».
 ///
-/// [onAddQuantity] gets the exact amount typed (1…[PhoneOrderState.maxQuantity]);
-/// weight-based products have no bulk field and use [onPickWeight] instead.
+/// [onAddQuantity] gets the exact amount typed (1…[PhoneOrderState.maxQuantity])
+/// plus an optional item note; weight-based products use [onPickWeight] instead.
 Future<void> showProductDetailsDialog(
   BuildContext context, {
   required Product product,
-  required ValueChanged<int> onAddQuantity,
-  required VoidCallback onPickWeight,
+  required void Function(int quantity, String? notes) onAddQuantity,
+  required void Function(String? notes) onPickWeight,
+  String? initialNotes,
 }) {
   return showDialog<void>(
     context: context,
@@ -29,6 +30,7 @@ Future<void> showProductDetailsDialog(
       product: product,
       onAddQuantity: onAddQuantity,
       onPickWeight: onPickWeight,
+      initialNotes: initialNotes,
     ),
   );
 }
@@ -39,11 +41,13 @@ class ProductDetailsDialog extends StatefulWidget {
     required this.product,
     required this.onAddQuantity,
     required this.onPickWeight,
+    this.initialNotes,
   });
 
   final Product product;
-  final ValueChanged<int> onAddQuantity;
-  final VoidCallback onPickWeight;
+  final void Function(int quantity, String? notes) onAddQuantity;
+  final void Function(String? notes) onPickWeight;
+  final String? initialNotes;
 
   @override
   State<ProductDetailsDialog> createState() => _ProductDetailsDialogState();
@@ -52,11 +56,17 @@ class ProductDetailsDialog extends StatefulWidget {
 class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   final _quantity = TextEditingController(text: '1');
   final _quantityFocus = FocusNode();
+  late final _notes = TextEditingController(text: widget.initialNotes ?? '');
   var _busy = false;
   String? _error;
 
   Product get _product => widget.product;
   String? get _imageUrl => _product.hasValidImageUrl ? _product.imageUrl : null;
+
+  String? get _trimmedNotes {
+    final t = _notes.text.trim();
+    return t.isEmpty ? null : t;
+  }
 
   @override
   void initState() {
@@ -76,6 +86,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   void dispose() {
     _quantity.dispose();
     _quantityFocus.dispose();
+    _notes.dispose();
     super.dispose();
   }
 
@@ -187,7 +198,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
-    widget.onAddQuantity(quantity);
+    widget.onAddQuantity(quantity, _trimmedNotes);
     Navigator.of(context).pop();
     messenger
       ..hideCurrentSnackBar()
@@ -266,8 +277,9 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
             child: FilledButton.icon(
               key: const Key('product-dialog-pick-weight'),
               onPressed: () {
+                final notes = _trimmedNotes;
                 Navigator.of(context).pop();
-                widget.onPickWeight();
+                widget.onPickWeight(notes);
               },
               icon: const Icon(Icons.scale_rounded),
               label: const Text('اختيار الوزن'),
@@ -420,6 +432,18 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                 ],
               ),
               const SizedBox(height: 14),
+              TextField(
+                key: const Key('product-dialog-item-notes'),
+                controller: _notes,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'ملاحظة للصنف',
+                  hintText: 'مثال: على ربعين، تقطيع رفيع...',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
               bulk,
               const SizedBox(height: 10),
               TextButton(

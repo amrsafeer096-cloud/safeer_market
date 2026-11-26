@@ -87,6 +87,20 @@ class CartItemTile extends StatelessWidget {
                     color: AppColors.secondary,
                   ),
                 ),
+                if (item.trimmedNotes case final note?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'ملاحظة: $note',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.amber.shade900,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

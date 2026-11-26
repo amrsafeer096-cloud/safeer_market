@@ -10,9 +10,11 @@ import '../../../../core/widgets/mobile_frame.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../home/presentation/providers/home_providers.dart';
+import '../../domain/entities/cart_item.dart';
 import '../../domain/weight_options.dart';
 import '../providers/cart_providers.dart';
 import '../widgets/cart_item_tile.dart';
+import '../widgets/weight_picker_sheet.dart';
 import '../../../subscriptions/presentation/providers/subscription_providers.dart';
 import '../../../subscriptions/presentation/screens/paywall_screen.dart';
 
@@ -56,30 +58,36 @@ class CartScreen extends ConsumerWidget {
                           direction: DismissDirection.endToStart,
                           onDismissed: (_) => cart.remove(item.product.id),
                           background: const _DismissBackground(),
-                          child: switch (item.selectedWeightInGrams) {
-                            final grams? => CartItemTile(
-                                item: item,
-                                onIncrement: () => cart.setWeight(
-                                  item.product,
-                                  WeightOptions.next(grams),
+                          child: InkWell(
+                            onTap: () => _editCartItem(context, ref, item),
+                            borderRadius: BorderRadius.circular(18),
+                            child: switch (item.selectedWeightInGrams) {
+                              final grams? => CartItemTile(
+                                  item: item,
+                                  onIncrement: () => cart.setWeight(
+                                    item.product,
+                                    WeightOptions.next(grams),
+                                    notes: item.notes,
+                                  ),
+                                  onDecrement: () => cart.setWeight(
+                                    item.product,
+                                    WeightOptions.previous(grams),
+                                    notes: item.notes,
+                                  ),
                                 ),
-                                onDecrement: () => cart.setWeight(
-                                  item.product,
-                                  WeightOptions.previous(grams),
+                              null => CartItemTile(
+                                  item: item,
+                                  onIncrement: () => cart.updateQuantity(
+                                    item.product.id,
+                                    item.quantity + 1,
+                                  ),
+                                  onDecrement: () => cart.updateQuantity(
+                                    item.product.id,
+                                    item.quantity - 1,
+                                  ),
                                 ),
-                              ),
-                            null => CartItemTile(
-                                item: item,
-                                onIncrement: () => cart.updateQuantity(
-                                  item.product.id,
-                                  item.quantity + 1,
-                                ),
-                                onDecrement: () => cart.updateQuantity(
-                                  item.product.id,
-                                  item.quantity - 1,
-                                ),
-                              ),
-                          },
+                            },
+                          ),
                         ),
                         const SizedBox(height: 12),
                       ],
@@ -99,6 +107,76 @@ class CartScreen extends ConsumerWidget {
       if (!(signedIn ?? false) || !context.mounted) return;
     }
     await context.push(AppRoutes.checkout);
+  }
+
+  Future<void> _editCartItem(
+    BuildContext context,
+    WidgetRef ref,
+    CartItem item,
+  ) async {
+    final cart = ref.read(cartProvider.notifier);
+    if (item.isWeightBased) {
+      final pick = await showWeightPickerSheet(
+        context,
+        product: item.product,
+        initialGrams: item.selectedWeightInGrams,
+        initialNotes: item.notes,
+      );
+      if (pick == null || !context.mounted) return;
+      cart.setWeight(item.product, pick.grams, notes: pick.notes);
+      return;
+    }
+    final notesCtrl = TextEditingController(text: item.notes ?? '');
+    final qtyCtrl = TextEditingController(text: '${item.quantity}');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('cart-item-notes-dialog'),
+        title: Text(item.product.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: qtyCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'الكمية',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: notesCtrl,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'ملاحظة للصنف',
+                hintText: 'مثال: على ربعين، تقطيع رفيع...',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    final notes = notesCtrl.text.trim();
+    final qty = int.tryParse(qtyCtrl.text.trim()) ?? item.quantity;
+    notesCtrl.dispose();
+    qtyCtrl.dispose();
+    if (saved != true || !context.mounted) return;
+    cart.updateQuantity(item.product.id, qty < 1 ? 1 : qty);
+    cart.setItemNotes(item.product.id, notes.isEmpty ? null : notes);
   }
 }
 

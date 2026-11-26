@@ -103,15 +103,23 @@ class CartNotifier extends Notifier<List<CartItem>> {
   }
 
   /// Adds or replaces a weight-based item; zero grams or less removes it.
-  void setWeight(Product product, int grams) {
+  void setWeight(Product product, int grams, {String? notes}) {
     if (grams <= 0) {
       remove(product.id);
       return;
+    }
+    String? existingNotes;
+    for (final existing in state) {
+      if (existing.product.id == product.id) {
+        existingNotes = existing.notes;
+        break;
+      }
     }
     final item = CartItem(
       product: product,
       quantity: 1,
       selectedWeightInGrams: grams,
+      notes: notes ?? existingNotes,
     );
     final exists = state.any((existing) => existing.product.id == product.id);
     state = exists
@@ -122,6 +130,19 @@ class CartNotifier extends Notifier<List<CartItem>> {
         : [...state, item];
   }
 
+  void setItemNotes(String productId, String? notes) {
+    final trimmed = notes?.trim();
+    state = [
+      for (final item in state)
+        item.product.id == productId
+            ? item.copyWith(
+                notes: trimmed,
+                clearNotes: trimmed == null || trimmed.isEmpty,
+              )
+            : item,
+    ];
+  }
+
   void clear() => state = const [];
 }
 
@@ -129,6 +150,7 @@ Map<String, dynamic> _cartItemToJson(CartItem item) => {
       'product': ProductModel.toJson(item.product),
       'quantity': item.quantity,
       'selected_weight_in_grams': item.selectedWeightInGrams,
+      if (item.trimmedNotes != null) 'notes': item.trimmedNotes,
     };
 
 CartItem? _cartItemFromJson(Map<String, dynamic> json) {
@@ -149,11 +171,13 @@ CartItem? _cartItemFromJson(Map<String, dynamic> json) {
     final String value => int.tryParse(value.trim()),
     _ => null,
   };
+  final notesRaw = json['notes']?.toString().trim();
   return CartItem(
     product: product,
     quantity: product.isWeightBased ? 1 : quantity,
     selectedWeightInGrams: product.isWeightBased
         ? (grams == null || grams <= 0 ? WeightOptions.defaultGrams : grams)
         : grams,
+    notes: (notesRaw == null || notesRaw.isEmpty) ? null : notesRaw,
   );
 }

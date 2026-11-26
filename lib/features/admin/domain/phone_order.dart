@@ -147,6 +147,8 @@ class PhoneOrderCustomer {
     this.phone,
     this.phone2,
     this.phone3,
+    this.phone4,
+    this.phone5,
     this.notes,
     this.address,
     this.zone,
@@ -165,6 +167,8 @@ class PhoneOrderCustomer {
   final String? phone;
   final String? phone2;
   final String? phone3;
+  final String? phone4;
+  final String? phone5;
   final String? notes;
   final String? address;
   final String? zone;
@@ -181,6 +185,9 @@ class PhoneOrderCustomer {
   /// Supabase `customer_addresses.id` chosen for this order (as string).
   final String? selectedAddressId;
 
+  /// All non-empty phone slots in order (up to 5).
+  List<String?> get phoneSlots => [phone, phone2, phone3, phone4, phone5];
+
   /// Stable across searches, for list keys and "is this the same caller".
   String get key => userId ?? 'pos-$posCustomerId';
 
@@ -189,6 +196,8 @@ class PhoneOrderCustomer {
     String? phone,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
     String? address,
     String? zone,
@@ -198,6 +207,8 @@ class PhoneOrderCustomer {
     String? selectedAddressId,
     bool clearPhone2 = false,
     bool clearPhone3 = false,
+    bool clearPhone4 = false,
+    bool clearPhone5 = false,
     bool clearNotes = false,
     bool clearFujitsuAddressId = false,
   }) =>
@@ -209,6 +220,8 @@ class PhoneOrderCustomer {
         phone: phone ?? this.phone,
         phone2: clearPhone2 ? null : phone2 ?? this.phone2,
         phone3: clearPhone3 ? null : phone3 ?? this.phone3,
+        phone4: clearPhone4 ? null : phone4 ?? this.phone4,
+        phone5: clearPhone5 ? null : phone5 ?? this.phone5,
         notes: clearNotes ? null : notes ?? this.notes,
         address: address ?? this.address,
         zone: zone ?? this.zone,
@@ -226,6 +239,7 @@ class PhoneOrderLine {
     required this.product,
     required this.quantity,
     this.weightInGrams,
+    this.notes,
   });
 
   final Product product;
@@ -236,7 +250,15 @@ class PhoneOrderLine {
   /// Grams chosen for a weight-based product; null for unit products.
   final int? weightInGrams;
 
+  /// Optional per-item instruction («ملاحظة للصنف»).
+  final String? notes;
+
   bool get isWeightBased => weightInGrams != null;
+
+  String? get trimmedNotes {
+    final t = notes?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
 
   /// Line total: proportional kilo price when weighed, else unit × quantity.
   double get total => switch (weightInGrams) {
@@ -255,12 +277,21 @@ class PhoneOrderLine {
         product: product,
         quantity: quantity,
         weightInGrams: weightInGrams,
+        notes: notes,
       );
 
-  PhoneOrderLine withWeight(int grams) => PhoneOrderLine(
+  PhoneOrderLine withWeight(int grams, {String? notes}) => PhoneOrderLine(
         product: product,
         quantity: 1,
         weightInGrams: grams,
+        notes: notes ?? this.notes,
+      );
+
+  PhoneOrderLine withNotes(String? notes) => PhoneOrderLine(
+        product: product,
+        quantity: quantity,
+        weightInGrams: weightInGrams,
+        notes: notes,
       );
 }
 

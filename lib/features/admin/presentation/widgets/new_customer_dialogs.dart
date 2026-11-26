@@ -9,16 +9,10 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../addresses/domain/services/location_service.dart';
-import '../../../auth/domain/egyptian_phone.dart';
+import '../../../auth/domain/customer_phone.dart';
 import '../../domain/phone_order.dart';
 import '../providers/phone_order_providers.dart';
-
-/// Phone helpers shared by both steps (mobile + landline).
-abstract final class _Phone {
-  static String local(String raw) => EgyptianPhone.normalize(raw);
-
-  static bool isValid(String raw) => EgyptianPhone.isValidCustomerPhone(raw);
-}
+import 'customer_phones_editor.dart';
 
 String? _optional(TextEditingController controller) =>
     controller.text.trim().isEmpty ? null : controller.text.trim();
@@ -46,29 +40,39 @@ class NewCustomerDialog extends ConsumerStatefulWidget {
 
 class _NewCustomerDialogState extends ConsumerState<NewCustomerDialog> {
   final _form = GlobalKey<FormState>();
+  final _phonesKey = GlobalKey<CustomerPhonesEditorState>();
   late final _name = TextEditingController(text: widget.initialName);
-  late final _phone = TextEditingController(text: widget.initialPhone);
-  final _phone2 = TextEditingController();
   var _type = PhoneOrderCustomerType.regular;
   bool _saving = false;
   String? _error;
 
   @override
   void dispose() {
-    for (final controller in [_name, _phone, _phone2]) {
-      controller.dispose();
-    }
+    _name.dispose();
     super.dispose();
   }
 
+  List<String?> _slots() =>
+      _phonesKey.currentState?.fiveSlots() ??
+      CustomerPhone.fiveSlots([widget.initialPhone]);
+
   Future<void> _addAddress() async {
     if (_saving || !_form.currentState!.validate()) return;
+    final phoneError = _phonesKey.currentState?.validate();
+    if (phoneError != null) {
+      setState(() => _error = phoneError);
+      return;
+    }
+    final slots = _slots();
     final customer = await showDialog<PhoneOrderCustomer>(
       context: context,
       builder: (_) => CustomerAddressDialog(
         name: _name.text.trim(),
-        phone: _phone.text.trim(),
-        phone2: _optional(_phone2),
+        phone: slots[0] ?? '',
+        phone2: slots[1],
+        phone3: slots[2],
+        phone4: slots[3],
+        phone5: slots[4],
         type: _type,
       ),
     );
@@ -77,17 +81,25 @@ class _NewCustomerDialogState extends ConsumerState<NewCustomerDialog> {
 
   Future<void> _saveWithoutAddress() async {
     if (_saving || !_form.currentState!.validate()) return;
+    final phoneError = _phonesKey.currentState?.validate();
+    if (phoneError != null) {
+      setState(() => _error = phoneError);
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      final phone2 = _optional(_phone2);
+      final slots = _slots();
       final customer =
           await ref.read(phoneOrdersRepositoryProvider).createCustomer(
                 fullName: _name.text.trim(),
-                phone: _Phone.local(_phone.text),
-                phone2: phone2 == null ? null : _Phone.local(phone2),
+                phone: slots[0] ?? '',
+                phone2: slots[1],
+                phone3: slots[2],
+                phone4: slots[3],
+                phone5: slots[4],
                 type: _type,
               );
       if (mounted) Navigator.of(context).pop(customer);
@@ -128,32 +140,10 @@ class _NewCustomerDialogState extends ConsumerState<NewCustomerDialog> {
                       ? l10n.phoneOrderNameRequired
                       : null,
                 ),
-                TextFormField(
-                  key: const Key('new-customer-phone'),
-                  controller: _phone,
-                  keyboardType: TextInputType.phone,
-                  textDirection: TextDirection.ltr,
-                  decoration: const InputDecoration(
-                    labelText: 'رقم الهاتف 1',
-                    hintText: 'موبايل أو أرضي',
-                  ),
-                  validator: (value) => _Phone.isValid(value ?? '')
-                      ? null
-                      : l10n.phoneOrderPhoneInvalid,
-                ),
-                TextFormField(
-                  key: const Key('new-customer-phone2'),
-                  controller: _phone2,
-                  keyboardType: TextInputType.phone,
-                  textDirection: TextDirection.ltr,
-                  decoration: const InputDecoration(
-                    labelText: 'رقم الهاتف 2 - اختياري',
-                    hintText: 'موبايل أو أرضي',
-                  ),
-                  validator: (value) =>
-                      (value ?? '').trim().isEmpty || _Phone.isValid(value!)
-                          ? null
-                          : l10n.phoneOrderPhoneInvalid,
+                const SizedBox(height: 8),
+                CustomerPhonesEditor(
+                  key: _phonesKey,
+                  initialPhones: [widget.initialPhone],
                 ),
                 const SizedBox(height: 16),
                 Text('نوع العميل',
@@ -232,12 +222,18 @@ class CustomerAddressDialog extends ConsumerStatefulWidget {
     required this.name,
     required this.phone,
     this.phone2,
+    this.phone3,
+    this.phone4,
+    this.phone5,
     this.type = PhoneOrderCustomerType.regular,
   });
 
   final String name;
   final String phone;
   final String? phone2;
+  final String? phone3;
+  final String? phone4;
+  final String? phone5;
   final PhoneOrderCustomerType type;
 
   /// Below this width the two sides stack.
@@ -250,8 +246,8 @@ class CustomerAddressDialog extends ConsumerStatefulWidget {
 
 class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
   final _form = GlobalKey<FormState>();
+  final _phonesKey = GlobalKey<CustomerPhonesEditorState>();
   late final _name = TextEditingController(text: widget.name);
-  late final _phone = TextEditingController(text: widget.phone);
   final _building = TextEditingController();
   final _floor = TextEditingController();
   final _apartment = TextEditingController();
@@ -265,9 +261,17 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
   bool _saving = false;
   String? _error;
 
+  List<String?> get _initialPhones => [
+        widget.phone,
+        widget.phone2,
+        widget.phone3,
+        widget.phone4,
+        widget.phone5,
+      ];
+
   @override
   void dispose() {
-    for (final controller in [_name, _phone, _building, _floor, _apartment]) {
+    for (final controller in [_name, _building, _floor, _apartment]) {
       controller.dispose();
     }
     super.dispose();
@@ -321,21 +325,30 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
 
   Future<void> _save() async {
     if (_saving || !_form.currentState!.validate()) return;
+    final phoneError = _phonesKey.currentState?.validate();
+    if (phoneError != null) {
+      setState(() => _error = phoneError);
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      final phone2 = widget.phone2;
+      final slots = _phonesKey.currentState?.fiveSlots() ??
+          CustomerPhone.fiveSlots(_initialPhones);
       final zone = _selectedZone;
       final customer =
           await ref.read(phoneOrdersRepositoryProvider).createCustomer(
                 fullName: _name.text.trim(),
-                phone: _Phone.local(_phone.text),
+                phone: slots[0] ?? '',
                 address: _addressLine,
                 zone: zone?.name ?? _city,
                 fujitsuZoneId: zone?.fujitsuZoneId,
-                phone2: phone2 == null ? null : _Phone.local(phone2),
+                phone2: slots[1],
+                phone3: slots[2],
+                phone4: slots[3],
+                phone5: slots[4],
                 type: widget.type,
                 governorate: _currentGovernorate,
                 city: _city,
@@ -553,35 +566,19 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              key: const Key('address-customer-name'),
-                              controller: _name,
-                              decoration: InputDecoration(
-                                  labelText: l10n.phoneOrderCustomerName),
-                              validator: (value) => (value ?? '').trim().isEmpty
-                                  ? l10n.phoneOrderNameRequired
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              key: const Key('address-customer-phone'),
-                              controller: _phone,
-                              keyboardType: TextInputType.phone,
-                              textDirection: TextDirection.ltr,
-                              decoration: const InputDecoration(
-                                  labelText: 'رقم الهاتف 1'),
-                              validator: (value) => _Phone.isValid(value ?? '')
-                                  ? null
-                                  : l10n.phoneOrderPhoneInvalid,
-                            ),
-                          ),
-                        ],
+                      TextFormField(
+                        key: const Key('address-customer-name'),
+                        controller: _name,
+                        decoration: InputDecoration(
+                            labelText: l10n.phoneOrderCustomerName),
+                        validator: (value) => (value ?? '').trim().isEmpty
+                            ? l10n.phoneOrderNameRequired
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      CustomerPhonesEditor(
+                        key: _phonesKey,
+                        initialPhones: _initialPhones,
                       ),
                       const SizedBox(height: 8),
                       LayoutBuilder(

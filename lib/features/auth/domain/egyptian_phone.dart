@@ -95,4 +95,35 @@ abstract final class EgyptianPhone {
     }
     return international;
   }
+
+  /// Secondary only when present and different from [primary] (normalized).
+  static String? distinctSecondary(String? primary, String? secondary) {
+    final a = normalize(primary ?? '');
+    final b = normalize(secondary ?? '');
+    if (b.isEmpty || b == a) return null;
+    return b;
+  }
+
+  /// Unique non-empty phones in order, normalized; identical digits dropped.
+  static List<String> uniquePhones(Iterable<String?> phones) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final raw in phones) {
+      final digits = normalize(raw ?? '');
+      if (digits.isEmpty || !seen.add(digits)) continue;
+      out.add(digits);
+    }
+    return out;
+  }
+
+  /// Display join (` / ` or ` - `) with duplicates removed.
+  static String formatPhones(
+    Iterable<String?> phones, {
+    String separator = ' / ',
+    String empty = '—',
+  }) {
+    final unique = uniquePhones(phones);
+    if (unique.isEmpty) return empty;
+    return unique.join(separator);
+  }
 }

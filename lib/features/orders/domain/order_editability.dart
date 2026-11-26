@@ -30,6 +30,7 @@ class OrderEditLine {
     this.listPrice,
     this.stockQuantity = 0,
     this.weightInGrams,
+    this.notes,
     this.isWeightBased = false,
     this.unit = Product.defaultUnit,
     this.existingItemId,
@@ -46,9 +47,15 @@ class OrderEditLine {
   double unitPrice;
   int quantity;
   int? weightInGrams;
+  String? notes;
   final bool isWeightBased;
   final String unit;
   final String? existingItemId;
+
+  String? get trimmedNotes {
+    final t = notes?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
 
   bool get soldByWeight =>
       isWeightBased || (weightInGrams != null && weightInGrams! > 0);
@@ -67,6 +74,7 @@ class OrderEditLine {
         'price_at_time': unitPrice,
         if (weightInGrams != null && weightInGrams! > 0)
           'weight_in_grams': weightInGrams,
+        if (trimmedNotes != null) 'notes': trimmedNotes,
       };
 
   Product toProduct() {
@@ -90,7 +98,9 @@ class OrderEditLine {
     int? quantity,
     double? unitPrice,
     int? weightInGrams,
+    String? notes,
     bool clearWeight = false,
+    bool clearNotes = false,
   }) =>
       OrderEditLine(
         productId: productId,
@@ -103,6 +113,7 @@ class OrderEditLine {
         quantity: quantity ?? this.quantity,
         weightInGrams:
             clearWeight ? null : (weightInGrams ?? this.weightInGrams),
+        notes: clearNotes ? null : (notes ?? this.notes),
         isWeightBased: isWeightBased,
         unit: unit,
         existingItemId: existingItemId,

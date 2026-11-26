@@ -105,6 +105,7 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
               'price_at_time': item.unitPrice,
               if (item.selectedWeightInGrams case final grams?)
                 'weight_in_grams': grams,
+              if (item.trimmedNotes case final note?) 'notes': note,
             },
         ]);
       } catch (_) {
@@ -127,6 +128,26 @@ class SupabaseCheckoutRepository implements CheckoutRepository {
               .eq('id', userId);
         } catch (_) {}
       }
+
+      // Link / merge into existing POS customer with the same phone.
+      try {
+        final linked = await _client.rpc(
+          'link_profile_to_pos_customer',
+          params: {'p_user_id': userId},
+        );
+        final posId = switch (linked) {
+          final int id => id,
+          final num id => id.toInt(),
+          final String id => int.tryParse(id),
+          _ => null,
+        };
+        if (posId != null) {
+          await _client
+              .from('orders')
+              .update({'pos_customer_id': posId})
+              .eq('id', orderId);
+        }
+      } catch (_) {}
 
       return orderId.toString();
     } on PostgrestException catch (e) {

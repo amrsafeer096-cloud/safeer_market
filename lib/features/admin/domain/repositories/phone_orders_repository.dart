@@ -24,6 +24,8 @@ abstract class PhoneOrdersRepository {
     String? fujitsuZoneId,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
     String? branch,
     PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
@@ -48,6 +50,8 @@ abstract class PhoneOrdersRepository {
     String? phone,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
   });
 

@@ -6,6 +6,7 @@ class CartItem {
     required this.product,
     required this.quantity,
     this.selectedWeightInGrams,
+    this.notes,
   });
 
   final Product product;
@@ -14,7 +15,15 @@ class CartItem {
   final int quantity;
   final int? selectedWeightInGrams;
 
+  /// Optional per-item instruction («ملاحظة للصنف»).
+  final String? notes;
+
   bool get isWeightBased => selectedWeightInGrams != null;
+
+  String? get trimmedNotes {
+    final t = notes?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
 
   /// Price of one piece, or of the selected weight for weight-based items,
   /// after any offer.
@@ -25,12 +34,18 @@ class CartItem {
 
   double get total => unitPrice * quantity;
 
-  CartItem copyWith({int? quantity, int? selectedWeightInGrams}) {
+  CartItem copyWith({
+    int? quantity,
+    int? selectedWeightInGrams,
+    String? notes,
+    bool clearNotes = false,
+  }) {
     return CartItem(
       product: product,
       quantity: quantity ?? this.quantity,
       selectedWeightInGrams:
           selectedWeightInGrams ?? this.selectedWeightInGrams,
+      notes: clearNotes ? null : (notes ?? this.notes),
     );
   }
 }

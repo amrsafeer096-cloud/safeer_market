@@ -101,17 +101,27 @@ class _CustomerPurchaseHistoryDialogState
       controller.add(product);
       return;
     }
-    final grams = await showWeightPickerSheet(
+    final state = ref.read(phoneOrderControllerProvider);
+    PhoneOrderLine? existing;
+    for (final line in state.lines) {
+      if (line.product.id == product.id) {
+        existing = line;
+        break;
+      }
+    }
+    final pick = await showWeightPickerSheet(
       context,
       product: product,
       initialGrams: initialGrams ??
-          ref.read(phoneOrderControllerProvider).weightOf(product.id) ??
+          existing?.weightInGrams ??
+          state.weightOf(product.id) ??
           WeightOptions.defaultGrams,
+      initialNotes: existing?.notes,
       title: 'اختر الوزن المطلوب',
       labelFor: WeightOptions.phoneOrderLabel,
     );
-    if (grams == null || !mounted) return;
-    controller.setWeight(product, grams);
+    if (pick == null || !mounted) return;
+    controller.setWeight(product, pick.grams, notes: pick.notes);
   }
 
   void _addLastAmount(CustomerPurchaseItem item) {

@@ -7,6 +7,7 @@ import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../l10n/app_localizations.dart';
+import '../../../auth/domain/customer_phone.dart';
 import '../../../cart/domain/weight_options.dart';
 import '../../../cart/presentation/widgets/weight_picker_sheet.dart';
 import '../../../checkout/domain/delivery_pricing.dart';
@@ -592,22 +593,35 @@ void _showMessage(BuildContext context, String message, {bool ok = false}) {
 Future<void> _addProduct(
   BuildContext context,
   WidgetRef ref,
-  Product product,
-) async {
+  Product product, {
+  String? initialNotes,
+}) async {
   final controller = ref.read(phoneOrderControllerProvider.notifier);
   if (!product.isWeightBased) {
     controller.add(product);
+    if (initialNotes != null && initialNotes.trim().isNotEmpty) {
+      controller.setLineNotes(product, initialNotes);
+    }
     return;
   }
-  final grams = await showWeightPickerSheet(
+  final state = ref.read(phoneOrderControllerProvider);
+  PhoneOrderLine? existing;
+  for (final line in state.lines) {
+    if (line.product.id == product.id) {
+      existing = line;
+      break;
+    }
+  }
+  final pick = await showWeightPickerSheet(
     context,
     product: product,
-    initialGrams: ref.read(phoneOrderControllerProvider).weightOf(product.id),
+    initialGrams: existing?.weightInGrams ?? state.weightOf(product.id),
+    initialNotes: initialNotes ?? existing?.notes,
     title: 'اختر الوزن المطلوب',
     labelFor: WeightOptions.phoneOrderLabel,
   );
-  if (grams == null || !context.mounted) return;
-  controller.setWeight(product, grams);
+  if (pick == null || !context.mounted) return;
+  controller.setWeight(product, pick.grams, notes: pick.notes);
 }
 
 // ---------------------------------------------------------------------------
@@ -847,7 +861,7 @@ class _OrderBuilder extends ConsumerStatefulWidget {
 }
 
 /// Packaging filter chips beside «نتائج البحث».
-enum _UnitPackFilter { all, piece, box }
+enum _UnitPackFilter { all, piece, box, weight }
 
 class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   final _search = TextEditingController();
@@ -1042,19 +1056,29 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     _dismissSearch();
   }
 
-  /// Double-click opens the detail card; Enter adds qty and clears search.
+  /// Single tap opens the detail card; Enter adds qty and clears search.
   Future<void> _openDetails(Product product) async {
+    String? existingNotes;
+    for (final line in ref.read(phoneOrderControllerProvider).lines) {
+      if (line.product.id == product.id) {
+        existingNotes = line.notes;
+        break;
+      }
+    }
     await showProductDetailsDialog(
       context,
       product: product,
-      onAddQuantity: (quantity) {
-        ref
-            .read(phoneOrderControllerProvider.notifier)
-            .addQuantity(product, quantity);
+      initialNotes: existingNotes,
+      onAddQuantity: (quantity, notes) {
+        ref.read(phoneOrderControllerProvider.notifier).addQuantity(
+              product,
+              quantity,
+              notes: notes,
+            );
         _dismissSearch();
       },
-      onPickWeight: () async {
-        await _addProduct(context, ref, product);
+      onPickWeight: (notes) async {
+        await _addProduct(context, ref, product, initialNotes: notes);
         if (mounted) _dismissSearch();
       },
     );
@@ -1079,6 +1103,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
           _UnitPackFilter.all => true,
           _UnitPackFilter.piece => product.isPieceUnit,
           _UnitPackFilter.box => product.isBoxUnit,
+          _UnitPackFilter.weight => product.isWeightBased,
         };
 
     Widget productTile(Product product) {
@@ -1200,6 +1225,12 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                             key: const Key('phone-order-unit-filter-box'),
                             label: 'علبة',
                             value: _UnitPackFilter.box,
+                          ),
+                          const SizedBox(width: 4),
+                          unitPackChip(
+                            key: const Key('phone-order-unit-filter-weight'),
+                            label: 'وزن',
+                            value: _UnitPackFilter.weight,
                           ),
                         ],
                       ),
@@ -1489,11 +1520,7 @@ class _LockedCustomer extends StatelessWidget {
         .whereType<String>()
         .where((part) => part.trim().isNotEmpty)
         .join(' - ');
-    final phones = [
-      customer.phone,
-      customer.phone2,
-      customer.phone3,
-    ].whereType<String>().where((p) => p.trim().isNotEmpty).join(' / ');
+    final phones = CustomerPhone.formatPhones(customer.phoneSlots, empty: '');
     final iconSize = compact ? 18.0 : 22.0;
     return Material(
       color: Colors.transparent,
@@ -1669,8 +1696,10 @@ class _CartPanel extends ConsumerWidget {
       await showCartLineEditDialog(
         context,
         line: line,
-        onSetQuantity: (q) => controller.setQuantity(line.product, q),
-        onSetWeightGrams: (g) => controller.setWeight(line.product, g),
+        onSetQuantity: (q, notes) =>
+            controller.setQuantity(line.product, q, notes: notes),
+        onSetWeightGrams: (g, notes) =>
+            controller.setWeight(line.product, g, notes: notes),
         onRemove: () {
           if (line.weightInGrams != null) {
             controller.setWeight(line.product, 0);
@@ -2028,6 +2057,17 @@ class _CartLine extends StatelessWidget {
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
                         color: palette.accent,
+                      ),
+                    ),
+                  if (line.trimmedNotes case final note?)
+                    Text(
+                      'ملاحظة: $note',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.amber.shade900,
                       ),
                     ),
                 ],

@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
 import '../../../../core/notifications/push_notification_service.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../domain/entities/user_profile.dart';
 import '../../domain/entities/user_role.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -45,7 +46,12 @@ class SupabaseProfileRepository implements ProfileRepository {
     required String phone,
   }) async {
     try {
-      await _saveOwnRow(userId, {'full_name': fullName, 'phone': phone});
+      final normalized = EgyptianPhone.normalize(phone);
+      await _saveOwnRow(userId, {
+        'full_name': fullName,
+        'phone': normalized.isEmpty ? phone : normalized,
+      });
+      await _linkPosCustomer(userId);
     } on PostgrestException catch (error) {
       throw ProfileFailure(L10n.current.profileSaveFailed(error.message));
     }
@@ -65,10 +71,14 @@ class SupabaseProfileRepository implements ProfileRepository {
         .maybeSingle();
 
     bool isBlank(Object? value) => value is! String || value.trim().isEmpty;
+    final normalizedPhone = phone == null || phone.trim().isEmpty
+        ? null
+        : EgyptianPhone.normalize(phone);
     final missing = <String, Object?>{
       if (!isBlank(fullName) && isBlank(row?['full_name']))
         'full_name': fullName,
-      if (!isBlank(phone) && isBlank(row?['phone'])) 'phone': phone,
+      if (!isBlank(normalizedPhone) && isBlank(row?['phone']))
+        'phone': normalizedPhone,
       if (!isBlank(avatarUrl) && isBlank(row?['avatar_url']))
         'avatar_url': avatarUrl,
     };
@@ -79,8 +89,22 @@ class SupabaseProfileRepository implements ProfileRepository {
       } else if (missing.isNotEmpty) {
         await _client.from('profiles').update(missing).eq('id', userId);
       }
+      await _linkPosCustomer(userId);
     } on PostgrestException catch (error) {
       throw ProfileFailure(L10n.current.profileSaveFailed(error.message));
+    }
+  }
+
+  /// Merge this app account into an existing POS customer with the same phone.
+  Future<void> _linkPosCustomer(String userId) async {
+    try {
+      await _client.rpc(
+        'link_profile_to_pos_customer',
+        params: {'p_user_id': userId},
+      );
+    } on PostgrestException catch (error) {
+      // Migration may not be applied yet — profile save still succeeded.
+      debugPrint('link_profile_to_pos_customer: ${error.message}');
     }
   }
 

@@ -39,7 +39,7 @@ class SupabaseAdminOrdersRepository implements AdminOrdersRepository {
     final rows = await _client
         .from('order_items')
         .select(
-          'id, product_id, quantity, price_at_time, weight_in_grams, '
+          'id, product_id, quantity, price_at_time, weight_in_grams, notes, '
           'products(name, image_url, barcode, unit, is_weight_based)',
         )
         .eq('order_id', orderId);
@@ -70,6 +70,7 @@ class SupabaseAdminOrdersRepository implements AdminOrdersRepository {
         price: _toNum(row['price_at_time']).toDouble(),
         // Never keep 0 grams — non-weighted lines show quantity + unit.
         weightInGrams: positiveWeight,
+        notes: _text(row['notes']),
         isWeightBased: weightBased && positiveWeight != null,
       );
     }).toList();

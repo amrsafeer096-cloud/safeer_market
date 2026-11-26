@@ -465,6 +465,32 @@ def find_customer(cursor, phone: str) -> Optional[tuple[int, Optional[int]]]:
     return int(row[0]), (int(row[1]) if row[1] is not None else None)
 
 
+def _distinct_phones(
+    primary: Optional[str], *secondaries: Optional[str]
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], list[str]]:
+    """Mobile + up to 3 Fujitsu secondaries; also return all distinct phones.
+
+    Fujitsu Customers has Mobile + Phone1..Phone3 (4 slots). Extra numbers
+    (5th) are returned in ``all_phones`` for AddressPhones.
+    """
+    mobile = truncate(normalize_phone(primary) or (primary or ""), 20) or None
+    seen = {mobile} if mobile else set()
+    extras: list[str] = []
+    all_phones: list[str] = ([mobile] if mobile else [])
+    for raw in secondaries:
+        normalized = normalize_phone(raw) or (str(raw).strip() if raw else "")
+        p = truncate(normalized, 20) or None
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        extras.append(p)
+        all_phones.append(p)
+    p1 = extras[0] if len(extras) > 0 else None
+    p2 = extras[1] if len(extras) > 1 else None
+    p3 = extras[2] if len(extras) > 2 else None
+    return mobile, p1, p2, p3, all_phones
+
+
 def update_customer_phones(
     cursor,
     *,
@@ -472,14 +498,15 @@ def update_customer_phones(
     phone: str,
     phone2: Optional[str] = None,
     phone3: Optional[str] = None,
+    phone4: Optional[str] = None,
+    phone5: Optional[str] = None,
     name: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> None:
-    """Match Trusty Update Customers phone / name / notes mapping."""
-    mobile = truncate(phone, 20) or None
-    p1 = mobile  # Phone1 mirrors primary mobile when no separate landline
-    p2 = truncate(phone2 or "", 20) or None
-    p3 = truncate(phone3 or "", 20) or None
+    """Update Fujitsu customer phones without duplicating Mobile into Phone1."""
+    mobile, p1, p2, p3, _ = _distinct_phones(
+        phone, phone2, phone3, phone4, phone5
+    )
     display = truncate(name or "", 200) or None
     comments = truncate(notes or "", 500) or None
     try:
@@ -489,9 +516,9 @@ def update_customer_phones(
             SET ArabicName = COALESCE(?, ArabicName),
                 EnglishName = COALESCE(?, EnglishName),
                 Mobile = COALESCE(?, Mobile),
-                Phone1 = COALESCE(?, Phone1),
-                Phone2 = CASE WHEN ? IS NULL THEN Phone2 ELSE ? END,
-                Phone3 = CASE WHEN ? IS NULL THEN Phone3 ELSE ? END,
+                Phone1 = ?,
+                Phone2 = ?,
+                Phone3 = ?,
                 Notes = CASE WHEN ? IS NULL THEN Notes ELSE ? END,
                 ModifiedBy = ?,
                 DateModified = GETDATE(),
@@ -504,8 +531,6 @@ def update_customer_phones(
                 mobile,
                 p1,
                 p2,
-                p2,
-                p3,
                 p3,
                 comments,
                 comments,
@@ -595,6 +620,8 @@ def create_customer(
     address: str,
     phone2: Optional[str] = None,
     phone3: Optional[str] = None,
+    phone4: Optional[str] = None,
+    phone5: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> tuple[int, int]:
     seq_cust = next_hd_sequence(cursor, DOC_CUSTOMER, daily=False)
@@ -603,10 +630,10 @@ def create_customer(
     address_id = seq_addr
 
     display_name = truncate(name, 200, "عميل")
-    mobile = truncate(phone, 20) or None
-    p2 = truncate(phone2 or "", 20) or None
-    p3 = truncate(phone3 or "", 20) or None
-    phone_blob = " - ".join(p for p in (mobile, p2, p3) if p)
+    mobile, p1, p2, p3, all_phones = _distinct_phones(
+        phone, phone2, phone3, phone4, phone5
+    )
+    phone_blob = " - ".join(all_phones)
 
     cursor.execute(
         """
@@ -635,7 +662,7 @@ def create_customer(
             display_name,
             display_name,
             mobile,
-            mobile,  # Phone1
+            p1,  # distinct secondary only — never copy Mobile
             p2,
             p3,
             address_id,
@@ -732,29 +759,36 @@ def ensure_address(
 
 def load_pos_customer_extras(
     pos_customer_id: Any,
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """phone2 / phone3 / notes from Supabase pos_customers."""
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """phone2..phone5 / notes from Supabase pos_customers."""
     if not pos_customer_id:
-        return None, None, None
+        return None, None, None, None, None
     try:
         res = (
             supabase.table("pos_customers")
-            .select("phone2, phone3, notes")
+            .select("phone, phone2, phone3, phone4, phone5, notes")
             .eq("id", pos_customer_id)
             .limit(1)
             .execute()
         )
         rows = res.data or []
         if not rows:
-            return None, None, None
+            return None, None, None, None, None
         row = rows[0]
-        p2 = normalize_phone(row.get("phone2")) or None
-        p3 = normalize_phone(row.get("phone3")) or None
+        mobile = normalize_phone(row.get("phone")) or ""
+        _, p2, p3, p4, all_phones = _distinct_phones(
+            mobile,
+            row.get("phone2"),
+            row.get("phone3"),
+            row.get("phone4"),
+            row.get("phone5"),
+        )
+        p5 = all_phones[4] if len(all_phones) > 4 else None
         notes = (str(row.get("notes") or "").strip() or None)
-        return p2, p3, notes
+        return p2, p3, p4, p5, notes
     except Exception as exc:
         log(f"⚠️ pos_customers extras lookup failed: {exc}")
-        return None, None, None
+        return None, None, None, None, None
 
 
 def write_back_customer_link(
@@ -1748,7 +1782,7 @@ def fetch_order_items(order_id: str) -> list[dict[str, Any]]:
     res = (
         supabase.table("order_items")
         .select(
-            "id, quantity, price_at_time, weight_in_grams, "
+            "id, quantity, price_at_time, weight_in_grams, notes, "
             "products(name, barcode, price, discount_price)"
         )
         .eq("order_id", order_id)
@@ -1939,6 +1973,7 @@ def insert_hd_order_item(
             ItemClass, ItemClassName, ItemSection, ItemSectionName,
             ItemGroup, ItemGroupName, ItemDepartment, ItemDepartmentName,
             RegistrationWay, SelectedFrom,
+            CustomerNotes, Notes,
             CreatedTime, ModifiedTime,
             SourceRowVersion, CreatedRowVersion, CreatedAt, ModifiedAt,
             DateCreated, DateModified
@@ -1954,6 +1989,7 @@ def insert_hd_order_item(
             ?, ?, ?, ?,
             ?, ?, ?, ?,
             3, 0,
+            ?, ?,
             ?, ?,
             0, 0, 0, 0,
             GETDATE(), GETDATE()
@@ -1993,6 +2029,8 @@ def insert_hd_order_item(
             group_name,
             department_id,
             department_name,
+            truncate(str(item.get("notes") or "").strip() or None, 1000) or None,
+            truncate(str(item.get("notes") or "").strip() or None, 1000) or None,
             now,
             now,
         ),
@@ -2019,8 +2057,13 @@ def sync_one_order(order: dict[str, Any]) -> None:
     except (TypeError, ValueError):
         preferred_address_id = None
 
-    phone2, phone3, notes = load_pos_customer_extras(pos_customer_id)
-    phone_blob = " - ".join(p for p in (phone, phone2, phone3) if p)
+    phone2, phone3, phone4, phone5, notes = load_pos_customer_extras(
+        pos_customer_id
+    )
+    _, phone2, phone3, phone4, all_phones = _distinct_phones(
+        phone, phone2, phone3, phone4, phone5
+    )
+    phone_blob = " - ".join(all_phones)
 
     raw_items = fetch_order_items(order_id)
     if not raw_items:
@@ -2039,6 +2082,8 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 phone=phone,
                 phone2=phone2,
                 phone3=phone3,
+                phone4=phone4,
+                phone5=phone5,
                 name=name,
                 notes=notes,
             )
@@ -2057,6 +2102,8 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 address=address,
                 phone2=phone2,
                 phone3=phone3,
+                phone4=phone4,
+                phone5=phone5,
                 notes=notes,
             )
 

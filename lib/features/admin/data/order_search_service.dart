@@ -87,32 +87,46 @@ Future<List<Map<String, dynamic>>> searchOrdersInSupabase(
   var request = client.from('orders').select();
 
   var phone = query.customerPhone.replaceAll(RegExp(r'\D'), '');
-  if (phone.startsWith('0020')) phone = '0${phone.substring(4)}';
-  if (phone.length > 10 && phone.startsWith('20')) {
-    phone = '0${phone.substring(2)}';
-  }
+  // Keep international digits for matching +971… / 00971… as well as
+  // Egyptian local 01… (also try stripping 00 / leading country hints).
+  if (phone.startsWith('00')) phone = phone.substring(2);
+  final egyptLocal = () {
+    var p = phone;
+    if (p.startsWith('20') && p.length >= 11) p = '0${p.substring(2)}';
+    return p;
+  }();
   if (phone.isNotEmpty) {
     // Phone orders store the number on the order; app orders only have it
     // on the customer's profile. Digit needles also match Fujitsu customer nos.
+    final needles = {
+      phone,
+      if (egyptLocal != phone) egyptLocal,
+    }.where((n) => n.length >= 3).toList();
+    final profileOr = needles.map((n) => 'phone.ilike.%$n%').join(',');
     final profiles = await client
         .from('profiles')
         .select('id')
-        .ilike('phone', '%$phone%')
+        .or(profileOr)
         .limit(200);
     final ids = [for (final row in profiles) '${row['id']}'];
+    final posOr = [
+      for (final n in needles) ...[
+        'phone.ilike.%$n%',
+        'phone2.ilike.%$n%',
+        'phone3.ilike.%$n%',
+        'phone4.ilike.%$n%',
+        'phone5.ilike.%$n%',
+      ],
+      'fujitsu_customer_no.eq.$phone',
+    ].join(',');
     final posCustomers = await client
         .from('pos_customers')
         .select('id')
-        .or(
-          'fujitsu_customer_no.eq.$phone,'
-          'phone.ilike.%$phone%,'
-          'phone2.ilike.%$phone%,'
-          'phone3.ilike.%$phone%',
-        )
+        .or(posOr)
         .limit(200);
     final posIds = [for (final row in posCustomers) '${row['id']}'];
     request = request.or([
-      'customer_phone.ilike.%$phone%',
+      for (final n in needles) 'customer_phone.ilike.%$n%',
       'fujitsu_customer_no.eq.$phone',
       if (ids.isNotEmpty) 'user_id.in.(${ids.join(',')})',
       if (posIds.isNotEmpty) 'pos_customer_id.in.(${posIds.join(',')})',

@@ -2432,6 +2432,38 @@ class _PrepItemCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                    if (item.trimmedNotes case final note?)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.amber.shade700),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.comment_rounded,
+                                  size: 15, color: Colors.amber.shade900),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  note,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     if (barcode != null && barcode.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),

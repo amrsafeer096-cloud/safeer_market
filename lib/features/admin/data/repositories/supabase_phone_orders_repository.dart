@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/l10n/l10n.dart';
 import '../../../../core/network/postgrest_helpers.dart';
+import '../../../auth/domain/customer_phone.dart';
 import '../../../catalog/domain/main_categories.dart';
 import '../../../home/data/models/product_model.dart';
 import '../../../home/domain/entities/product.dart';
@@ -46,6 +47,8 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     String? fujitsuZoneId,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
     String? branch,
     PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
@@ -57,16 +60,17 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     double? latitude,
     double? longitude,
   }) async {
-    // Extras are sent only when set, so a plain customer still works on a
-    // database that hasn't had the customer-details migration yet.
+    final slots = CustomerPhone.fiveSlots([phone, phone2, phone3, phone4, phone5]);
     final rows = _rows(await _rpc('create_phone_order_customer', {
       'p_full_name': fullName,
-      'p_phone': phone,
+      'p_phone': slots[0],
       'p_address': address,
       'p_zone': zone,
       if (fujitsuZoneId != null) 'p_fujitsu_zone_id': fujitsuZoneId,
-      if (phone2 != null) 'p_phone2': phone2,
-      if (phone3 != null) 'p_phone3': phone3,
+      if (slots[1] != null) 'p_phone2': slots[1],
+      if (slots[2] != null) 'p_phone3': slots[2],
+      if (slots[3] != null) 'p_phone4': slots[3],
+      if (slots[4] != null) 'p_phone5': slots[4],
       if (notes != null) 'p_notes': notes,
       if (branch != null) 'p_branch': branch,
       if (type != PhoneOrderCustomerType.regular) 'p_customer_type': type.value,
@@ -129,22 +133,36 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     String? phone,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
   }) async {
+    final hasPhones = phone != null ||
+        phone2 != null ||
+        phone3 != null ||
+        phone4 != null ||
+        phone5 != null;
+    final slots = hasPhones
+        ? CustomerPhone.fiveSlots([phone, phone2, phone3, phone4, phone5])
+        : null;
     final raw = await _rpc('update_phone_order_customer_details', {
       'p_pos_customer_id': posCustomerId,
       if (fullName != null) 'p_full_name': fullName,
-      if (phone != null) 'p_phone': phone,
-      // Empty string clears optional phones / notes in the RPC.
-      if (phone2 != null) 'p_phone2': phone2,
-      if (phone3 != null) 'p_phone3': phone3,
+      if (slots != null) ...{
+        'p_phone': slots[0],
+        // Empty string clears optional phones in the RPC.
+        'p_phone2': slots[1] ?? '',
+        'p_phone3': slots[2] ?? '',
+        'p_phone4': slots[3] ?? '',
+        'p_phone5': slots[4] ?? '',
+      },
       if (notes != null) 'p_notes': notes,
     });
     final map = switch (raw) {
       final Map m => Map<String, dynamic>.from(m),
       _ => <String, dynamic>{},
     };
-    return _toCustomer({...map, 'source': 'pos'});
+    return _toCustomer(map);
   }
 
   @override
@@ -329,6 +347,7 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
               'quantity': line.quantity,
               if (line.weightInGrams case final grams?)
                 'weight_in_grams': grams,
+              if (line.trimmedNotes case final note?) 'notes': note,
             },
         ],
         'p_delivery_fee': deliveryFee,
@@ -658,17 +677,26 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
           _ => null,
         };
     final isApp = row['source'] == 'app';
+    final slots = CustomerPhone.fiveSlots([
+      text('phone'),
+      text('phone2'),
+      text('phone3'),
+      text('phone4'),
+      text('phone5'),
+    ]);
     return PhoneOrderCustomer(
       source:
           isApp ? PhoneOrderCustomerSource.app : PhoneOrderCustomerSource.pos,
       userId: text('user_id'),
-      // A bare pos_customers row (no `source`) carries its id as `id`.
+      // Linked app customers carry both ids; bare POS rows may use `id`.
       posCustomerId: integer(row['pos_customer_id']) ??
-          (isApp || row.containsKey('source') ? null : integer(row['id'])),
+          (row.containsKey('source') ? null : integer(row['id'])),
       fullName: text('full_name'),
-      phone: text('phone'),
-      phone2: text('phone2'),
-      phone3: text('phone3'),
+      phone: slots[0],
+      phone2: slots[1],
+      phone3: slots[2],
+      phone4: slots[3],
+      phone5: slots[4],
       notes: text('notes'),
       address: text('address'),
       zone: text('zone'),

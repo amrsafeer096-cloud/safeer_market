@@ -69,6 +69,7 @@ class AdminOrderItem {
     this.imageUrl,
     this.unit,
     this.weightInGrams,
+    this.notes,
     this.isWeightBased = false,
   });
 
@@ -90,6 +91,14 @@ class AdminOrderItem {
   /// Grams for a weight-based line; null / ≤0 for unit products.
   final int? weightInGrams;
   final bool isWeightBased;
+
+  /// Optional per-item instruction («ملاحظة للصنف»).
+  final String? notes;
+
+  String? get trimmedNotes {
+    final t = notes?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
 
   /// True only when this line has a positive gram amount (never «0 جرام»).
   bool get isWeighted => weightInGrams != null && weightInGrams! > 0;

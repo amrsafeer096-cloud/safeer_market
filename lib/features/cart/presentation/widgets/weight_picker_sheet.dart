@@ -11,14 +11,15 @@ import '../../domain/weight_options.dart';
 
 /// Asks how many grams of a weight-based [product] to put in the cart.
 /// Resolves to null when the sheet is dismissed.
-Future<int?> showWeightPickerSheet(
+Future<WeightSelection?> showWeightPickerSheet(
   BuildContext context, {
   required Product product,
   int? initialGrams,
+  String? initialNotes,
   String? title,
   String Function(int grams)? labelFor,
 }) {
-  return showModalBottomSheet<int>(
+  return showModalBottomSheet<WeightSelection>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -33,6 +34,7 @@ Future<int?> showWeightPickerSheet(
       child: WeightPickerSheet(
         product: product,
         initialGrams: initialGrams,
+        initialNotes: initialNotes,
         title: title,
         labelFor: labelFor,
       ),
@@ -45,6 +47,7 @@ class WeightPickerSheet extends StatefulWidget {
     super.key,
     required this.product,
     this.initialGrams,
+    this.initialNotes,
     this.title,
     this.labelFor,
   });
@@ -53,6 +56,9 @@ class WeightPickerSheet extends StatefulWidget {
 
   /// The weight already in the cart, if any.
   final int? initialGrams;
+
+  /// Optional existing item note to edit.
+  final String? initialNotes;
 
   /// Defaults to [AppLocalizations.chooseWeight].
   final String? title;
@@ -72,6 +78,7 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
   var _unit = _WeightUnit.kilo;
   final _customCtrl = TextEditingController();
   final _customFocus = FocusNode();
+  late final _notesCtrl = TextEditingController(text: widget.initialNotes ?? '');
 
   @override
   void initState() {
@@ -94,6 +101,7 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
   void dispose() {
     _customCtrl.dispose();
     _customFocus.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
@@ -136,7 +144,13 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
   void _submit() {
     final grams = _effectiveGrams;
     if (grams == null || grams <= 0) return;
-    Navigator.of(context).pop(grams);
+    final notes = _notesCtrl.text.trim();
+    Navigator.of(context).pop(
+      WeightSelection(
+        grams: grams,
+        notes: notes.isEmpty ? null : notes,
+      ),
+    );
   }
 
   @override
@@ -302,7 +316,20 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
                 ],
               ),
             ],
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            TextField(
+              key: const Key('weight-sheet-item-notes'),
+              controller: _notesCtrl,
+              maxLines: 2,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'ملاحظة للصنف',
+                hintText: 'مثال: على ربعين، تقطيع رفيع...',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(

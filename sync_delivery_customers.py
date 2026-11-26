@@ -61,9 +61,30 @@ FUJITSU_ZONES = {
 
 
 def clean_phone(phone_val):
+    """Normalize to Egyptian local digits (01… / landline); empty if none."""
     if not phone_val:
         return ""
-    return str(phone_val).strip().replace(" ", "").replace("-", "")
+    digits = "".join(ch for ch in str(phone_val) if ch.isdigit())
+    if digits.startswith("0020"):
+        digits = "0" + digits[4:]
+    elif digits.startswith("20") and len(digits) >= 11:
+        digits = "0" + digits[2:]
+    if len(digits) == 10 and digits.startswith("1"):
+        digits = "0" + digits
+    return digits[:20]
+
+
+def distinct_secondary(primary, *candidates):
+    """Return unique secondaries that differ from primary and each other."""
+    seen = {primary} if primary else set()
+    out = []
+    for raw in candidates:
+        p = clean_phone(raw)
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+    return out
 
 
 def get_zone_info(zone_id):
@@ -204,9 +225,26 @@ def push_supabase_to_fujitsu(table_name):
                 phone1 = clean_phone(
                     cust.get("phone") or cust.get("mobile") or cust.get("phone1")
                 )
-                phone2 = clean_phone(
-                    cust.get("phone2") or cust.get("secondary_phone") or ""
+                # Keep international storage form for AddressPhones blob.
+                all_phones = []
+                for key in ("phone", "phone2", "phone3", "phone4", "phone5"):
+                    raw = cust.get(key) or ""
+                    if key == "phone" and not raw:
+                        raw = cust.get("mobile") or cust.get("phone1") or ""
+                    p = clean_phone(raw) or str(raw).strip()
+                    if p and p not in all_phones:
+                        all_phones.append(p)
+                extras = distinct_secondary(
+                    phone1,
+                    cust.get("phone2") or cust.get("secondary_phone") or "",
+                    cust.get("phone3") or "",
+                    cust.get("phone4") or "",
+                    cust.get("phone5") or "",
                 )
+                phone2 = extras[0] if len(extras) > 0 else ""
+                phone3 = extras[1] if len(extras) > 1 else ""
+                phone4 = extras[2] if len(extras) > 2 else ""
+                # phone5 lives only on AddressPhones (Fujitsu has 4 customer slots).
 
                 cursor.execute(
                     "SELECT TOP 1 CustomerNo FROM Customers WHERE Mobile = ? OR Phone1 = ?",
@@ -273,11 +311,13 @@ def push_supabase_to_fujitsu(table_name):
                 # حجز الأرقام من hd_sequence الرسمي لفوجيتسو
                 new_cust_no, new_addr_id = get_next_fujitsu_ids(cursor)
 
-                phone3 = clean_phone(cust.get("phone3") or "")
                 notes = str(cust.get("notes") or "").strip() or None
-                phone_blob = " - ".join(p for p in (phone1, phone2, phone3) if p)
+                # All up-to-5 phones on AddressPhones; Customers holds first 4.
+                phone_blob = " - ".join(all_phones) if all_phones else " - ".join(
+                    p for p in (phone1, phone2, phone3, phone4) if p
+                )
 
-                # Trusty AddNewCustomer column mapping (phones on Customers row).
+                # Mobile + Phone1..Phone3 = first 4 distinct numbers.
                 cursor.execute(
                     """
                     INSERT INTO Customers (
@@ -303,9 +343,9 @@ def push_supabase_to_fujitsu(table_name):
                         now,
                         now,
                         phone1,
-                        phone1,  # Phone1
                         phone2 if phone2 else None,
                         phone3 if phone3 else None,
+                        phone4 if phone4 else None,
                         notes,
                         new_addr_id,
                     ),
@@ -495,12 +535,27 @@ def pull_fujitsu_to_supabase(min_row_version):
             new_max_rv = c_no
 
         phone1 = clean_phone(r.Mobile) or clean_phone(r.Phone1)
-        phone2 = clean_phone(r.Phone2) or (
-            clean_phone(r.Phone1) if clean_phone(r.Mobile) else ""
-        )
-        phone3 = clean_phone(r.Phone3)
         if not phone1:
             continue
+        # Prefer real secondaries; only use Phone1 when Mobile is set and Phone1 differs.
+        extras = distinct_secondary(
+            phone1,
+            r.Phone2,
+            r.Phone1 if clean_phone(r.Mobile) else "",
+            r.Phone3,
+        )
+        # Also scrape AddressPhones for a possible 5th number.
+        addr_phones = [
+            clean_phone(p)
+            for p in str(getattr(r, "AddressPhones", "") or "").replace(",", "-").split("-")
+        ]
+        for ap in addr_phones:
+            if ap and ap != phone1 and ap not in extras:
+                extras.append(ap)
+        phone2 = extras[0] if len(extras) > 0 else ""
+        phone3 = extras[1] if len(extras) > 1 else ""
+        phone4 = extras[2] if len(extras) > 2 else ""
+        phone5 = extras[3] if len(extras) > 3 else ""
 
         full_name = (r.Name or "عميل").strip()
         full_addr = (r.FullAddress or r.StreetAddress or "").strip()
@@ -522,6 +577,8 @@ def pull_fujitsu_to_supabase(min_row_version):
             "phone": phone1,
             "phone2": phone2 if phone2 else None,
             "phone3": phone3 if phone3 else None,
+            "phone4": phone4 if phone4 else None,
+            "phone5": phone5 if phone5 else None,
             "notes": (str(r.Notes or "").strip() or None),
             "customer_type": "regular",
             "address": full_addr,

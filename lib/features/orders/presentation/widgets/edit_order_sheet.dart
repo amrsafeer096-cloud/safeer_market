@@ -179,23 +179,25 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
 
   Future<void> _pickWeight(Product product) async {
     final existing = _lineOf(product.id);
-    final grams = await showWeightPickerSheet(
+    final pick = await showWeightPickerSheet(
       context,
       product: product,
       initialGrams: existing?.weightInGrams,
+      initialNotes: existing?.notes,
       title: 'اختر الوزن المطلوب',
       labelFor: WeightOptions.phoneOrderLabel,
     );
-    if (grams == null || !mounted) return;
+    if (pick == null || !mounted) return;
     setState(() {
-      if (grams <= 0) {
+      if (pick.grams <= 0) {
         _lines.removeWhere((l) => l.productId == product.id);
         return;
       }
       if (existing != null) {
         existing
-          ..weightInGrams = grams
-          ..quantity = 1;
+          ..weightInGrams = pick.grams
+          ..quantity = 1
+          ..notes = pick.notes;
       } else {
         _lines.add(
           OrderEditLine(
@@ -207,7 +209,8 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
             stockQuantity: product.stockQuantity,
             unitPrice: product.effectivePrice,
             quantity: 1,
-            weightInGrams: grams,
+            weightInGrams: pick.grams,
+            notes: pick.notes,
             isWeightBased: true,
             unit: Product.weightUnit,
           ),
@@ -255,12 +258,15 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
       builder: (_) => _EditOrderQtyDialog(
         productName: line.productName,
         initialQuantity: line.quantity,
-        onSave: (qty) {
+        initialNotes: line.notes,
+        onSave: (qty, notes) {
           setState(() {
             if (qty <= 0) {
               _lines.removeWhere((l) => l.productId == product.id);
             } else {
-              line.quantity = qty;
+              line
+                ..quantity = qty
+                ..notes = notes;
             }
           });
         },
@@ -545,11 +551,13 @@ class _EditOrderQtyDialog extends StatefulWidget {
     required this.initialQuantity,
     required this.onSave,
     required this.onRemove,
+    this.initialNotes,
   });
 
   final String productName;
   final int initialQuantity;
-  final ValueChanged<int> onSave;
+  final String? initialNotes;
+  final void Function(int quantity, String? notes) onSave;
   final VoidCallback onRemove;
 
   @override
@@ -559,12 +567,14 @@ class _EditOrderQtyDialog extends StatefulWidget {
 class _EditOrderQtyDialogState extends State<_EditOrderQtyDialog> {
   static const _maxQty = 9999;
   late final TextEditingController _qty;
+  late final TextEditingController _notes;
   late final FocusNode _focus;
 
   @override
   void initState() {
     super.initState();
     _qty = TextEditingController(text: '${widget.initialQuantity}');
+    _notes = TextEditingController(text: widget.initialNotes ?? '');
     _focus = FocusNode(onKeyEvent: _onKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -576,6 +586,7 @@ class _EditOrderQtyDialogState extends State<_EditOrderQtyDialog> {
   @override
   void dispose() {
     _qty.dispose();
+    _notes.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -629,7 +640,8 @@ class _EditOrderQtyDialogState extends State<_EditOrderQtyDialog> {
 
   void _save() {
     final q = int.tryParse(_qty.text.trim()) ?? 0;
-    widget.onSave(q);
+    final notes = _notes.text.trim();
+    widget.onSave(q, notes.isEmpty ? null : notes);
     Navigator.of(context).pop();
   }
 
@@ -682,6 +694,18 @@ class _EditOrderQtyDialogState extends State<_EditOrderQtyDialog> {
                 icon: const Icon(Icons.add_circle_outline),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('edit-order-item-notes'),
+            controller: _notes,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'ملاحظة للصنف',
+              hintText: 'مثال: على ربعين، تقطيع رفيع...',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
           ),
         ],
       ),

@@ -28,7 +28,7 @@ class OrderEditService {
     final rows = await _client
         .from('order_items')
         .select(
-          'id, quantity, price_at_time, weight_in_grams, product_id, '
+          'id, quantity, price_at_time, weight_in_grams, notes, product_id, '
           'products(id, name, barcode, price, discount_price, image_url, '
           'stock_quantity, unit, is_weight_based)',
         )
@@ -71,6 +71,7 @@ class OrderEditService {
             : (discount > 0 && discount < listPrice ? discount : listPrice),
         quantity: byWeight ? 1 : _num(row['quantity']).round().clamp(1, 9999),
         weightInGrams: grams,
+        notes: _textOrNull(row['notes']),
         isWeightBased: byWeight,
         unit: unit.isEmpty ? Product.defaultUnit : unit,
         existingItemId: '${row['id']}',

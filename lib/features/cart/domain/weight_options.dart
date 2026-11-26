@@ -1,5 +1,13 @@
 import '../../../core/l10n/l10n.dart';
 
+/// Result of «اختر الوزن المطلوب», including an optional item note.
+class WeightSelection {
+  const WeightSelection({required this.grams, this.notes});
+
+  final int grams;
+  final String? notes;
+}
+
 /// Weights offered for products sold by the kilo.
 abstract final class WeightOptions {
   static const presetsInGrams = [100, 200, 250, 500, 750, 1000];

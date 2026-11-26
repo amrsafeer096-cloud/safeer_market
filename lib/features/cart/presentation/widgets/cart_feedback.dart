@@ -6,6 +6,7 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../auth/presentation/widgets/sign_in_prompt.dart';
 import '../../../home/domain/entities/product.dart';
+import '../../domain/entities/cart_item.dart';
 import '../../domain/weight_options.dart';
 import '../providers/cart_providers.dart';
 import 'weight_picker_sheet.dart';
@@ -43,20 +44,24 @@ Future<bool> addToCartWithFeedback(
   final cart = ref.read(cartProvider.notifier);
   final String message;
   if (product.isWeightBased) {
-    final grams = await showWeightPickerSheet(
+    CartItem? existing;
+    for (final item in ref.read(cartProvider)) {
+      if (item.product.id == product.id) {
+        existing = item;
+        break;
+      }
+    }
+    final pick = await showWeightPickerSheet(
       context,
       product: product,
-      initialGrams: ref
-          .read(cartProvider)
-          .where((item) => item.product.id == product.id)
-          .firstOrNull
-          ?.selectedWeightInGrams,
+      initialGrams: existing?.selectedWeightInGrams,
+      initialNotes: existing?.notes,
     );
-    if (grams == null || !context.mounted) return false;
+    if (pick == null || !context.mounted) return false;
     onAdding?.call();
-    cart.setWeight(product, grams);
+    cart.setWeight(product, pick.grams, notes: pick.notes);
     message = l10n.cartAddedWeightOfProduct(
-      WeightOptions.label(grams),
+      WeightOptions.label(pick.grams),
       product.name,
     );
   } else {

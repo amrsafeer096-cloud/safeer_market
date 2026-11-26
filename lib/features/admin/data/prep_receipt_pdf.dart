@@ -187,6 +187,18 @@ abstract final class PrepReceiptPdf {
                               font: font,
                               fontSize: 7,
                               color: PdfColors.grey700)),
+                    if (item.trimmedNotes case final note?)
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.only(top: 1, bottom: 1),
+                        child: pw.Text(
+                          'ملاحظة: $note',
+                          style: pw.TextStyle(
+                            font: bold,
+                            fontSize: 8,
+                            color: PdfColors.black,
+                          ),
+                        ),
+                      ),
                     if (item.hasDiscount)
                       pw.Text(
                         'خصم: ${_money(item.displayPrice)} ← ${_money(item.unitPrice)}',

@@ -268,9 +268,13 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
   }
 
   /// Adds exactly [quantity] more of a unit product (bulk add).
-  void addQuantity(Product product, int quantity) {
+  void addQuantity(Product product, int quantity, {String? notes}) {
     if (quantity < 1) return;
-    setQuantity(product, state.quantityOf(product.id) + quantity);
+    setQuantity(
+      product,
+      state.quantityOf(product.id) + quantity,
+      notes: notes,
+    );
   }
 
   void remove(Product product) {
@@ -283,24 +287,34 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
     setQuantity(product, state.quantityOf(product.id) - 1);
   }
 
-  void setQuantity(Product product, int quantity) {
+  void setQuantity(Product product, int quantity, {String? notes}) {
     final clamped = quantity.clamp(0, PhoneOrderState.maxQuantity);
     final lines = [...state.lines];
     final index = lines.indexWhere((line) => line.product.id == product.id);
+    final existingNotes = index >= 0 ? lines[index].notes : null;
     if (clamped == 0) {
       if (index >= 0) lines.removeAt(index);
     } else if (index >= 0) {
-      lines[index] = PhoneOrderLine(product: product, quantity: clamped);
+      lines[index] = PhoneOrderLine(
+        product: product,
+        quantity: clamped,
+        notes: notes ?? existingNotes,
+      );
     } else {
-      lines.add(PhoneOrderLine(product: product, quantity: clamped));
+      lines.add(PhoneOrderLine(
+        product: product,
+        quantity: clamped,
+        notes: notes,
+      ));
     }
     state = state.copyWith(lines: lines);
   }
 
   /// Sets or clears a weight-based line. [grams] ≤ 0 removes it.
-  void setWeight(Product product, int grams) {
+  void setWeight(Product product, int grams, {String? notes}) {
     final lines = [...state.lines];
     final index = lines.indexWhere((line) => line.product.id == product.id);
+    final existingNotes = index >= 0 ? lines[index].notes : null;
     if (grams <= 0) {
       if (index >= 0) lines.removeAt(index);
     } else if (index >= 0) {
@@ -308,14 +322,27 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
         product: product,
         quantity: 1,
         weightInGrams: grams,
+        notes: notes ?? existingNotes,
       );
     } else {
       lines.add(PhoneOrderLine(
         product: product,
         quantity: 1,
         weightInGrams: grams,
+        notes: notes,
       ));
     }
+    state = state.copyWith(lines: lines);
+  }
+
+  void setLineNotes(Product product, String? notes) {
+    final lines = [...state.lines];
+    final index = lines.indexWhere((line) => line.product.id == product.id);
+    if (index < 0) return;
+    final trimmed = notes?.trim();
+    lines[index] = lines[index].withNotes(
+      (trimmed == null || trimmed.isEmpty) ? null : trimmed,
+    );
     state = state.copyWith(lines: lines);
   }
 
