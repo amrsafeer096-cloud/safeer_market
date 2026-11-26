@@ -846,12 +846,16 @@ class _OrderBuilder extends ConsumerStatefulWidget {
   ConsumerState<_OrderBuilder> createState() => _OrderBuilderState();
 }
 
+/// Packaging filter chips beside «نتائج البحث».
+enum _UnitPackFilter { all, piece, box }
+
 class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   Timer? _debounce;
   String _query = '';
   var _filter = ProductSearchFilterMode.inStock;
+  var _unitPackFilter = _UnitPackFilter.all;
   var _popupOpen = false;
 
   /// Staged +/- picks inside the search popup (not yet in the cart).
@@ -1071,6 +1075,12 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     final historyAsync =
         ref.watch(phoneOrderCustomerHistoryProvider(customer.key));
 
+    bool matchesUnitPack(Product product) => switch (_unitPackFilter) {
+          _UnitPackFilter.all => true,
+          _UnitPackFilter.piece => product.isPieceUnit,
+          _UnitPackFilter.box => product.isBoxUnit,
+        };
+
     Widget productTile(Product product) {
       final staged = _staged[product.id];
       final countLabel = switch (staged) {
@@ -1083,7 +1093,9 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         product: product,
         quantityLabel: countLabel,
         inCart: staged != null,
-        openOnDoubleTap: true,
+        // Single tap on the row body opens the card / weight picker.
+        // +/- IconButtons keep their own handlers and do not open it.
+        openOnDoubleTap: false,
         keyPrefix: 'phone-order',
         showZeroStockInRed: _filter == ProductSearchFilterMode.allItems,
         onAdd: () => _stageInc(product),
@@ -1099,10 +1111,49 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       if (history == null || needle.isEmpty) return const [];
       return [
         for (final item in history.mostRecent)
-          if (arabicSearchContains(item.product.name, needle) ||
-              arabicSearchContains(item.product.barcode ?? '', needle))
+          if ((arabicSearchContains(item.product.name, needle) ||
+                  arabicSearchContains(item.product.barcode ?? '', needle)) &&
+              matchesUnitPack(item.product))
             item,
       ];
+    }
+
+    void selectUnitPack(_UnitPackFilter next) {
+      setState(() {
+        // Tap active chip again → back to «الكل».
+        _unitPackFilter =
+            _unitPackFilter == next && next != _UnitPackFilter.all
+                ? _UnitPackFilter.all
+                : next;
+      });
+      _restoreSearchFocus();
+    }
+
+    Widget unitPackChip({
+      required Key key,
+      required String label,
+      required _UnitPackFilter value,
+    }) {
+      final selected = _unitPackFilter == value;
+      return FilterChip(
+        key: key,
+        label: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w800,
+            color: selected ? Colors.white : null,
+          ),
+        ),
+        selected: selected,
+        showCheckmark: false,
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+        selectedColor: palette.accent,
+        onSelected: (_) => selectUnitPack(value),
+      );
     }
 
     Widget searchPopup() {
@@ -1120,13 +1171,38 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+              padding: const EdgeInsets.fromLTRB(10, 6, 4, 4),
               child: Row(
                 children: [
-                  const Expanded(
-                    child: Text(
-                      'نتائج البحث',
-                      style: TextStyle(fontWeight: FontWeight.w900),
+                  const Text(
+                    'نتائج البحث',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          unitPackChip(
+                            key: const Key('phone-order-unit-filter-all'),
+                            label: 'الكل',
+                            value: _UnitPackFilter.all,
+                          ),
+                          const SizedBox(width: 4),
+                          unitPackChip(
+                            key: const Key('phone-order-unit-filter-piece'),
+                            label: 'قطعة',
+                            value: _UnitPackFilter.piece,
+                          ),
+                          const SizedBox(width: 4),
+                          unitPackChip(
+                            key: const Key('phone-order-unit-filter-box'),
+                            label: 'علبة',
+                            value: _UnitPackFilter.box,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   IconButton(
@@ -1209,22 +1285,29 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                                 child: Text('$error',
                                     textAlign: TextAlign.center),
                               ),
-                              data: (products) => products.isEmpty
-                                  ? Center(
-                                      child: Text(l10n.phoneOrderNoProducts,
-                                          style: TextStyle(
-                                              color: palette.muted)),
-                                    )
-                                  : ListView.separated(
-                                      key: const Key('phone-order-products'),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 4),
-                                      itemCount: products.length,
-                                      separatorBuilder: (_, __) =>
-                                          const Divider(height: 1),
-                                      itemBuilder: (context, index) =>
-                                          productTile(products[index]),
-                                    ),
+                              data: (products) {
+                                final filtered = [
+                                  for (final p in products)
+                                    if (matchesUnitPack(p)) p,
+                                ];
+                                if (filtered.isEmpty) {
+                                  return Center(
+                                    child: Text(l10n.phoneOrderNoProducts,
+                                        style: TextStyle(
+                                            color: palette.muted)),
+                                  );
+                                }
+                                return ListView.separated(
+                                  key: const Key('phone-order-products'),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 4),
+                                  itemCount: filtered.length,
+                                  separatorBuilder: (_, __) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (context, index) =>
+                                      productTile(filtered[index]),
+                                );
+                              },
                             ),
                   ),
                 ],

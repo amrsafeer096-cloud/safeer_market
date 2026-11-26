@@ -70,7 +70,29 @@ class Product {
   /// Products without the backend flag are still sold by weight when their
   /// unit or name says so (e.g. «جبنة رومي وزن»).
   bool get isWeightBased =>
-      _isWeightBased || unit.trim() == weightUnit || name.contains(weightUnit);
+      _isWeightBased ||
+      unit.trim() == weightUnit ||
+      name.contains(weightUnit) ||
+      canonicalUnit(unit) == 'كيلو';
+
+  /// Box / pack / carton packaging (`علبة`, `كرتونة`, ERP `ك * N`, …).
+  bool get isBoxUnit {
+    if (piecesPerCarton != null) return true;
+    final c = canonicalUnit(unit);
+    if (c == 'علبة' || c == 'كرتونة' || c == 'باكو') return true;
+    final raw = unit.trim().toLowerCase();
+    return raw.contains('علبة') ||
+        raw.contains('علبه') ||
+        raw.contains('كرتون') ||
+        raw.contains('باكت') ||
+        raw.contains('باكو') ||
+        raw.contains('pack') ||
+        raw.contains('box') ||
+        raw.contains('carton');
+  }
+
+  /// Single-piece sale unit (not weight, not box/carton).
+  bool get isPieceUnit => !isWeightBased && !isBoxUnit;
 
   /// What to show after the price («/ علبة»), in the app language. Weight
   /// items are priced per kilo; a unit the app doesn't know shows as stored.
