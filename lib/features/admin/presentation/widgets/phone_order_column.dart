@@ -618,7 +618,8 @@ Future<void> _addProduct(
     initialGrams: existing?.weightInGrams ?? state.weightOf(product.id),
     initialNotes: initialNotes ?? existing?.notes,
     title: 'اختر الوزن المطلوب',
-    labelFor: WeightOptions.phoneOrderLabel,
+    labelFor: WeightOptions.adminQuickPickLabel,
+    fastAdminEntry: true,
   );
   if (pick == null || !context.mounted) return;
   controller.setWeight(product, pick.grams, notes: pick.notes);
@@ -1059,9 +1060,11 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   /// Single tap opens the detail card; Enter adds qty and clears search.
   Future<void> _openDetails(Product product) async {
     String? existingNotes;
+    int? existingGrams;
     for (final line in ref.read(phoneOrderControllerProvider).lines) {
       if (line.product.id == product.id) {
         existingNotes = line.notes;
+        existingGrams = line.weightInGrams;
         break;
       }
     }
@@ -1069,6 +1072,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       context,
       product: product,
       initialNotes: existingNotes,
+      initialGrams: existingGrams,
       onAddQuantity: (quantity, notes) {
         ref.read(phoneOrderControllerProvider.notifier).addQuantity(
               product,
@@ -1077,9 +1081,11 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
             );
         _dismissSearch();
       },
-      onPickWeight: (notes) async {
-        await _addProduct(context, ref, product, initialNotes: notes);
-        if (mounted) _dismissSearch();
+      onConfirmWeight: (grams, notes) {
+        ref
+            .read(phoneOrderControllerProvider.notifier)
+            .setWeight(product, grams, notes: notes);
+        _dismissSearch();
       },
     );
     if (mounted) _restoreSearchFocus();

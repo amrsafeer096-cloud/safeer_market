@@ -13,6 +13,9 @@ abstract final class WeightOptions {
   static const presetsInGrams = [100, 200, 250, 500, 750, 1000];
   static const defaultGrams = 250;
 
+  /// Admin dashboard («تلقي الطلبات» / «تعديل الطلب») quick-picks.
+  static const adminQuickPicksInGrams = [125, 250, 500, 1000];
+
   /// Above the largest preset the cart steps by half a kilo.
   static const _bulkStep = 500;
   static const maxGrams = 10000;
@@ -80,6 +83,15 @@ abstract final class WeightOptions {
         750 => '750 جرام (ثلاثة أرباع كيلو)',
         1000 => '1 كيلو',
         _ => compactLabel(grams),
+      };
+
+  /// Compact admin quick-pick labels (125g / ربع / نص / 1 كيلو).
+  static String adminQuickPickLabel(int grams) => switch (grams) {
+        125 => '125 جرام',
+        250 => 'ربع كيلو',
+        500 => 'نص كيلو',
+        1000 => '1 كيلو',
+        _ => phoneOrderLabel(grams),
       };
 
   /// Normalize Eastern/Arabic digits and decimal separators to ASCII.

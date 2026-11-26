@@ -114,11 +114,11 @@ class _CustomerPurchaseHistoryDialogState
       product: product,
       initialGrams: initialGrams ??
           existing?.weightInGrams ??
-          state.weightOf(product.id) ??
-          WeightOptions.defaultGrams,
+          state.weightOf(product.id),
       initialNotes: existing?.notes,
       title: 'اختر الوزن المطلوب',
-      labelFor: WeightOptions.phoneOrderLabel,
+      labelFor: WeightOptions.adminQuickPickLabel,
+      fastAdminEntry: true,
     );
     if (pick == null || !mounted) return;
     controller.setWeight(product, pick.grams, notes: pick.notes);
@@ -556,19 +556,19 @@ class _HistoryRow extends StatelessWidget {
           child: Row(
             children: [
               SizedBox.square(
-                dimension: 40,
+                dimension: 62,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   child: ColoredBox(
-                    color: Colors.white,
+                    color: const Color(0xFFFFFFFF),
                     child: Opacity(
                       opacity: outOfStock ? 0.45 : 1,
                       child: ProductImage(
                         imageUrl:
                             product.hasValidImageUrl ? product.imageUrl : null,
-                        iconSize: 16,
+                        iconSize: 26,
                         fit: BoxFit.contain,
-                        padding: const EdgeInsets.all(3),
+                        padding: const EdgeInsets.all(4),
                       ),
                     ),
                   ),

@@ -193,14 +193,14 @@ class StaffProductSearchTile extends StatelessWidget {
         : staffStockColor(stockQty, palette);
 
     final image = SizedBox.square(
-      dimension: 56,
+      dimension: 62,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: ColoredBox(
-          color: Colors.white,
+          color: const Color(0xFFFFFFFF),
           child: ProductImage(
             imageUrl: product.hasValidImageUrl ? product.imageUrl : null,
-            iconSize: 22,
+            iconSize: 26,
             fit: BoxFit.contain,
             padding: const EdgeInsets.all(4),
           ),

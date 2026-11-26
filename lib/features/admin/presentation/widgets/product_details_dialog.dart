@@ -6,48 +6,58 @@ import 'package:pasteboard/pasteboard.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_currency.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/web/web_image_clipboard.dart';
+import '../../../cart/domain/weight_options.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../domain/phone_order.dart';
 import 'draggable_product_image.dart';
+import 'staff_product_search_tile.dart';
 
 /// «تفاصيل المنتج» for the order taker: a large image (copy / share it to
-/// send to a customer), barcode and stock, and a bulk «إضافة كمية بالجملة».
+/// send to a customer), barcode and stock, and either bulk quantity or
+/// single-step weight entry (quick-pick chips + focused kg/g input).
 ///
 /// [onAddQuantity] gets the exact amount typed (1…[PhoneOrderState.maxQuantity])
-/// plus an optional item note; weight-based products use [onPickWeight] instead.
+/// plus an optional item note; weight-based products use [onConfirmWeight].
 Future<void> showProductDetailsDialog(
   BuildContext context, {
   required Product product,
   required void Function(int quantity, String? notes) onAddQuantity,
-  required void Function(String? notes) onPickWeight,
+  required void Function(int grams, String? notes) onConfirmWeight,
   String? initialNotes,
+  int? initialGrams,
 }) {
   return showDialog<void>(
     context: context,
     builder: (_) => ProductDetailsDialog(
       product: product,
       onAddQuantity: onAddQuantity,
-      onPickWeight: onPickWeight,
+      onConfirmWeight: onConfirmWeight,
       initialNotes: initialNotes,
+      initialGrams: initialGrams,
     ),
   );
 }
+
+enum _WeightUnit { kilo, gram }
 
 class ProductDetailsDialog extends StatefulWidget {
   const ProductDetailsDialog({
     super.key,
     required this.product,
     required this.onAddQuantity,
-    required this.onPickWeight,
+    required this.onConfirmWeight,
     this.initialNotes,
+    this.initialGrams,
   });
 
   final Product product;
   final void Function(int quantity, String? notes) onAddQuantity;
-  final void Function(String? notes) onPickWeight;
+  final void Function(int grams, String? notes) onConfirmWeight;
   final String? initialNotes;
+  final int? initialGrams;
 
   @override
   State<ProductDetailsDialog> createState() => _ProductDetailsDialogState();
@@ -56,9 +66,13 @@ class ProductDetailsDialog extends StatefulWidget {
 class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   final _quantity = TextEditingController(text: '1');
   final _quantityFocus = FocusNode();
+  final _weight = TextEditingController();
+  final _weightFocus = FocusNode();
   late final _notes = TextEditingController(text: widget.initialNotes ?? '');
   var _busy = false;
   String? _error;
+  var _unit = _WeightUnit.kilo;
+  int? _selectedQuickPick;
 
   Product get _product => widget.product;
   String? get _imageUrl => _product.hasValidImageUrl ? _product.imageUrl : null;
@@ -68,12 +82,53 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
     return t.isEmpty ? null : t;
   }
 
+  int? get _effectiveGrams => WeightOptions.parseCustomGrams(
+        _weight.text,
+        inKilos: _unit == _WeightUnit.kilo,
+      );
+
+  bool get _canSubmitWeight {
+    final g = _effectiveGrams;
+    return g != null && g > 0;
+  }
+
+  static String _formatKg(int grams) => WeightOptions.kgOf(grams)
+      .toStringAsFixed(WeightOptions.maxKgDecimals)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
+
+  void _fillWeight(int grams, {required bool selectChip}) {
+    _selectedQuickPick =
+        selectChip && WeightOptions.adminQuickPicksInGrams.contains(grams)
+            ? grams
+            : null;
+    _unit = _WeightUnit.kilo;
+    _weight.text = _formatKg(grams);
+    _weight.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _weight.text.length,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
-    // Pre-fill «1» fully selected so Enter adds 1, or typing replaces it.
+    final initial = widget.initialGrams;
+    if (_product.isWeightBased && initial != null && initial > 0) {
+      _fillWeight(initial, selectChip: true);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _product.isWeightBased) return;
+      if (!mounted) return;
+      if (_product.isWeightBased) {
+        _weightFocus.requestFocus();
+        if (_weight.text.isNotEmpty) {
+          _weight.selection = TextSelection(
+            baseOffset: 0,
+            extentOffset: _weight.text.length,
+          );
+        }
+        return;
+      }
       _quantity.selection = const TextSelection(
         baseOffset: 0,
         extentOffset: 1,
@@ -86,6 +141,8 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   void dispose() {
     _quantity.dispose();
     _quantityFocus.dispose();
+    _weight.dispose();
+    _weightFocus.dispose();
     _notes.dispose();
     super.dispose();
   }
@@ -208,6 +265,198 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
       ));
   }
 
+  void _addWeight() {
+    final grams = _effectiveGrams;
+    if (grams == null || grams <= 0) {
+      setState(() => _error = 'أدخل وزناً صالحاً');
+      _weightFocus.requestFocus();
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    final label = WeightOptions.compactLabel(grams);
+    widget.onConfirmWeight(grams, _trimmedNotes);
+    Navigator.of(context).pop();
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text('تمت إضافة $label × ${_product.name} للسلة'),
+      ));
+  }
+
+  void _onQuickPick(int grams) {
+    setState(() {
+      _error = null;
+      _fillWeight(grams, selectChip: true);
+    });
+    _weightFocus.requestFocus();
+  }
+
+  void _onWeightChanged(String _) {
+    final grams = _effectiveGrams;
+    setState(() {
+      _error = null;
+      _selectedQuickPick =
+          grams != null && WeightOptions.adminQuickPicksInGrams.contains(grams)
+              ? grams
+              : null;
+    });
+  }
+
+  Widget _weightEntry(AppPalette palette) {
+    final effective = _effectiveGrams;
+    final price = effective == null
+        ? 0.0
+        : WeightOptions.priceFor(_product.effectivePrice, effective);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'اختر الوزن أو اكتبه',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            color: palette.muted,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final grams in WeightOptions.adminQuickPicksInGrams)
+              ChoiceChip(
+                key: Key('product-dialog-weight-chip-$grams'),
+                label: Text(WeightOptions.adminQuickPickLabel(grams)),
+                selected: _selectedQuickPick == grams,
+                showCheckmark: false,
+                selectedColor: AppColors.primary,
+                backgroundColor: palette.card,
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: _selectedQuickPick == grams
+                      ? AppColors.onPrimary
+                      : palette.onSurface,
+                ),
+                side: BorderSide(
+                  color: palette.accent.withValues(alpha: 0.15),
+                ),
+                shape: const StadiumBorder(),
+                onSelected: (_) => _onQuickPick(grams),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('product-dialog-weight-input'),
+                controller: _weight,
+                focusNode: _weightFocus,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                textInputAction: TextInputAction.done,
+                inputFormatters: [
+                  _WeightInputFormatter(inKilos: _unit == _WeightUnit.kilo),
+                ],
+                onChanged: _onWeightChanged,
+                onSubmitted: (_) {
+                  if (_canSubmitWeight) _addWeight();
+                },
+                decoration: InputDecoration(
+                  hintText:
+                      _unit == _WeightUnit.kilo ? 'مثال: 0.125' : 'مثال: 125',
+                  errorText: _error,
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SegmentedButton<_WeightUnit>(
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              segments: const [
+                ButtonSegment(
+                  value: _WeightUnit.kilo,
+                  label: Text('كيلو',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+                ButtonSegment(
+                  value: _WeightUnit.gram,
+                  label: Text('جرام',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+              ],
+              selected: {_unit},
+              onSelectionChanged: (next) {
+                final unit = next.first;
+                final current = WeightOptions.parseCustomGrams(
+                  _weight.text,
+                  inKilos: _unit == _WeightUnit.kilo,
+                );
+                setState(() {
+                  _unit = unit;
+                  if (current != null) {
+                    _weight.text = unit == _WeightUnit.kilo
+                        ? _formatKg(current)
+                        : '$current';
+                    _weight.selection = TextSelection(
+                      baseOffset: 0,
+                      extentOffset: _weight.text.length,
+                    );
+                  }
+                });
+                _weightFocus.requestFocus();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'السعر',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: palette.muted,
+                ),
+              ),
+            ),
+            Text(
+              AppCurrency.of(price),
+              key: const Key('product-dialog-weight-price'),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: _canSubmitWeight ? AppColors.secondary : palette.muted,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 44,
+          child: FilledButton.icon(
+            key: const Key('product-dialog-add-weight'),
+            onPressed: _canSubmitWeight ? _addWeight : null,
+            icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
+            label: const Text('إضافة للسلة'),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -272,19 +521,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
     }
 
     final bulk = _product.isWeightBased
-        ? SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              key: const Key('product-dialog-pick-weight'),
-              onPressed: () {
-                final notes = _trimmedNotes;
-                Navigator.of(context).pop();
-                widget.onPickWeight(notes);
-              },
-              icon: const Icon(Icons.scale_rounded),
-              label: const Text('اختيار الوزن'),
-            ),
-          )
+        ? _weightEntry(palette)
         : Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -364,17 +601,20 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: palette.muted, fontSize: 13),
               ),
+              if (_product.hasActiveOffer) ...[
+                const SizedBox(height: 6),
+                Center(child: ProductOfferBadge(product: _product)),
+              ],
               const SizedBox(height: 10),
               Container(
                 height: 200,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: const Color(0xFFFFFFFF),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: palette.border),
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  // Web: native <img draggable> for Chrome → WhatsApp drag.
                   child: DraggableProductImage(
                     imageUrl: _imageUrl,
                     iconSize: 56,
@@ -455,6 +695,59 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Digits + one decimal point; normalizes Arabic separators/digits as typed.
+class _WeightInputFormatter extends TextInputFormatter {
+  _WeightInputFormatter({required this.inKilos});
+
+  final bool inKilos;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final normalized = WeightOptions.normalizeDecimalInput(newValue.text);
+    if (normalized.isEmpty) {
+      return newValue.copyWith(
+          text: '', selection: const TextSelection.collapsed(offset: 0));
+    }
+
+    if (normalized == '.') {
+      return const TextEditingValue(
+        text: '0.',
+        selection: TextSelection.collapsed(offset: 2),
+      );
+    }
+
+    final parts = normalized.split('.');
+    if (parts.length > 2) return oldValue;
+    if (!RegExp(r'^\d*\.?\d*$').hasMatch(normalized)) return oldValue;
+
+    if (parts.length == 2) {
+      final maxDec = inKilos ? WeightOptions.maxKgDecimals : 0;
+      if (parts[1].length > maxDec) {
+        if (maxDec == 0) {
+          return TextEditingValue(
+            text: parts[0],
+            selection: TextSelection.collapsed(offset: parts[0].length),
+          );
+        }
+        final clipped = '${parts[0]}.${parts[1].substring(0, maxDec)}';
+        return TextEditingValue(
+          text: clipped,
+          selection: TextSelection.collapsed(offset: clipped.length),
+        );
+      }
+    }
+
+    if (normalized == newValue.text) return newValue;
+    return TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
     );
   }
 }

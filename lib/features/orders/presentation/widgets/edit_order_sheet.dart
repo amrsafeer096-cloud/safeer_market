@@ -8,9 +8,9 @@ import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../admin/domain/product_search_filter.dart';
+import '../../../admin/presentation/widgets/product_details_dialog.dart';
 import '../../../admin/presentation/widgets/staff_product_search_tile.dart';
 import '../../../cart/domain/weight_options.dart';
-import '../../../cart/presentation/widgets/weight_picker_sheet.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../data/order_edit_service.dart';
 import '../../domain/order_editability.dart';
@@ -177,27 +177,18 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
     });
   }
 
-  Future<void> _pickWeight(Product product) async {
+  void _applyWeight(Product product, int grams, String? notes) {
     final existing = _lineOf(product.id);
-    final pick = await showWeightPickerSheet(
-      context,
-      product: product,
-      initialGrams: existing?.weightInGrams,
-      initialNotes: existing?.notes,
-      title: 'اختر الوزن المطلوب',
-      labelFor: WeightOptions.phoneOrderLabel,
-    );
-    if (pick == null || !mounted) return;
     setState(() {
-      if (pick.grams <= 0) {
+      if (grams <= 0) {
         _lines.removeWhere((l) => l.productId == product.id);
         return;
       }
       if (existing != null) {
         existing
-          ..weightInGrams = pick.grams
+          ..weightInGrams = grams
           ..quantity = 1
-          ..notes = pick.notes;
+          ..notes = notes;
       } else {
         _lines.add(
           OrderEditLine(
@@ -209,14 +200,26 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
             stockQuantity: product.stockQuantity,
             unitPrice: product.effectivePrice,
             quantity: 1,
-            weightInGrams: pick.grams,
-            notes: pick.notes,
+            weightInGrams: grams,
+            notes: notes,
             isWeightBased: true,
             unit: Product.weightUnit,
           ),
         );
       }
     });
+  }
+
+  Future<void> _pickWeight(Product product) async {
+    final existing = _lineOf(product.id);
+    await showProductDetailsDialog(
+      context,
+      product: product,
+      initialNotes: existing?.notes,
+      initialGrams: existing?.weightInGrams,
+      onAddQuantity: (_, __) {},
+      onConfirmWeight: (grams, notes) => _applyWeight(product, grams, notes),
+    );
   }
 
   void _removeOne(String productId) {
