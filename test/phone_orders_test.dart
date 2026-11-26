@@ -91,6 +91,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     String? fujitsuZoneId,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
     String? branch,
     PhoneOrderCustomerType type = PhoneOrderCustomerType.regular,
@@ -112,6 +114,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
       'fujitsu_zone_id': fujitsuZoneId,
       'phone2': phone2,
       'phone3': phone3,
+      'phone4': phone4,
+      'phone5': phone5,
       'notes': notes,
       'branch': branch,
       'type': type,
@@ -130,6 +134,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
       phone: phone,
       phone2: phone2,
       phone3: phone3,
+      phone4: phone4,
+      phone5: phone5,
       notes: notes,
       address: address,
       zone: zone,
@@ -163,6 +169,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     String? phone,
     String? phone2,
     String? phone3,
+    String? phone4,
+    String? phone5,
     String? notes,
   }) async {
     return PhoneOrderCustomer(
@@ -172,6 +180,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
       phone: phone,
       phone2: phone2?.isEmpty == true ? null : phone2,
       phone3: phone3?.isEmpty == true ? null : phone3,
+      phone4: phone4?.isEmpty == true ? null : phone4,
+      phone5: phone5?.isEmpty == true ? null : phone5,
       notes: notes?.isEmpty == true ? null : notes,
     );
   }

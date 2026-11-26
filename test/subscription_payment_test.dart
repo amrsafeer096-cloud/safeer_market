@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -13,6 +14,7 @@ import 'package:safeer_market/core/theme/app_theme.dart';
 import 'package:safeer_market/features/auth/presentation/providers/auth_providers.dart';
 import 'package:safeer_market/features/auth/presentation/widgets/sign_in_prompt.dart';
 import 'package:safeer_market/features/subscriptions/data/paymob_service.dart';
+import 'package:safeer_market/features/subscriptions/domain/pending_subscription.dart';
 import 'package:safeer_market/features/subscriptions/domain/subscription.dart';
 import 'package:safeer_market/features/subscriptions/presentation/providers/subscription_providers.dart';
 import 'package:safeer_market/features/subscriptions/presentation/screens/paywall_screen.dart';
@@ -138,6 +140,28 @@ class _FakePaymobService implements PaymobService {
         plan: SubscriptionPlan.pro,
         expiry: DateTime.now().add(const Duration(days: 30)),
       );
+
+  @override
+  Future<String> uploadSubscriptionReceipt({
+    required String userId,
+    required Uint8List bytes,
+    required String fileName,
+    required String contentType,
+  }) async =>
+      'https://example.com/receipt.png';
+
+  @override
+  Future<void> submitInstaPaySubscription({
+    required PaidTier tier,
+    required String receiptUrl,
+  }) async {}
+
+  @override
+  Future<List<PendingSubscriptionRequest>> listPendingSubscriptions() async =>
+      const [];
+
+  @override
+  Future<void> approveSubscriptionRequest(String userId) async {}
 }
 
 class _FakePaymentPage implements PaymentPage {

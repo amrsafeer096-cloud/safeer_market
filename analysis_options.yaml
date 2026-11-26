@@ -7,7 +7,11 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
-include: package:flutter_lints/flutter.yaml
+    # Vendored / unused local package stubs (not in pubspec; breaks analyze).
+    - packages/**
+    # Web-only impl (dart:html / dart:js_util); analyzed via conditional import.
+    - lib/core/web/web_image_clipboard_web.dart
+  include: package:flutter_lints/flutter.yaml
 
 linter:
   rules:
