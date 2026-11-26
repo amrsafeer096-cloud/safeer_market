@@ -6,16 +6,19 @@ Customers / CustomerAddresses / hd_sequence) + PosPrintouts QR.
 
 Picks up newly placed orders (no fujitsu_order_id yet), creates/matches the
 customer in Fujitsu, allocates a real daily OrderId (YYMMDD######) using the
-SQL Server working date (never Python utcnow), inserts hd_orders +
-hd_order_items at StatusCode=2 with empty PickerNo/PickerName, writes
-hd_order_log, then writes Fujitsu ids back to Supabase. When a preparer
-starts the order (status→preparing), updates StatusCode=3 with the real
-PickerNo/PickerName.
+Trusty ServerWorkingDate (GETDATE minus hd_settings «order processing
+shift hours»), inserts hd_orders + hd_order_items at StatusCode=2 with
+empty PickerNo/PickerName, writes hd_order_log, then writes Fujitsu ids
+back to Supabase. When a preparer starts the order (status→preparing),
+updates StatusCode=3 with the real PickerNo/PickerName.
 
 Also:
   - rebuilds hd_order_items after edits / substitutions (barcode merge)
   - syncs cancellations → StatusCode 200 + audit log
   - syncs lifecycle status transitions + audit log
+  - 2-way staff sync: Fujitsu hd_pickers ↔ staff(preparer) and
+    sal_cashier(jobtype=2) pilots ↔ staff(driver)
+  - on out_for_delivery/delivered writes real PilotNo/PilotName (not «طيار»)
 
 Reuse the same SQL Server + Supabase config as sync_direct.py.
 Run next to sync_direct.py:  python sync_orders_to_fujitsu.py
@@ -26,7 +29,7 @@ from __future__ import annotations
 import re
 import time
 import traceback
-from datetime import datetime, date
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 import pyodbc
@@ -65,9 +68,15 @@ TERMINAL_NO = 0
 ORDER_VERSION = 0
 APP_VERSION = "1.0.0.56"
 POLL_SECONDS = 5
-PICKER_SYNC_INTERVAL_SECONDS = 300
+STAFF_SYNC_INTERVAL_SECONDS = 300
+# Back-compat alias (older loops / docs referred to picker-only sync).
+PICKER_SYNC_INTERVAL_SECONDS = STAFF_SYNC_INTERVAL_SECONDS
 DEFAULT_PICKER_ID = 10
 DEFAULT_PICKER_NAME = "محضر"
+# Fujitsu pilots live in sal_cashier with jobtype=2 (PilotNo = cashier).
+FUJITSU_PILOT_JOBTYPE = 2
+# In sal_cashier, status=0 is the value used by currently delivering pilots.
+FUJITSU_PILOT_STATUS_ACTIVE = 0
 STAFF_USER_ID = 7
 STAFF_USER_NAME = "سفير ماركت"
 
@@ -241,18 +250,59 @@ def _fetch_last_result(cursor):
     return cols, rows
 
 
-def sql_server_working_date(cursor) -> date:
-    """SQL Server local calendar day (Cairo POS). Never use Python utcnow()."""
-    cursor.execute("SELECT CAST(GETDATE() AS DATE)")
-    row = cursor.fetchone()
-    if not row or row[0] is None:
-        raise RuntimeError("SQL Server GETDATE() returned no date")
-    value = row[0]
+def _as_date(value: Any) -> date:
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
+
+
+def utc_now_iso() -> str:
+    """UTC timestamp for Supabase write-backs (avoids deprecated utcnow())."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def order_processing_shift_hours(cursor) -> int:
+    """Trusty hd_settings: «order processing shift hours» (positive hours)."""
+    cursor.execute(
+        """
+        SELECT TOP 1 TRY_CAST(setting_value AS int)
+        FROM hd_settings
+        WHERE setting_name = N'order processing shift hours'
+        """
+    )
+    row = cursor.fetchone()
+    try:
+        hours = int(row[0]) if row and row[0] is not None else 0
+    except (TypeError, ValueError):
+        hours = 0
+    return abs(hours)
+
+
+def sql_server_working_date(cursor) -> date:
+    """Trusty ``ServerWorkingDate`` used for OrderDate / OrderId / GetPrepOrders.
+
+    Exact Trusty filter (report §5 RefreshProcessingOrders / GetPrepOrders):
+      OrderDate = CONVERT(date, DATEADD(hh, {offset}, GETDATE()))
+
+    ``offset`` is ``-hd_settings['order processing shift hours']`` (e.g. -5), so
+    until that many hours after midnight the business day is still yesterday —
+    e.g. 02:30 on Nov 26 with shift=5 → working date Nov 25.
+
+    Never use Python ``date.today()`` / ``utcnow()`` / plain ``CAST(GETDATE() AS DATE)``.
+    """
+    shift = order_processing_shift_hours(cursor)
+    cursor.execute(
+        """
+        SELECT CONVERT(date, DATEADD(hh, ?, GETDATE()))
+        """,
+        (-shift,),
+    )
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        raise RuntimeError("SQL Server ServerWorkingDate returned no date")
+    return _as_date(row[0])
 
 
 def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
@@ -320,10 +370,16 @@ def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
 def allocate_daily_order_identity(cursor) -> tuple[int, int, date]:
     """Allocate a unique (OrderId, OrderNo, OrderDate) for DocType=4.
 
-    Uses SQL Server GETDATE() date only. OrderNo = max(hd_sequence, MAX(OrderNo))+1
-    and the resulting OrderId must not already exist in hd_orders.
+    Uses Trusty ServerWorkingDate (shift-hours business day). OrderNo =
+    max(hd_sequence, MAX(OrderNo for that OrderDate))+1 and the resulting
+    OrderId must not already exist in hd_orders.
     """
     working = sql_server_working_date(cursor)
+    shift = order_processing_shift_hours(cursor)
+    log(
+        f"📅 ServerWorkingDate={working} "
+        f"(GETDATE()-{shift}h order-processing shift)"
+    )
     cursor.execute(
         """
         IF NOT EXISTS (
@@ -854,6 +910,81 @@ def resolve_picker(
     return 0, truncate(name, 150)
 
 
+def _egypt_mobile(raw: Optional[str]) -> Optional[str]:
+    phone_val = (raw or "").strip()
+    if not re.fullmatch(r"01[0125]\d{8}", phone_val):
+        return None
+    return phone_val
+
+
+def _norm_name(value: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
+
+
+def _names_match(a: Optional[str], b: Optional[str]) -> bool:
+    """Exact or containment match (e.g. «محمود» ↔ «محمود يحيي»)."""
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return False
+    return na == nb or na in nb or nb in na
+
+
+def _is_junk_person_name(name: str) -> bool:
+    """Skip masked / generic Fujitsu placeholders."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return True
+    if set(cleaned) <= {"*", " "}:
+        return True
+    compact = re.sub(r"\s+", "", cleaned)
+    if compact in {"طيار", "طيار1", "محضر"}:
+        return True
+    return False
+
+
+def _find_staff_by_name(
+    *,
+    role: str,
+    name: str,
+    id_column: str,
+) -> Optional[dict[str, Any]]:
+    """Match a dashboard staff row missing its Fujitsu id (exact, then soft)."""
+    needle = (name or "").strip()
+    if not needle:
+        return None
+    try:
+        exact = (
+            supabase.table("staff")
+            .select(f"id, name, {id_column}")
+            .eq("role", role)
+            .eq("name", needle)
+            .is_(id_column, "null")
+            .limit(1)
+            .execute()
+        )
+        if exact.data:
+            return exact.data[0]
+
+        soft = (
+            supabase.table("staff")
+            .select(f"id, name, {id_column}")
+            .eq("role", role)
+            .is_(id_column, "null")
+            .limit(200)
+            .execute()
+        )
+        hits = [
+            r
+            for r in (soft.data or [])
+            if _names_match(str(r.get("name") or ""), needle)
+        ]
+        if len(hits) == 1:
+            return hits[0]
+    except Exception as exc:
+        log(f"⚠️ staff name lookup ({role}/{needle}) failed: {exc}")
+    return None
+
+
 def sync_fujitsu_pickers(cursor) -> int:
     """Upsert active/inactive hd_pickers into public.staff (role=preparer).
 
@@ -879,14 +1010,11 @@ def sync_fujitsu_pickers(cursor) -> int:
     changed = 0
     for picker_id, picker_name, phone, is_active in rows:
         name = (picker_name or "").strip()
-        if not name:
+        if not name or _is_junk_person_name(name):
             continue
         pid = int(picker_id)
         active = int(is_active or 0) == 1
-        phone_val = (phone or "").strip()
-        # Keep only plausible Egyptian mobiles; junk ('0', '010') → null.
-        if not re.fullmatch(r"01[0125]\d{8}", phone_val):
-            phone_val = None
+        phone_val = _egypt_mobile(phone)
 
         try:
             by_id = (
@@ -912,17 +1040,9 @@ def sync_fujitsu_pickers(cursor) -> int:
                     changed += 1
                 continue
 
-            # Attach Fujitsu id to a manually added preparer with the same name.
-            by_name = (
-                supabase.table("staff")
-                .select("id")
-                .eq("role", "preparer")
-                .eq("name", name)
-                .is_("fujitsu_picker_no", "null")
-                .limit(1)
-                .execute()
+            named = _find_staff_by_name(
+                role="preparer", name=name, id_column="fujitsu_picker_no"
             )
-            named = (by_name.data or [None])[0]
             if named:
                 patch = {"fujitsu_picker_no": pid, "is_active": active}
                 if phone_val:
@@ -949,6 +1069,377 @@ def sync_fujitsu_pickers(cursor) -> int:
         except Exception as exc:
             log(f"⚠️ picker upsert {pid}/{name} failed: {exc}")
     return changed
+
+
+def sync_fujitsu_pilots(cursor) -> int:
+    """Upsert sal_cashier pilots (jobtype=2) into public.staff (role=driver).
+
+    PilotNo on hd_orders is sal_cashier.cashier. Phone is stored in l_name.
+    status=0 means active for currently delivering pilots.
+    """
+    cursor.execute(
+        """
+        SELECT
+            cashier,
+            LTRIM(RTRIM(ISNULL(a_name, ''))) AS pilot_name,
+            LTRIM(RTRIM(ISNULL(l_name, ''))) AS phone,
+            CAST(ISNULL(status, 1) AS INT) AS status_code
+        FROM sal_cashier
+        WHERE jobtype = ?
+          AND a_name IS NOT NULL
+          AND LTRIM(RTRIM(a_name)) <> ''
+        """,
+        (FUJITSU_PILOT_JOBTYPE,),
+    )
+    rows = cursor.fetchall() or []
+    if not rows:
+        return 0
+
+    changed = 0
+    for cashier, pilot_name, phone, status_code in rows:
+        name = (pilot_name or "").strip()
+        if not name or _is_junk_person_name(name):
+            continue
+        pid = int(cashier)
+        active = int(status_code) == FUJITSU_PILOT_STATUS_ACTIVE
+        phone_val = _egypt_mobile(phone)
+
+        try:
+            by_id = (
+                supabase.table("staff")
+                .select("id, name, phone, is_active")
+                .eq("fujitsu_pilot_no", pid)
+                .limit(1)
+                .execute()
+            )
+            existing = (by_id.data or [None])[0]
+            if existing:
+                patch: dict[str, Any] = {}
+                if str(existing.get("name") or "").strip() != name:
+                    patch["name"] = name
+                if phone_val and str(existing.get("phone") or "").strip() != phone_val:
+                    patch["phone"] = phone_val
+                if bool(existing.get("is_active", True)) != active:
+                    patch["is_active"] = active
+                if patch:
+                    supabase.table("staff").update(patch).eq(
+                        "id", existing["id"]
+                    ).execute()
+                    changed += 1
+                continue
+
+            named = _find_staff_by_name(
+                role="driver", name=name, id_column="fujitsu_pilot_no"
+            )
+            if named:
+                patch = {"fujitsu_pilot_no": pid, "is_active": active}
+                if phone_val:
+                    patch["phone"] = phone_val
+                # Keep the dashboard short name (e.g. محمود) when it already
+                # soft-matches the Fujitsu full name.
+                supabase.table("staff").update(patch).eq(
+                    "id", named["id"]
+                ).execute()
+                changed += 1
+                continue
+
+            if not active:
+                continue
+
+            payload: dict[str, Any] = {
+                "name": name,
+                "role": "driver",
+                "fujitsu_pilot_no": pid,
+                "is_active": True,
+            }
+            if phone_val:
+                payload["phone"] = phone_val
+            supabase.table("staff").insert(payload).execute()
+            changed += 1
+        except Exception as exc:
+            log(f"⚠️ pilot upsert {pid}/{name} failed: {exc}")
+    return changed
+
+
+def _next_picker_id(cursor) -> int:
+    cursor.execute("SELECT ISNULL(MAX(picker_id), 0) + 1 FROM hd_pickers")
+    return int((cursor.fetchone() or [1])[0] or 1)
+
+
+def _next_pilot_cashier_no(cursor) -> int:
+    """Allocate the next PilotNo in the modern 1xxx range (avoid 8xxxx legacy)."""
+    cursor.execute(
+        """
+        SELECT ISNULL(MAX(cashier), 1000) + 1
+        FROM sal_cashier
+        WHERE cashier >= 1000 AND cashier < 80000
+        """
+    )
+    candidate = int((cursor.fetchone() or [1001])[0] or 1001)
+    while True:
+        cursor.execute(
+            "SELECT 1 FROM sal_cashier WHERE cashier = ?", (candidate,)
+        )
+        if not cursor.fetchone():
+            return candidate
+        candidate += 1
+
+
+def push_new_staff_pickers(cursor) -> int:
+    """Insert dashboard preparers missing fujitsu_picker_no into hd_pickers."""
+    try:
+        res = (
+            supabase.table("staff")
+            .select("id, name, phone, is_active")
+            .eq("role", "preparer")
+            .is_("fujitsu_picker_no", "null")
+            .eq("is_active", True)
+            .limit(100)
+            .execute()
+        )
+    except Exception as exc:
+        log(f"⚠️ push pickers query failed: {exc}")
+        return 0
+
+    pushed = 0
+    for row in res.data or []:
+        name = str(row.get("name") or "").strip()
+        if not name or _is_junk_person_name(name):
+            continue
+        phone_val = _egypt_mobile(str(row.get("phone") or ""))
+        try:
+            # Re-use an existing Fujitsu picker with the same name when present.
+            cursor.execute(
+                """
+                SELECT TOP 1 picker_id
+                FROM hd_pickers
+                WHERE LTRIM(RTRIM(picker_arabic_name)) = ?
+                ORDER BY picker_id
+                """,
+                (name,),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                pid = int(existing[0])
+            else:
+                pid = _next_picker_id(cursor)
+                cursor.execute(
+                    """
+                    INSERT INTO hd_pickers (
+                        picker_id, picker_arabic_name, picker_english_name,
+                        active, branch_id, last_modified_time, Phone
+                    ) VALUES (?, ?, N'', 1, ?, GETDATE(), ?)
+                    """,
+                    (pid, truncate(name, 50), BRANCH_ID, phone_val or ""),
+                )
+            supabase.table("staff").update(
+                {"fujitsu_picker_no": pid}
+            ).eq("id", row["id"]).execute()
+            pushed += 1
+            log(f"👷 pushed preparer «{name}» → hd_pickers #{pid}")
+        except Exception as exc:
+            log(f"⚠️ push preparer {name} failed: {exc}")
+    return pushed
+
+
+def push_new_staff_pilots(cursor) -> int:
+    """Insert dashboard drivers missing fujitsu_pilot_no into sal_cashier."""
+    try:
+        res = (
+            supabase.table("staff")
+            .select("id, name, phone, is_active")
+            .eq("role", "driver")
+            .is_("fujitsu_pilot_no", "null")
+            .eq("is_active", True)
+            .limit(100)
+            .execute()
+        )
+    except Exception as exc:
+        log(f"⚠️ push pilots query failed: {exc}")
+        return 0
+
+    pushed = 0
+    for row in res.data or []:
+        name = str(row.get("name") or "").strip()
+        if not name or _is_junk_person_name(name):
+            continue
+        phone_val = _egypt_mobile(str(row.get("phone") or "")) or ""
+        try:
+            cursor.execute(
+                """
+                SELECT TOP 1 cashier, a_name
+                FROM sal_cashier
+                WHERE jobtype = ?
+                  AND LTRIM(RTRIM(a_name)) = ?
+                ORDER BY cashier
+                """,
+                (FUJITSU_PILOT_JOBTYPE, name),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                pid = int(existing[0])
+            else:
+                # Soft-match full Fujitsu names («محمود يحيي») to short dashboard names.
+                cursor.execute(
+                    """
+                    SELECT cashier, LTRIM(RTRIM(a_name)) AS a_name
+                    FROM sal_cashier
+                    WHERE jobtype = ?
+                      AND a_name IS NOT NULL
+                    """,
+                    (FUJITSU_PILOT_JOBTYPE,),
+                )
+                soft_hits = [
+                    r
+                    for r in (cursor.fetchall() or [])
+                    if _names_match(str(r[1] or ""), name)
+                    and not _is_junk_person_name(str(r[1] or ""))
+                ]
+                if len(soft_hits) == 1:
+                    pid = int(soft_hits[0][0])
+                else:
+                    pid = _next_pilot_cashier_no(cursor)
+                    cursor.execute(
+                        """
+                        INSERT INTO sal_cashier (
+                            cashier, a_name, l_name, company, branch, job,
+                            education, hire_date, commission, status, govern,
+                            city, emp_privileges, user_id, password,
+                            accesslevel, jobtype, ledger, subledger,
+                            last_modified_time
+                        ) VALUES (
+                            ?, ?, ?, NULL, ?, NULL,
+                            NULL, NULL, 0, ?, NULL,
+                            NULL, NULL, NULL, NULL,
+                            0, ?, NULL, NULL,
+                            GETDATE()
+                        )
+                        """,
+                        (
+                            pid,
+                            truncate(name, 50),
+                            truncate(phone_val, 50) if phone_val else "",
+                            BRANCH_ID,
+                            FUJITSU_PILOT_STATUS_ACTIVE,
+                            FUJITSU_PILOT_JOBTYPE,
+                        ),
+                    )
+            supabase.table("staff").update(
+                {"fujitsu_pilot_no": pid}
+            ).eq("id", row["id"]).execute()
+            pushed += 1
+            log(f"🛵 pushed pilot «{name}» → sal_cashier #{pid}")
+        except Exception as exc:
+            log(f"⚠️ push pilot {name} failed: {exc}")
+    return pushed
+
+
+def sync_fujitsu_staff(cursor) -> tuple[int, int, int, int]:
+    """Pull Fujitsu pickers/pilots then push any new dashboard-only staff."""
+    pulled_pickers = sync_fujitsu_pickers(cursor)
+    pulled_pilots = sync_fujitsu_pilots(cursor)
+    pushed_pickers = push_new_staff_pickers(cursor)
+    pushed_pilots = push_new_staff_pilots(cursor)
+    return pulled_pickers, pulled_pilots, pushed_pickers, pushed_pilots
+
+
+def _staff_pilot_no(driver_name: str) -> Optional[int]:
+    """Exact / soft PilotNo from public.staff after sal_cashier sync."""
+    name = (driver_name or "").strip()
+    if not name:
+        return None
+    try:
+        res = (
+            supabase.table("staff")
+            .select("fujitsu_pilot_no, name")
+            .eq("role", "driver")
+            .eq("name", name)
+            .not_.is_("fujitsu_pilot_no", "null")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            res = (
+                supabase.table("staff")
+                .select("fujitsu_pilot_no, name")
+                .eq("role", "driver")
+                .not_.is_("fujitsu_pilot_no", "null")
+                .limit(200)
+                .execute()
+            )
+            rows = [
+                r
+                for r in (res.data or [])
+                if _names_match(str(r.get("name") or ""), name)
+            ]
+        if not rows:
+            return None
+        raw = rows[0].get("fujitsu_pilot_no")
+        return int(raw) if raw is not None else None
+    except Exception as exc:
+        log(f"⚠️ staff fujitsu_pilot_no lookup failed: {exc}")
+        return None
+
+
+def resolve_pilot(cursor, driver_name: str) -> tuple[int, str]:
+    """Prefer staff.fujitsu_pilot_no, else match sal_cashier pilots by name.
+
+    Never falls back to a generic «طيار» placeholder — unmatched keeps the
+    real name with PilotNo=0.
+    """
+    name = (driver_name or "").strip()
+    if not name:
+        return 0, ""
+
+    pilot_no = _staff_pilot_no(name)
+    if pilot_no is not None:
+        cursor.execute(
+            """
+            SELECT TOP 1 cashier, LTRIM(RTRIM(a_name))
+            FROM sal_cashier
+            WHERE cashier = ? AND jobtype = ?
+            """,
+            (pilot_no, FUJITSU_PILOT_JOBTYPE),
+        )
+        row = cursor.fetchone()
+        if row:
+            return int(row[0]), truncate(str(row[1] or name).strip(), 150, name)
+        return pilot_no, truncate(name, 150)
+
+    cursor.execute(
+        """
+        SELECT TOP 1 cashier, LTRIM(RTRIM(a_name))
+        FROM sal_cashier
+        WHERE jobtype = ?
+          AND LTRIM(RTRIM(a_name)) = ?
+        ORDER BY cashier
+        """,
+        (FUJITSU_PILOT_JOBTYPE, name),
+    )
+    row = cursor.fetchone()
+    if row:
+        return int(row[0]), truncate(str(row[1] or name).strip(), 150, name)
+
+    cursor.execute(
+        """
+        SELECT cashier, LTRIM(RTRIM(a_name))
+        FROM sal_cashier
+        WHERE jobtype = ?
+          AND a_name IS NOT NULL
+        """,
+        (FUJITSU_PILOT_JOBTYPE,),
+    )
+    soft = [
+        r
+        for r in (cursor.fetchall() or [])
+        if _names_match(str(r[1] or ""), name)
+        and not _is_junk_person_name(str(r[1] or ""))
+    ]
+    if len(soft) == 1:
+        return int(soft[0][0]), truncate(str(soft[0][1] or name).strip(), 150, name)
+
+    return 0, truncate(name, 150)
 
 
 def lookup_item(cursor, barcode: str) -> Optional[dict[str, Any]]:
@@ -1576,8 +2067,8 @@ def sync_one_order(order: dict[str, Any]) -> None:
 
         fujitsu_order_id, seq, working_date = allocate_daily_order_identity(cursor)
         fujitsu_order_id_str = str(fujitsu_order_id)
-        # OrderDate must match the SQL Server working day used in OrderId —
-        # never Python utcnow() / UTC created_at (causes YYMMDD collisions).
+        # OrderDate must match Trusty ServerWorkingDate used in OrderId /
+        # GetPrepOrders (shift-hours business day — not calendar midnight).
         order_date = datetime(
             working_date.year, working_date.month, working_date.day
         )
@@ -1705,11 +2196,11 @@ def sync_one_order(order: dict[str, Any]) -> None:
             "fujitsu_order_id": fujitsu_order_id_str,
             "fujitsu_customer_no": customer_no,
             "fujitsu_address_id": address_id,
-            "fujitsu_synced_at": datetime.utcnow().isoformat() + "Z",
+            "fujitsu_synced_at": utc_now_iso(),
             "fujitsu_sync_error": None,
             "pos_receipt_number": fujitsu_order_id_str,
             "fujitsu_status_code": STATUS_WAITING_PREP,
-            "fujitsu_status_synced_at": datetime.utcnow().isoformat() + "Z",
+            "fujitsu_status_synced_at": utc_now_iso(),
         }
         try:
             supabase.table("orders").update(write_back).eq("id", order_id).execute()
@@ -1845,7 +2336,7 @@ def _rebuild_fujitsu_items(
             ),
         )
         conn.commit()
-        now_iso = datetime.utcnow().isoformat() + "Z"
+        now_iso = utc_now_iso()
         supabase.table("orders").update(
             {
                 "fujitsu_synced_at": now_iso,
@@ -1961,6 +2452,7 @@ def _apply_fujitsu_status(
     created_at: Any,
     cancel_reason: Optional[str] = None,
     preparer_name: str = "",
+    driver_name: str = "",
 ) -> None:
     if not fujitsu_order_id_str or fujitsu_order_id_str.upper() == "SKIPPED":
         return
@@ -2073,26 +2565,65 @@ def _apply_fujitsu_status(
                 (new_status, new_name, now, fujitsu_order_id),
             )
         elif new_status == 5:
+            pilot_no, pilot_name = resolve_pilot(cursor, driver_name)
+            started_by_name = truncate(
+                pilot_name or driver_name, 150, driver_name or STAFF_USER_NAME
+            )
+            # Never write the generic «طيار» placeholder.
+            if _is_junk_person_name(started_by_name):
+                started_by_name = truncate(driver_name, 150, STAFF_USER_NAME)
             cursor.execute(
                 """
                 UPDATE hd_orders
                 SET PreviousStatusCode = StatusCode,
                     PreviousStatusName = StatusName,
                     StatusCode = ?, StatusName = ?,
+                    PilotNo = ?,
+                    PilotName = ?,
                     DeliveryStartedBy = ?, DeliveryStartedByName = ?,
                     DeliveryStartTime = COALESCE(DeliveryStartTime, ?),
                     ModifiedTime = GETDATE(), DateModified = GETDATE()
                 WHERE OrderId = ?
                 """,
-                (new_status, new_name, STAFF_USER_ID, STAFF_USER_NAME, now, fujitsu_order_id),
+                (
+                    new_status,
+                    new_name,
+                    int(pilot_no or 0),
+                    truncate(pilot_name or driver_name, 150, ""),
+                    STAFF_USER_ID,
+                    started_by_name,
+                    now,
+                    fujitsu_order_id,
+                ),
             )
         elif new_status == 6:
+            pilot_no, pilot_name = resolve_pilot(cursor, driver_name)
+            closed_by_name = truncate(
+                pilot_name or driver_name, 150, driver_name or STAFF_USER_NAME
+            )
+            if _is_junk_person_name(closed_by_name):
+                closed_by_name = truncate(driver_name, 150, STAFF_USER_NAME)
             cursor.execute(
                 """
                 UPDATE hd_orders
                 SET PreviousStatusCode = StatusCode,
                     PreviousStatusName = StatusName,
                     StatusCode = ?, StatusName = ?,
+                    PilotNo = CASE
+                        WHEN ? > 0 THEN ?
+                        ELSE PilotNo
+                    END,
+                    PilotName = CASE
+                        WHEN LTRIM(RTRIM(?)) <> N'' THEN ?
+                        ELSE PilotName
+                    END,
+                    DeliveryStartedByName = CASE
+                        WHEN LTRIM(RTRIM(?)) <> N''
+                             AND (DeliveryStartedByName IS NULL
+                                  OR LTRIM(RTRIM(DeliveryStartedByName)) IN (N'', N'طيار', N'طيار '))
+                        THEN ?
+                        ELSE DeliveryStartedByName
+                    END,
                     DeliveryEndTime = ?, EndTime = ?,
                     ClosedBy = ?, ClosedByName = ?,
                     ModifiedTime = GETDATE(), DateModified = GETDATE()
@@ -2101,10 +2632,16 @@ def _apply_fujitsu_status(
                 (
                     new_status,
                     new_name,
+                    int(pilot_no or 0),
+                    int(pilot_no or 0),
+                    truncate(pilot_name or driver_name, 150, ""),
+                    truncate(pilot_name or driver_name, 150, ""),
+                    closed_by_name,
+                    closed_by_name,
                     now,
                     now,
                     STAFF_USER_ID,
-                    STAFF_USER_NAME,
+                    closed_by_name,
                     fujitsu_order_id,
                 ),
             )
@@ -2121,6 +2658,9 @@ def _apply_fujitsu_status(
                 (new_status, new_name, fujitsu_order_id),
             )
 
+        log_notes = cancel_reason or "safeer_market status sync"
+        if new_status in (5, 6) and (driver_name or "").strip():
+            log_notes = f"{log_notes} · pilot {(driver_name or '').strip()}"
         insert_hd_order_log(
             cursor,
             order_id=fujitsu_order_id,
@@ -2128,14 +2668,14 @@ def _apply_fujitsu_status(
             order_no=order_no,
             old_status=prev,
             new_status=new_status,
-            notes=cancel_reason or "safeer_market status sync",
+            notes=log_notes,
         )
         conn.commit()
 
         supabase.table("orders").update(
             {
                 "fujitsu_status_code": new_status,
-                "fujitsu_status_synced_at": datetime.utcnow().isoformat() + "Z",
+                "fujitsu_status_synced_at": utc_now_iso(),
                 "fujitsu_sync_error": None,
             }
         ).eq("id", order_id).execute()
@@ -2164,7 +2704,7 @@ def sync_status_and_cancellations() -> None:
         res = (
             supabase.table("orders")
             .select(
-                "id, status, created_at, preparer_name, "
+                "id, status, created_at, preparer_name, driver_name, "
                 "fujitsu_order_id, fujitsu_status_code"
             )
             .not_.is_("fujitsu_order_id", "null")
@@ -2204,7 +2744,7 @@ def sync_status_and_cancellations() -> None:
                 supabase.table("orders").update(
                     {
                         "fujitsu_status_code": STATUS_WAITING_PREP,
-                        "fujitsu_status_synced_at": datetime.utcnow().isoformat() + "Z",
+                        "fujitsu_status_synced_at": utc_now_iso(),
                     }
                 ).eq("id", str(order["id"])).execute()
             except Exception:
@@ -2219,6 +2759,7 @@ def sync_status_and_cancellations() -> None:
                 created_at=order.get("created_at"),
                 cancel_reason=None,
                 preparer_name=str(order.get("preparer_name") or ""),
+                driver_name=str(order.get("driver_name") or ""),
             )
         except Exception as exc:
             log(f"⚠️ status sync failed for {fujitsu_id}: {exc}")
@@ -2229,23 +2770,35 @@ def main() -> None:
         "🚀 sync_orders_to_fujitsu started (Trusty parity loop every "
         f"{POLL_SECONDS}s) → {SQL_SERVER}/{SQL_DATABASE}"
     )
-    last_picker_sync = 0.0
+    last_staff_sync = 0.0
     while True:
         try:
             now_ts = time.time()
-            if now_ts - last_picker_sync >= PICKER_SYNC_INTERVAL_SECONDS:
+            if now_ts - last_staff_sync >= STAFF_SYNC_INTERVAL_SECONDS:
                 try:
                     conn = connect_sql()
                     try:
                         cur = conn.cursor()
-                        n = sync_fujitsu_pickers(cur)
-                        if n:
-                            log(f"👷 synced/updated {n} Fujitsu preparer(s)")
+                        pulled_p, pulled_d, pushed_p, pushed_d = sync_fujitsu_staff(
+                            cur
+                        )
+                        conn.commit()
+                        if pulled_p:
+                            log(f"👷 synced/updated {pulled_p} Fujitsu preparer(s)")
+                        if pulled_d:
+                            log(f"🛵 synced/updated {pulled_d} Fujitsu pilot(s)")
+                        if pushed_p:
+                            log(f"👷 pushed {pushed_p} new preparer(s) → hd_pickers")
+                        if pushed_d:
+                            log(f"🛵 pushed {pushed_d} new pilot(s) → sal_cashier")
+                    except Exception:
+                        conn.rollback()
+                        raise
                     finally:
                         conn.close()
                 except Exception as exc:
-                    log(f"⚠️ hd_pickers sync failed: {exc}")
-                last_picker_sync = now_ts
+                    log(f"⚠️ staff/picker/pilot sync failed: {exc}")
+                last_staff_sync = now_ts
 
             pending = fetch_pending_orders()
             if pending:

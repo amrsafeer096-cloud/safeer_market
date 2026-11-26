@@ -419,13 +419,16 @@ def get_last_synced_customer_rowversion():
 
 def pull_fujitsu_to_supabase(min_row_version):
     """
-    Trusty SyncCustomerCache: v_customers WHERE
-      RowVersion >= Convert(RowVersion, Convert(bigint, {minVersion}))
+    Incremental pull from v_customers.
+
+    Trusty SyncCustomerCache seeds with ``RowVersion >= minVersion`` once, then
+    advances past the watermark. We use strict ``IntRowVersion > last`` so the
+    last synced customer is not re-fetched every poll when nothing changed.
     """
     conn = pyodbc.connect(connection_string)
     cursor = conn.cursor()
 
-    # Prefer IntRowVersion incremental (exact Trusty pattern). Fall back to CustomerNo.
+    # Prefer IntRowVersion incremental. Fall back to CustomerNo when version is 0.
     query = """
         SELECT TOP 500
             CustomerNo,
@@ -457,7 +460,7 @@ def pull_fujitsu_to_supabase(min_row_version):
         FROM dbo.v_customers
         WHERE IsDisabled = 0
           AND (
-                IntRowVersion >= ?
+                IntRowVersion > ?
              OR (ISNULL(IntRowVersion, 0) = 0 AND CustomerNo > ?)
           )
         ORDER BY IntRowVersion ASC, CustomerNo ASC
@@ -477,7 +480,7 @@ def pull_fujitsu_to_supabase(min_row_version):
     print(
         f"[{datetime.now().strftime('%I:%M:%S %p')}] "
         f"⬇️ جاري سحب ({len(rows)}) عميل من v_customers "
-        f"(RowVersion>={min_row_version}, أول رقم {first_no})..."
+        f"(RowVersion>{min_row_version}, أول رقم {first_no})..."
     )
 
     batch = []
