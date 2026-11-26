@@ -88,6 +88,46 @@ abstract final class PrepReceiptPdf {
               ),
             ),
             sep(),
+            // Order source — bold header cue (app = inverted black box).
+            if (receipt.isAppOrder)
+              pw.Container(
+                width: double.infinity,
+                margin: const pw.EdgeInsets.only(bottom: 6),
+                padding: const pw.EdgeInsets.symmetric(
+                  vertical: 5,
+                  horizontal: 4,
+                ),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.black,
+                  border: pw.Border.all(color: PdfColors.black, width: 1.2),
+                ),
+                child: pw.Center(
+                  child: pw.Text(
+                    receipt.orderSourceLabel,
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      font: bold,
+                      fontSize: 10,
+                      color: PdfColors.white,
+                    ),
+                  ),
+                ),
+              )
+            else
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 6),
+                child: pw.Center(
+                  child: pw.Text(
+                    receipt.orderSourceLabel,
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                      font: bold,
+                      fontSize: 10,
+                      color: PdfColors.black,
+                    ),
+                  ),
+                ),
+              ),
             line('الفرع', '${receipt.branchName} (${receipt.branchCode})'),
             line(
               'رقم الطلب',

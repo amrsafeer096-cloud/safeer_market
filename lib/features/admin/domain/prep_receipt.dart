@@ -56,6 +56,14 @@ class PrepReceipt {
   /// TrustyDelivery `OrderSource`: 0 = call center, 1 = online/app.
   final int orderSource;
 
+  /// True when [orderSource] is mobile app / online (`1`).
+  bool get isAppOrder => orderSource == 1;
+
+  /// Bold receipt line: «مصدر الطلب: …».
+  String get orderSourceLabel => isAppOrder
+      ? 'مصدر الطلب: عميل تطبيق (أبليكيشن)'
+      : 'مصدر الطلب: طلب تليفون';
+
   /// TrustyDelivery `CommitPrices` flag embedded in the cashier QR.
   final int commitPrices;
 
