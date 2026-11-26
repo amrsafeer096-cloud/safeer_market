@@ -584,15 +584,23 @@ class _HistoryRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                        color: outOfStock ? palette.muted : palette.onSurface,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: outOfStock
+                            ? palette.muted
+                            : const Color(0xFF0F172A),
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '${AppCurrency.of(product.effectivePrice)} / ${product.displayUnit}',
-                      style: TextStyle(fontSize: 11, color: palette.muted),
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: outOfStock
+                            ? palette.muted
+                            : const Color(0xFF0F172A),
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Wrap(

@@ -1552,18 +1552,29 @@ class _LockedCustomer extends StatelessWidget {
                         TextSpan(
                           text: customer.fullName ?? l10n.adminNoName,
                           style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: compact ? 12.5 : null,
+                            fontWeight: FontWeight.w700,
+                            fontSize: compact ? 14 : 15,
+                            color: const Color(0xFF111827),
+                            height: 1.25,
                           ),
                         ),
-                        const TextSpan(text: '  •  '),
+                        TextSpan(
+                          text: '  •  ',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: compact ? 13 : 13.5,
+                            color: const Color(0xFF111827),
+                          ),
+                        ),
                         TextSpan(
                           text: phones.isEmpty
                               ? l10n.adminNoPhoneNumber
                               : phones,
                           style: TextStyle(
-                            color: palette.muted,
-                            fontSize: compact ? 12 : null,
+                            fontWeight: FontWeight.w700,
+                            fontSize: compact ? 13 : 13.5,
+                            color: const Color(0xFF111827),
+                            height: 1.25,
                           ),
                         ),
                       ]),
@@ -1575,7 +1586,11 @@ class _LockedCustomer extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: compact ? 11 : 12, color: palette.muted),
+                        fontSize: compact ? 12 : 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF111827),
+                        height: 1.25,
+                      ),
                     ),
                   ],
                 ),
@@ -2048,8 +2063,23 @@ class _CartLine extends StatelessWidget {
                     line.product.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: Color(0xFF0F172A),
+                      height: 1.3,
+                    ),
                   ),
+                  Text(
+                    '${AppCurrency.of(line.product.effectivePrice)} / ${line.product.displayUnit}',
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  if (line.product.hasActiveOffer)
+                    ProductOfferBadge(product: line.product),
                   if (weightLabel != null)
                     Text(
                       'الوزن: $weightLabel',
@@ -2100,7 +2130,11 @@ class _CartLine extends StatelessWidget {
               child: Text(
                 AppCurrency.of(line.total),
                 textAlign: TextAlign.end,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13.5,
+                  color: Color(0xFF0F172A),
+                ),
               ),
             ),
           ],

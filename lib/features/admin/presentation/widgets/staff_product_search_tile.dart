@@ -50,11 +50,15 @@ class ProductSearchFilterButton extends StatelessWidget {
   }
 }
 
-/// Green offer chip: «خصم 15% • 85.00 ج.م بدل 100.00 ج.م».
+/// Red offer chip: «خصم 15% • 85.00 ج.م بدل 100.00 ج.م».
 class ProductOfferBadge extends StatelessWidget {
   const ProductOfferBadge({super.key, required this.product});
 
   final Product product;
+
+  static const _bg = Color(0xFFFEE2E2);
+  static const _border = Color(0xFFFCA5A5); // red.shade300-ish
+  static const _fg = Color(0xFFB91C1C);
 
   @override
   Widget build(BuildContext context) {
@@ -67,16 +71,16 @@ class ProductOfferBadge extends StatelessWidget {
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
+        color: _bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF81C784)),
+        border: Border.all(color: _border),
       ),
       child: Text(
         detail,
-        style: TextStyle(
+        style: const TextStyle(
           fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: Colors.green.shade800,
+          fontWeight: FontWeight.w700,
+          color: _fg,
         ),
       ),
     );
@@ -124,7 +128,11 @@ class ProductBarcodeCopyRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textDirection: TextDirection.ltr,
-                  style: TextStyle(fontSize: 12, color: palette.muted),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF334155),
+                  ),
                 ),
               ),
               const SizedBox(width: 4),
@@ -140,7 +148,7 @@ class ProductBarcodeCopyRow extends StatelessWidget {
 Color staffStockColor(int stock, AppPalette palette) {
   if (stock <= 0) return Colors.red.shade700;
   if (stock <= 5) return Colors.orange.shade800;
-  return palette.muted;
+  return const Color(0xFF334155);
 }
 
 /// Shared staff product row (phone orders + edit-order search).
@@ -206,15 +214,20 @@ class StaffProductSearchTile extends StatelessWidget {
         Text(
           product.name,
           style: const TextStyle(
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
             fontSize: 14,
             height: 1.35,
+            color: Color(0xFF0F172A),
           ),
         ),
         const SizedBox(height: 4),
         Text(
           '${AppCurrency.of(product.effectivePrice)} / ${product.displayUnit}',
-          style: TextStyle(fontSize: 12, color: palette.muted),
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF0F172A),
+          ),
         ),
         ProductOfferBadge(product: product),
         if (product.barcode case final barcode?
@@ -234,7 +247,7 @@ class StaffProductSearchTile extends StatelessWidget {
         key: Key('$keyPrefix-stock-${product.id}'),
         style: TextStyle(
           fontSize: 12,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w600,
           color: stockColor,
         ),
       ),
