@@ -257,14 +257,22 @@ class PrepReceiptItem {
   final int? weightInGrams;
   final bool isWeightBased;
 
-  /// `500 جم`, `1 كجم`, or `5 قطعة`.
+  /// `500 جم`, `1.3 كجم`, or `5 قطعة`.
   String get quantityLabel {
     if (isWeightBased) {
       final grams = weightInGrams ?? 0;
       if (grams <= 0) return '1';
+      // Keep exact decimal kg (e.g. 1300 → 1.3 كجم, 125 → 125 جم).
       if (grams % 1000 == 0) {
         final kg = grams ~/ 1000;
         return kg == 1 ? '1 كجم' : '$kg كجم';
+      }
+      if (grams > 1000) {
+        final kilos = grams / 1000.0;
+        var text = kilos.toStringAsFixed(3);
+        text = text.replaceFirst(RegExp(r'0+$'), '');
+        text = text.replaceFirst(RegExp(r'\.$'), '');
+        return '$text كجم';
       }
       return '$grams جم';
     }

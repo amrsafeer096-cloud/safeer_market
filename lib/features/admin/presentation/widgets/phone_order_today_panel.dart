@@ -3,9 +3,10 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/constants/app_currency.dart';
 import '../../../../core/network/supabase_providers.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../domain/entities/order_status.dart';
@@ -31,19 +32,22 @@ final takerTodayOrdersProvider =
           .select(columns)
           .eq('taker_name', name)
           .gte('created_at', start.toIso8601String())
-          .neq('status', 'cancelled')
           .order('created_at', ascending: false)
-          .limit(80);
+          .limit(100);
       return List<Map<String, dynamic>>.from(rows as List);
     }
 
     // Prefer updated_at for the live timer; fall back if the column is absent.
     const withUpdated =
         'id, status, created_at, updated_at, prep_completed_at, '
-        'customer_name, customer_phone, taker_name, driver_name, preparer_name';
+        'customer_name, customer_phone, taker_name, driver_name, preparer_name, '
+        'delivery_fee, total_amount, address_details, payment_method, '
+        'fujitsu_order_id, delivery_area';
     const withoutUpdated =
         'id, status, created_at, prep_completed_at, '
-        'customer_name, customer_phone, taker_name, driver_name, preparer_name';
+        'customer_name, customer_phone, taker_name, driver_name, preparer_name, '
+        'delivery_fee, total_amount, address_details, payment_method, '
+        'fujitsu_order_id, delivery_area';
     try {
       return await query(withUpdated);
     } catch (error) {
@@ -80,7 +84,7 @@ final takerTodayOrdersProvider =
   }
 
   unawaited(push());
-  final poll = Timer.periodic(const Duration(seconds: 8), (_) => push());
+  final poll = Timer.periodic(const Duration(seconds: 5), (_) => push());
 
   final channel = client.channel('phone-order-today-$name');
   channel
@@ -187,76 +191,84 @@ class _TodayOrderCard extends StatelessWidget {
     final status = OrderStatus.normalize('${order['status'] ?? ''}');
     final name = (order['customer_name'] ?? 'عميل').toString().trim();
     final phone = (order['customer_phone'] ?? '').toString().trim();
-    final label = _statusLabel(status);
-    final color = _statusColor(status);
+    final label = todayStatusLabel(status);
+    final color = todayStatusColor(status);
+    final id = '${order['id']}';
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            name.isEmpty ? 'عميل' : name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
-          ),
-          if (phone.isNotEmpty)
-            Text(
-              phone,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: palette.muted),
-            ),
-          const SizedBox(height: 4),
-          Row(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: Key('phone-order-today-$id'),
+        onTap: () => showTodayOrderInspection(context, orderId: id),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: color.withValues(alpha: 0.35)),
-                ),
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
-                ),
+              Text(
+                name.isEmpty ? 'عميل' : name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
               ),
-              const Spacer(),
-              _StatusElapsedTimer(order: order),
+              if (phone.isNotEmpty)
+                Text(
+                  phone,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: palette.muted),
+                ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: color.withValues(alpha: 0.35)),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: color,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  _StatusElapsedTimer(order: order),
+                ],
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
-
-  static String _statusLabel(String status) => switch (status) {
-        'pending' => 'جديد',
-        'preparing' => 'تحضير',
-        'ready_for_delivery' => 'للطيار',
-        'out_for_delivery' => 'توصيل',
-        'delivered' => 'مكتمل',
-        'cancelled' => 'ملغي',
-        _ => status,
-      };
-
-  static Color _statusColor(String status) => switch (status) {
-        'pending' => Colors.blueGrey,
-        'preparing' => Colors.orange,
-        'ready_for_delivery' => Colors.purple,
-        'out_for_delivery' => Colors.blue,
-        'delivered' => Colors.green,
-        'cancelled' => Colors.red,
-        _ => Colors.grey,
-      };
 }
+
+String todayStatusLabel(String status) => switch (status) {
+      'pending' => 'انتظار',
+      'preparing' => 'تحضير',
+      'ready_for_delivery' => 'جاهز',
+      'out_for_delivery' => 'توصيل',
+      'delivered' => 'تم',
+      'cancelled' => 'ملغي',
+      _ => status,
+    };
+
+Color todayStatusColor(String status) => switch (status) {
+      'pending' => Colors.blueGrey,
+      'preparing' => Colors.orange,
+      'ready_for_delivery' => Colors.purple,
+      'out_for_delivery' => Colors.blue,
+      'delivered' => Colors.green,
+      'cancelled' => Colors.red,
+      _ => Colors.grey,
+    };
 
 /// Live MM:SS / HH:MM from last status change (`updated_at` preferred).
 class _StatusElapsedTimer extends StatefulWidget {
@@ -301,14 +313,11 @@ class _StatusElapsedTimerState extends State<_StatusElapsedTimer> {
   }
 
   DateTime _anchor() {
-    // Prefer the moment we observed a status change so the timer
-    // resets to 00:00 immediately in the UI.
     if (_statusChangedAt != null) return _statusChangedAt!;
 
     final status = OrderStatus.normalize('${widget.order['status'] ?? ''}');
     DateTime? parse(Object? raw) => DateTime.tryParse('$raw')?.toLocal();
 
-    // `status_updated_at` does not exist — use updated_at, then prep/created.
     final updated = parse(widget.order['updated_at']);
     if (updated != null) return updated;
     if (status == OrderStatus.readyForDelivery.value) {
@@ -342,6 +351,332 @@ class _StatusElapsedTimerState extends State<_StatusElapsedTimer> {
         fontWeight: FontWeight.w900,
         fontSize: 12,
         fontFamily: 'monospace',
+      ),
+    );
+  }
+}
+
+Future<void> showTodayOrderInspection(
+  BuildContext context, {
+  required String orderId,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    builder: (ctx) => _TodayOrderInspectionDialog(orderId: orderId),
+  );
+}
+
+class _TodayOrderInspectionDialog extends ConsumerStatefulWidget {
+  const _TodayOrderInspectionDialog({required this.orderId});
+
+  final String orderId;
+
+  @override
+  ConsumerState<_TodayOrderInspectionDialog> createState() =>
+      _TodayOrderInspectionDialogState();
+}
+
+class _TodayOrderInspectionDialogState
+    extends ConsumerState<_TodayOrderInspectionDialog> {
+  Map<String, dynamic>? _order;
+  List<Map<String, dynamic>> _items = const [];
+  Object? _error;
+  var _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final client = ref.read(supabaseClientProvider);
+      final order = await client
+          .from('orders')
+          .select(
+            'id, status, created_at, updated_at, prep_completed_at, '
+            'customer_name, customer_phone, taker_name, preparer_name, '
+            'driver_name, delivery_fee, total_amount, address_details, '
+            'payment_method, fujitsu_order_id, delivery_area',
+          )
+          .eq('id', widget.orderId)
+          .maybeSingle();
+      final items = await client
+          .from('order_items')
+          .select(
+            'id, quantity, price_at_time, weight_in_grams, '
+            'products(name, barcode)',
+          )
+          .eq('order_id', widget.orderId);
+      if (!mounted) return;
+      setState(() {
+        _order = order == null ? null : Map<String, dynamic>.from(order);
+        _items = [
+          for (final row in items as List)
+            Map<String, dynamic>.from(row as Map),
+        ];
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  String _paymentLabel(String? raw) => switch ((raw ?? '').toLowerCase()) {
+        'cash' || 'cash_on_delivery' => 'نقدي',
+        'visa_on_delivery' => 'فيزا عند الاستلام',
+        'card' || 'visa' => 'ائتمان',
+        'instapay' => 'إنستا باي',
+        _ => (raw?.trim().isNotEmpty ?? false) ? raw!.trim() : '—',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final dateFmt = DateFormat('dd/MM/yyyy hh:mm a');
+    final order = _order;
+    final status = OrderStatus.normalize('${order?['status'] ?? ''}');
+    final prepDone = order?['prep_completed_at'] != null;
+    final preparedCount = prepDone ? _items.length : 0;
+    final pendingCount = prepDone ? 0 : _items.length;
+
+    return AlertDialog(
+      key: const Key('phone-order-today-inspection'),
+      title: const Text(
+        'تفاصيل طلب اليوم',
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+      content: SizedBox(
+        width: 480,
+        height: 460,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(child: Text('$_error', textAlign: TextAlign.center))
+                : order == null
+                    ? const Center(child: Text('الطلب غير موجود'))
+                    : ListView(
+                        children: [
+                          _kv('العميل', '${order['customer_name'] ?? '—'}'),
+                          _kv('تليفون', '${order['customer_phone'] ?? '—'}'),
+                          _kv(
+                            'العنوان',
+                            '${order['address_details'] ?? '—'}',
+                          ),
+                          _kv(
+                            'المنطقة',
+                            '${order['delivery_area'] ?? '—'}',
+                          ),
+                          _kv(
+                            'الحالة',
+                            todayStatusLabel(status),
+                          ),
+                          _kv(
+                            'وقت الطلب',
+                            dateFmt.format(
+                              DateTime.tryParse('${order['created_at']}')
+                                      ?.toLocal() ??
+                                  DateTime.now(),
+                            ),
+                          ),
+                          _kv('المتلقي', '${order['taker_name'] ?? '—'}'),
+                          _kv('المحضر', '${order['preparer_name'] ?? '—'}'),
+                          _kv('السائق', '${order['driver_name'] ?? '—'}'),
+                          _kv(
+                            'الدفع',
+                            _paymentLabel(order['payment_method']?.toString()),
+                          ),
+                          if (order['fujitsu_order_id'] != null)
+                            _kv(
+                              'رقم فوجيتسو',
+                              '${order['fujitsu_order_id']}',
+                            ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: palette.background,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: palette.border),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'تقدم التجهيز',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    color: palette.accent,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  prepDone
+                                      ? 'اكتمل تجهيز كل الأصناف ($_items.length)'
+                                      : status == 'pending'
+                                          ? 'في الانتظار — لم يبدأ التجهيز'
+                                          : 'قيد التجهيز: جاهز $preparedCount • متبقي $pendingCount',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700),
+                                ),
+                                if (prepDone)
+                                  Text(
+                                    'اكتمل: ${dateFmt.format(DateTime.tryParse('${order['prep_completed_at']}')?.toLocal() ?? DateTime.now())}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: palette.muted,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 20),
+                          Text(
+                            'الأصناف (${_items.length})',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: palette.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          for (final item in _items)
+                            _ItemRow(
+                              item: item,
+                              prepared: prepDone,
+                              pending: !prepDone,
+                            ),
+                          const Divider(height: 20),
+                          _kv(
+                            'التوصيل',
+                            AppCurrency.of(
+                              (order['delivery_fee'] as num?)?.toDouble() ?? 0,
+                            ),
+                          ),
+                          _kv(
+                            'الإجمالي',
+                            AppCurrency.of(
+                              (order['total_amount'] as num?)?.toDouble() ?? 0,
+                            ),
+                          ),
+                        ],
+                      ),
+      ),
+      actions: [
+        FilledButton.icon(
+          key: const Key('phone-order-today-back'),
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_forward_rounded),
+          label: const Text('رجوع للطلب الحالي'),
+        ),
+      ],
+    );
+  }
+
+  Widget _kv(String k, String v) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 100,
+              child: Text(
+                k,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 12.5),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                v,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _ItemRow extends StatelessWidget {
+  const _ItemRow({
+    required this.item,
+    required this.prepared,
+    required this.pending,
+  });
+
+  final Map<String, dynamic> item;
+  final bool prepared;
+  final bool pending;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final product = item['products'];
+    final p = product is Map
+        ? Map<String, dynamic>.from(product)
+        : <String, dynamic>{};
+    final name = '${p['name'] ?? 'منتج'}';
+    final barcode = '${p['barcode'] ?? ''}'.trim();
+    final grams = item['weight_in_grams'];
+    final qty = item['quantity'] ?? 1;
+    final qtyLabel = (grams is num && grams > 0)
+        ? '${grams.round()} جم'
+        : '× $qty';
+    final price = (item['price_at_time'] as num?)?.toDouble() ?? 0;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            prepared
+                ? Icons.check_circle_rounded
+                : pending
+                    ? Icons.hourglass_top_rounded
+                    : Icons.circle_outlined,
+            size: 18,
+            color: prepared
+                ? Colors.green
+                : pending
+                    ? Colors.orange
+                    : palette.muted,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                if (barcode.isNotEmpty)
+                  Text(barcode,
+                      style: TextStyle(fontSize: 11, color: palette.muted)),
+              ],
+            ),
+          ),
+          Text(
+            qtyLabel,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            AppCurrency.of(price),
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: palette.accent,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -59,6 +59,9 @@ class PhoneOrderColumn extends ConsumerWidget {
     final hasCustomer = ref.watch(
       phoneOrderControllerProvider.select((state) => state.customer != null),
     );
+    final hasLines = ref.watch(
+      phoneOrderControllerProvider.select((state) => state.lines.isNotEmpty),
+    );
     final canPark = ref.watch(
       phoneOrderControllerProvider
           .select((state) => !state.isBlank && !state.submitting),
@@ -67,47 +70,52 @@ class PhoneOrderColumn extends ConsumerWidget {
       phoneOrderControllerProvider.select((state) => state.parked.isNotEmpty),
     );
 
-    Widget? lockedBanner() {
-      if (!hasCustomer) return null;
-      final state = ref.watch(phoneOrderControllerProvider);
-      final customer = state.customer!;
+    Widget? customerChrome() {
       final controller = ref.read(phoneOrderControllerProvider.notifier);
-      return _LockedCustomer(
-        customer: customer,
-        isSupplemental: state.isSupplemental,
-        compact: true,
-        onChange: controller.clear,
-        onEdit: () async {
-          final confirmed =
-              await showCustomerDetailsSheet(context, customer: customer);
-          if (confirmed == null || !context.mounted) return;
-          final hasToday = await ref
-              .read(phoneOrdersRepositoryProvider)
-              .hasOrderToday(confirmed);
-          if (!context.mounted) return;
-          if (hasToday) {
-            final kind = await showSameDayOrderDialog(context);
-            if (kind == null || !context.mounted) return;
-            await controller.selectCustomerWithZoneFee(confirmed);
-            if (kind == SameDayOrderKind.supplemental) {
-              controller
-                ..setDeliveryFee(0)
-                ..setSupplemental(true);
+      if (hasCustomer) {
+        final state = ref.watch(phoneOrderControllerProvider);
+        final customer = state.customer!;
+        return _LockedCustomer(
+          customer: customer,
+          isSupplemental: state.isSupplemental,
+          compact: true,
+          onChange: controller.detachCustomer,
+          onRemove: controller.detachCustomer,
+          onEdit: () async {
+            final confirmed =
+                await showCustomerDetailsSheet(context, customer: customer);
+            if (confirmed == null || !context.mounted) return;
+            final hasToday = await ref
+                .read(phoneOrdersRepositoryProvider)
+                .hasOrderToday(confirmed);
+            if (!context.mounted) return;
+            if (hasToday) {
+              final kind = await showSameDayOrderDialog(context);
+              if (kind == null || !context.mounted) return;
+              await controller.selectCustomerWithZoneFee(confirmed);
+              if (kind == SameDayOrderKind.supplemental) {
+                controller
+                  ..setDeliveryFee(0)
+                  ..setSupplemental(true);
+              } else {
+                controller.setSupplemental(false);
+              }
             } else {
+              await controller.selectCustomerWithZoneFee(confirmed);
               controller.setSupplemental(false);
             }
-          } else {
-            await controller.selectCustomerWithZoneFee(confirmed);
-            controller.setSupplemental(false);
-          }
-        },
-        onShowHistory: () =>
-            showCustomerPurchaseHistoryDialog(context, customer),
-      );
+          },
+          onShowHistory: () =>
+              showCustomerPurchaseHistoryDialog(context, customer),
+        );
+      }
+      // Cart kept after detach: empty slot; lookup sits above the cart.
+      if (hasLines) return const _EmptyCustomerSlot();
+      return null;
     }
 
     Widget header() {
-      final locked = lockedBanner();
+      final chrome = customerChrome();
       return Container(
         constraints: const BoxConstraints(minHeight: 56),
         padding: const EdgeInsetsDirectional.fromSTEB(12, 6, 8, 6),
@@ -158,14 +166,39 @@ class PhoneOrderColumn extends ConsumerWidget {
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
-            if (locked != null) ...[
+            if (chrome != null) ...[
               const SizedBox(width: 10),
-              Expanded(child: locked),
+              Expanded(child: chrome),
             ] else
               const Spacer(),
           ],
         ),
       );
+    }
+
+    Widget orderWorkspace() {
+      // Keep product search + cart when the caller was detached mid-basket.
+      if (hasCustomer || hasLines) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!hasCustomer) ...[
+              const SizedBox(
+                height: 220,
+                child: _CustomerLookup(compact: true),
+              ),
+              const Divider(height: 1),
+            ],
+            Expanded(
+              child: _OrderBuilder(
+                onPlaced: onPlaced,
+                splitLayout: splitLayout,
+              ),
+            ),
+          ],
+        );
+      }
+      return const _CustomerLookup();
     }
 
     Widget pendingBanner() {
@@ -213,11 +246,7 @@ class PhoneOrderColumn extends ConsumerWidget {
             const Divider(height: 1),
             pendingBanner(),
             if (hasParked) const _OpenOrdersStrip(),
-            Expanded(
-              child: hasCustomer
-                  ? _OrderBuilder(onPlaced: onPlaced, splitLayout: false)
-                  : const _CustomerLookup(),
-            ),
+            Expanded(child: orderWorkspace()),
           ],
         ),
       );
@@ -238,9 +267,7 @@ class PhoneOrderColumn extends ConsumerWidget {
           flex: 5,
           child: Material(
             color: palette.card,
-            child: hasCustomer
-                ? _OrderBuilder(onPlaced: onPlaced, splitLayout: true)
-                : const _CustomerLookup(),
+            child: orderWorkspace(),
           ),
         ),
         const VerticalDivider(width: 1),
@@ -489,6 +516,7 @@ Future<void> _confirmOrder(
     ));
   try {
     final orderId = await controller.submit();
+    ref.invalidate(takerTodayOrdersProvider);
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
@@ -587,7 +615,10 @@ Future<void> _addProduct(
 // ---------------------------------------------------------------------------
 
 class _CustomerLookup extends ConsumerStatefulWidget {
-  const _CustomerLookup();
+  const _CustomerLookup({this.compact = false});
+
+  /// Compact strip above an existing cart after «إزالة العميل».
+  final bool compact;
 
   @override
   ConsumerState<_CustomerLookup> createState() => _CustomerLookupState();
@@ -666,11 +697,24 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final palette = context.palette;
+    final compact = widget.compact;
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(compact ? 8 : 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (compact)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                'اختر / إضافة عميل للسلة الحالية',
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12.5,
+                  color: palette.accent,
+                ),
+              ),
+            ),
           TextField(
             key: const Key('phone-order-customer-search'),
             controller: _search,
@@ -698,7 +742,10 @@ class _CustomerLookupState extends ConsumerState<_CustomerLookup> {
           Expanded(
             child: _query.length < 2
                 ? Center(
-                    child: Text(l10n.phoneOrderTypeToSearch,
+                    child: Text(
+                        compact
+                            ? 'ابحث لإرفاق عميل دون فقدان السلة'
+                            : l10n.phoneOrderTypeToSearch,
                         textAlign: TextAlign.center,
                         style: TextStyle(color: palette.muted)),
                   )
@@ -1294,12 +1341,49 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   }
 }
 
+/// Empty customer slot after detach — cart stays below.
+class _EmptyCustomerSlot extends StatelessWidget {
+  const _EmptyCustomerSlot();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Container(
+      key: const Key('phone-order-empty-customer'),
+      padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 10, 6),
+      decoration: BoxDecoration(
+        color: palette.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: palette.border),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.person_add_alt_1_rounded,
+              color: palette.muted, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'اختر / إضافة عميل',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+                color: palette.muted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The caller (name, phone, address) in one compact bar, with the button
 /// for their usual and past purchases.
 class _LockedCustomer extends StatelessWidget {
   const _LockedCustomer({
     required this.customer,
     required this.onChange,
+    required this.onRemove,
     required this.onEdit,
     required this.onShowHistory,
     this.isSupplemental = false,
@@ -1308,6 +1392,7 @@ class _LockedCustomer extends StatelessWidget {
 
   final PhoneOrderCustomer customer;
   final VoidCallback onChange;
+  final VoidCallback onRemove;
   final VoidCallback onEdit;
   final VoidCallback onShowHistory;
   final bool isSupplemental;
@@ -1430,6 +1515,17 @@ class _LockedCustomer extends StatelessWidget {
                     : null,
                 onPressed: onChange,
                 icon: Icon(Icons.swap_horiz_rounded, size: iconSize),
+              ),
+              IconButton(
+                key: const Key('phone-order-remove-customer'),
+                tooltip: 'إزالة العميل',
+                visualDensity: VisualDensity.compact,
+                constraints: compact
+                    ? const BoxConstraints.tightFor(width: 34, height: 34)
+                    : null,
+                onPressed: onRemove,
+                icon: Icon(Icons.person_remove_outlined,
+                    color: Colors.red.shade700, size: iconSize),
               ),
             ],
           ),
@@ -1639,37 +1735,58 @@ class _CartPanel extends ConsumerWidget {
       ),
     );
 
+    final needsCustomer =
+        state.customer == null && state.lines.isNotEmpty && !state.submitting;
     final confirm = Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: SizedBox(
-        height: 48,
-        width: double.infinity,
-        child: FilledButton.icon(
-          key: const Key('phone-order-confirm'),
-          onPressed: state.canSubmit ? onConfirm : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.success,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (needsCustomer)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                'اختر عميلاً أولاً',
+                key: const Key('phone-order-need-customer-hint'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                  color: Colors.orange.shade800,
+                ),
+              ),
+            ),
+          SizedBox(
+            height: 48,
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('phone-order-confirm'),
+              onPressed: state.canSubmit ? onConfirm : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.success,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: state.submitting
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white),
+                    )
+                  : const Icon(Icons.check_circle_rounded),
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  l10n.phoneOrderConfirm,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w900),
+                ),
+              ),
             ),
           ),
-          icon: state.submitting
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: Colors.white),
-                )
-              : const Icon(Icons.check_circle_rounded),
-          label: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              l10n.phoneOrderConfirm,
-              style: const TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w900),
-            ),
-          ),
-        ),
+        ],
       ),
     );
 

@@ -1540,37 +1540,57 @@ class _OrderDetailsView extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Receipt only after a preparer is chosen (admin + preparer).
-        // Preparers must check off every item before printing / scanning.
+        // Admin may print anytime (even before a preparer). Preparers must
+        // finish checking every item first. Non-admin staff still need a preparer.
         if (!isDriver && !isStaffDriver) ...[
-          if (hasPreparer)
-            Builder(builder: (context) {
-              final checkedIds = ref.watch(orderPrepChecklistProvider);
-              final itemsAsync = ref.watch(adminOrderItemsProvider(orderId));
-              final totalItems = itemsAsync.valueOrNull?.length ?? 0;
-              final allItemsPrepared =
-                  prepDone || (totalItems > 0 && checkedIds.length == totalItems);
-              final lockPrint = isStaffPreparer && !allItemsPrepared;
-              return _ActionCard(
-                key: const Key('action-print-prep-receipt'),
-                title: 'طباعة إيصال التحضير',
-                desc: lockPrint
-                    ? 'أكمل تجهيز جميع الأصناف أولاً'
-                    : 'QR للكاشير • $preparerName',
-                icon: Icons.receipt_long_rounded,
-                color: const Color(0xFF1565C0),
-                enabled: !lockPrint,
-                onTap: () => showPrepReceiptSheet(context, orderId: orderId),
+          Builder(builder: (context) {
+            final isAdminLike =
+                isStaffAdmin || ref.watch(isRealAdminProvider);
+            final checkedIds = ref.watch(orderPrepChecklistProvider);
+            final itemsAsync = ref.watch(adminOrderItemsProvider(orderId));
+            final totalItems = itemsAsync.valueOrNull?.length ?? 0;
+            final allItemsPrepared = prepDone ||
+                (totalItems > 0 && checkedIds.length == totalItems);
+            final lockPrint = isStaffPreparer && !allItemsPrepared;
+            final canShowPrint = hasPreparer || isAdminLike;
+
+            if (!canShowPrint) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _StatusBanner(
+                    key: const Key('prep-receipt-need-preparer'),
+                    color: Colors.blueGrey,
+                    icon: Icons.receipt_long_rounded,
+                    text: 'اختر المحضر أولاً ثم اطبع إيصال التحضير',
+                  ),
+                  gap(),
+                ],
               );
-            })
-          else
-            _StatusBanner(
-              key: const Key('prep-receipt-need-preparer'),
-              color: Colors.blueGrey,
-              icon: Icons.receipt_long_rounded,
-              text: 'اختر المحضر أولاً ثم اطبع إيصال التحضير',
-            ),
-          gap(),
+            }
+
+            final desc = lockPrint
+                ? 'أكمل تجهيز جميع الأصناف أولاً'
+                : hasPreparer
+                    ? 'QR للكاشير • $preparerName'
+                    : 'QR للكاشير (قبل تعيين المحضر)';
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ActionCard(
+                  key: const Key('action-print-prep-receipt'),
+                  title: 'طباعة إيصال التحضير',
+                  desc: desc,
+                  icon: Icons.receipt_long_rounded,
+                  color: const Color(0xFF1565C0),
+                  enabled: !lockPrint,
+                  onTap: () =>
+                      showPrepReceiptSheet(context, orderId: orderId),
+                ),
+                gap(),
+              ],
+            );
+          }),
         ],
         if (canEdit) ...[
           _ActionCard(

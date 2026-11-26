@@ -388,7 +388,7 @@ void main() {
       expect(c.read(phoneOrderControllerProvider).deliveryFee, 0);
     });
 
-    test('a different caller starts an empty cart; the same one keeps it', () {
+    test('swapping or detaching a caller keeps the cart intact', () {
       final c = container();
       final orders = c.read(phoneOrderControllerProvider.notifier)
         ..selectCustomer(_mona)
@@ -397,7 +397,14 @@ void main() {
       expect(c.read(phoneOrderControllerProvider).lines, hasLength(1));
 
       orders.selectCustomer(_appUser);
-      expect(c.read(phoneOrderControllerProvider).lines, isEmpty);
+      expect(c.read(phoneOrderControllerProvider).lines, hasLength(1));
+      expect(c.read(phoneOrderControllerProvider).customer?.key, _appUser.key);
+
+      orders.detachCustomer();
+      final afterDetach = c.read(phoneOrderControllerProvider);
+      expect(afterDetach.customer, isNull);
+      expect(afterDetach.lines, hasLength(1));
+      expect(afterDetach.canSubmit, isFalse);
     });
 
     test("selecting a customer applies their zone's delivery fee", () async {

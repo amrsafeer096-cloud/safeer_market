@@ -65,4 +65,18 @@ void main() {
     expect(item.unitPrice, closeTo(800.0, 0.01));
     expect(item.lineTotal, closeTo(800.0, 0.01));
   });
+
+  test('custom 1.3 kg label and math', () {
+    final item = PrepReceiptItem.fromJson({
+      'product_name': 'وزن مخصص',
+      'quantity': 1,
+      'price_at_time': 1040.0,
+      'weight_in_grams': 1300,
+      'list_price': 800.0,
+    });
+    expect(item.quantityLabel, '1.3 كجم');
+    expect(item.unitPrice, closeTo(800.0, 0.01));
+    expect(item.lineTotal, closeTo(1040.0, 0.01));
+    expect(item.hasDiscount, isFalse);
+  });
 }

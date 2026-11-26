@@ -148,12 +148,19 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
   @override
   PhoneOrderState build() => const PhoneOrderState();
 
-  /// A new caller starts a new cart.
+  /// Attach [customer] to the active draft. Cart lines stay intact so the
+  /// taker can swap / re-attach callers without re-building the basket.
   void selectCustomer(PhoneOrderCustomer customer) {
-    final same = state.customer?.key == customer.key;
+    state = state.copyWith(customer: customer);
+  }
+
+  /// Detach the caller only («إزالة العميل» / «تغيير العميل»). Cart, fees,
+  /// payment and receipt stay as they are.
+  void detachCustomer() {
+    if (state.customer == null) return;
     state = state.copyWith(
-      customer: customer,
-      lines: same ? state.lines : const [],
+      clearCustomer: true,
+      isSupplemental: false,
     );
   }
 

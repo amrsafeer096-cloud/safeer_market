@@ -4,10 +4,13 @@ Two-way delivery-order bridge: Supabase → Fujitsu POS (retail).
 Parity target: TrustyDelivery (hd_orders / hd_order_items / hd_order_log /
 Customers / CustomerAddresses / hd_sequence) + PosPrintouts QR.
 
-Picks up orders that already have preparer_name assigned, creates/matches the
-customer in Fujitsu, allocates a real daily OrderId (YYMMDD######), inserts
-hd_orders + hd_order_items, writes hd_order_log, then writes Fujitsu ids back
-to Supabase so the Flutter prep-receipt QR can be scanned at the cashier.
+Picks up newly placed orders (no fujitsu_order_id yet), creates/matches the
+customer in Fujitsu, allocates a real daily OrderId (YYMMDD######) using the
+SQL Server working date (never Python utcnow), inserts hd_orders +
+hd_order_items at StatusCode=2 with empty PickerNo/PickerName, writes
+hd_order_log, then writes Fujitsu ids back to Supabase. When a preparer
+starts the order (status→preparing), updates StatusCode=3 with the real
+PickerNo/PickerName.
 
 Also:
   - rebuilds hd_order_items after edits / substitutions (barcode merge)
@@ -170,9 +173,10 @@ def line_qty_and_unit_price(item: dict[str, Any]) -> tuple[float, float]:
         grams = 0
     stored = float(item.get("price_at_time") or 0)
     if grams > 0:
-        qty = grams / 1000.0
+        # Exact kg to 3 decimals (1 g = 0.001 kg) — never coerce to int/quarters.
+        qty = round(grams / 1000.0, 3)
         if qty <= 0:
-            qty = 1.0
+            qty = 0.001
         unit = stored / qty if qty else stored
         return qty, unit
     qty = float(item.get("quantity") or 1)
@@ -237,23 +241,37 @@ def _fetch_last_result(cursor):
     return cols, rows
 
 
+def sql_server_working_date(cursor) -> date:
+    """SQL Server local calendar day (Cairo POS). Never use Python utcnow()."""
+    cursor.execute("SELECT CAST(GETDATE() AS DATE)")
+    row = cursor.fetchone()
+    if not row or row[0] is None:
+        raise RuntimeError("SQL Server GETDATE() returned no date")
+    value = row[0]
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
 def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
     """Atomically increment hd_sequence and return the new Sequence value."""
-    today = date.today()
+    working = sql_server_working_date(cursor)
     if daily:
         cursor.execute(
             """
             IF NOT EXISTS (
                 SELECT 1 FROM hd_sequence WITH (UPDLOCK, HOLDLOCK)
                 WHERE Branch = 0 AND Param1 = 0 AND Param2 = 0 AND Param3 = 0
-                  AND DocType = ? AND SequenceDate = CAST(GETDATE() AS DATE)
+                  AND DocType = ? AND SequenceDate = ?
             )
             INSERT INTO hd_sequence
                 (Branch, Param1, Param2, Param3, DocType, SequenceDate,
                  Sequence, ModifiedTime)
-            VALUES (0, 0, 0, 0, ?, CAST(GETDATE() AS DATE), 0, GETDATE());
+            VALUES (0, 0, 0, 0, ?, ?, 0, GETDATE());
             """,
-            (doc_type, doc_type),
+            (doc_type, working, doc_type, working),
         )
         cursor.execute(
             """
@@ -262,9 +280,9 @@ def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
                 ModifiedTime = GETDATE()
             OUTPUT INSERTED.Sequence
             WHERE Branch = 0 AND Param1 = 0 AND Param2 = 0 AND Param3 = 0
-              AND DocType = ? AND SequenceDate = CAST(GETDATE() AS DATE);
+              AND DocType = ? AND SequenceDate = ?;
             """,
-            (doc_type,),
+            (doc_type, working),
         )
     else:
         cursor.execute(
@@ -279,7 +297,7 @@ def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
                  Sequence, ModifiedTime)
             VALUES (0, 0, 0, 0, ?, ?, 0, GETDATE());
             """,
-            (doc_type, doc_type, today),
+            (doc_type, doc_type, working),
         )
         cursor.execute(
             """
@@ -298,6 +316,76 @@ def next_hd_sequence(cursor, doc_type: int, *, daily: bool) -> int:
         raise RuntimeError(f"hd_sequence returned no value for DocType={doc_type}")
     return int(row[0])
 
+
+def allocate_daily_order_identity(cursor) -> tuple[int, int, date]:
+    """Allocate a unique (OrderId, OrderNo, OrderDate) for DocType=4.
+
+    Uses SQL Server GETDATE() date only. OrderNo = max(hd_sequence, MAX(OrderNo))+1
+    and the resulting OrderId must not already exist in hd_orders.
+    """
+    working = sql_server_working_date(cursor)
+    cursor.execute(
+        """
+        IF NOT EXISTS (
+            SELECT 1 FROM hd_sequence WITH (UPDLOCK, HOLDLOCK)
+            WHERE Branch = 0 AND Param1 = 0 AND Param2 = 0 AND Param3 = 0
+              AND DocType = ? AND SequenceDate = ?
+        )
+        INSERT INTO hd_sequence
+            (Branch, Param1, Param2, Param3, DocType, SequenceDate,
+             Sequence, ModifiedTime)
+        VALUES (0, 0, 0, 0, ?, ?, 0, GETDATE());
+        """,
+        (DOC_ORDER, working, DOC_ORDER, working),
+    )
+
+    cursor.execute(
+        """
+        SELECT ISNULL(MAX(OrderNo), 0)
+        FROM hd_orders WITH (UPDLOCK, HOLDLOCK)
+        WHERE CAST(OrderDate AS DATE) = ?
+        """,
+        (working,),
+    )
+    max_existing = int((cursor.fetchone() or [0])[0] or 0)
+
+    cursor.execute(
+        """
+        SELECT Sequence
+        FROM hd_sequence WITH (UPDLOCK, HOLDLOCK)
+        WHERE Branch = 0 AND Param1 = 0 AND Param2 = 0 AND Param3 = 0
+          AND DocType = ? AND SequenceDate = ?
+        """,
+        (DOC_ORDER, working),
+    )
+    seq_row = cursor.fetchone()
+    seq_val = int(seq_row[0] or 0) if seq_row else 0
+
+    order_no = max(seq_val, max_existing) + 1
+    yymmdd = working.strftime("%y%m%d")
+
+    for _ in range(50):
+        order_id = int(f"{yymmdd}{str(order_no).zfill(6)}")
+        cursor.execute(
+            "SELECT 1 FROM hd_orders WHERE OrderId = ?",
+            (order_id,),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                """
+                UPDATE hd_sequence
+                SET Sequence = ?, ModifiedTime = GETDATE()
+                WHERE Branch = 0 AND Param1 = 0 AND Param2 = 0 AND Param3 = 0
+                  AND DocType = ? AND SequenceDate = ?
+                """,
+                (order_no, DOC_ORDER, working),
+            )
+            return order_id, order_no, working
+        order_no += 1
+
+    raise RuntimeError(
+        f"Could not allocate unique OrderId for OrderDate={working}"
+    )
 
 def find_customer(cursor, phone: str) -> Optional[tuple[int, Optional[int]]]:
     if not phone:
@@ -648,31 +736,41 @@ def write_back_customer_link(
         log(f"⚠️ customer_addresses fujitsu_address_id write-back failed: {exc}")
 
 
-def match_picker(cursor, preparer_name: str) -> tuple[int, str]:
+def match_picker_optional(
+    cursor, preparer_name: str
+) -> Optional[tuple[int, str]]:
     name = (preparer_name or "").strip()
-    if name:
-        cursor.execute(
-            """
-            SELECT TOP 1 picker_id, picker_arabic_name
-            FROM hd_pickers
-            WHERE LTRIM(RTRIM(picker_arabic_name)) = ?
-            """,
-            (name,),
-        )
-        row = cursor.fetchone()
-        if row:
-            return int(row[0]), truncate(str(row[1] or name), 150, DEFAULT_PICKER_NAME)
-        cursor.execute(
-            """
-            SELECT TOP 1 picker_id, picker_arabic_name
-            FROM hd_pickers
-            WHERE picker_arabic_name LIKE ?
-            """,
-            (f"%{name}%",),
-        )
-        row = cursor.fetchone()
-        if row:
-            return int(row[0]), truncate(str(row[1] or name), 150, DEFAULT_PICKER_NAME)
+    if not name:
+        return None
+    cursor.execute(
+        """
+        SELECT TOP 1 picker_id, picker_arabic_name
+        FROM hd_pickers
+        WHERE LTRIM(RTRIM(picker_arabic_name)) = ?
+        """,
+        (name,),
+    )
+    row = cursor.fetchone()
+    if row:
+        return int(row[0]), truncate(str(row[1] or name).strip(), 150, name)
+    cursor.execute(
+        """
+        SELECT TOP 1 picker_id, picker_arabic_name
+        FROM hd_pickers
+        WHERE picker_arabic_name LIKE ?
+        """,
+        (f"%{name}%",),
+    )
+    row = cursor.fetchone()
+    if row:
+        return int(row[0]), truncate(str(row[1] or name).strip(), 150, name)
+    return None
+
+
+def match_picker(cursor, preparer_name: str) -> tuple[int, str]:
+    found = match_picker_optional(cursor, preparer_name)
+    if found:
+        return found
     return DEFAULT_PICKER_ID, DEFAULT_PICKER_NAME
 
 
@@ -717,9 +815,22 @@ def _staff_picker_no(preparer_name: str) -> Optional[int]:
         return None
 
 
-def resolve_picker(cursor, preparer_name: str) -> tuple[int, str]:
-    """Prefer synced staff.fujitsu_picker_no, else match hd_pickers by name."""
-    name = (preparer_name or "").strip() or DEFAULT_PICKER_NAME
+def resolve_picker(
+    cursor, preparer_name: str, *, allow_default: bool = True
+) -> tuple[int, str]:
+    """Prefer synced staff.fujitsu_picker_no, else match hd_pickers by name.
+
+    When [allow_default] is False (preparer start), never fall back to the
+    generic «محضر» picker — keep the actual name with PickerNo=0 if unmatched.
+    """
+    name = (preparer_name or "").strip()
+    if not name:
+        return (
+            (DEFAULT_PICKER_ID, DEFAULT_PICKER_NAME)
+            if allow_default
+            else (0, "")
+        )
+
     picker_no = _staff_picker_no(name)
     if picker_no is not None:
         cursor.execute(
@@ -732,11 +843,15 @@ def resolve_picker(cursor, preparer_name: str) -> tuple[int, str]:
         )
         row = cursor.fetchone()
         if row:
-            return int(row[0]), truncate(
-                str(row[1] or name).strip(), 150, DEFAULT_PICKER_NAME
-            )
-        return picker_no, truncate(name, 150, DEFAULT_PICKER_NAME)
-    return match_picker(cursor, name)
+            return int(row[0]), truncate(str(row[1] or name).strip(), 150, name)
+        return picker_no, truncate(name, 150)
+
+    found = match_picker_optional(cursor, name)
+    if found:
+        return found
+    if allow_default:
+        return DEFAULT_PICKER_ID, DEFAULT_PICKER_NAME
+    return 0, truncate(name, 150)
 
 
 def sync_fujitsu_pickers(cursor) -> int:
@@ -1015,13 +1130,13 @@ def product_of(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def merge_items_by_barcode(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Trusty: same barcode on one order → Qty += addedQty."""
+    """Trusty: same barcode on one order → Qty += addedQty (kg for weight)."""
     merged: dict[str, dict[str, Any]] = {}
     passthrough: list[dict[str, Any]] = []
     for item in items:
         product = product_of(item)
         barcode = str(product.get("barcode") or "").strip()
-        qty = float(item.get("quantity") or 1)
+        qty, _ = line_qty_and_unit_price(item)
         if qty <= 0:
             qty = 1.0
         if not barcode:
@@ -1029,11 +1144,27 @@ def merge_items_by_barcode(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if barcode in merged:
             prev = merged[barcode]
-            prev["quantity"] = float(prev.get("quantity") or 0) + qty
-            # Keep first price_at_time (Trusty keeps original line price).
+            prev_qty, _ = line_qty_and_unit_price(prev)
+            new_qty = round(prev_qty + qty, 3)
+            prev_grams = int(prev.get("weight_in_grams") or 0)
+            add_grams = int(item.get("weight_in_grams") or 0)
+            if prev_grams > 0 or add_grams > 0:
+                total_grams = prev_grams + add_grams
+                prev["weight_in_grams"] = total_grams
+                prev["quantity"] = 1
+                # Line totals (price_at_time) sum for weight lines.
+                prev["price_at_time"] = float(prev.get("price_at_time") or 0) + float(
+                    item.get("price_at_time") or 0
+                )
+            else:
+                prev["quantity"] = new_qty
+            # Keep first charged unit when piece lines merge.
         else:
             copy = dict(item)
-            copy["quantity"] = qty
+            if int(item.get("weight_in_grams") or 0) > 0:
+                copy["quantity"] = 1
+            else:
+                copy["quantity"] = qty
             merged[barcode] = copy
     return list(merged.values()) + passthrough
 
@@ -1099,6 +1230,11 @@ def insert_hd_order_log(
 
 
 def fetch_pending_orders() -> list[dict[str, Any]]:
+    """Orders ready for first Fujitsu insert (no fujitsu_order_id yet).
+
+    Syncs immediately after «إتمام وتسجيل الطلب» into إنتظار التجهيز (2)
+    with empty picker — does NOT wait for a preparer.
+    """
     res = (
         supabase.table("orders")
         .select(
@@ -1107,15 +1243,14 @@ def fetch_pending_orders() -> list[dict[str, Any]]:
             "total_amount, payment_method, order_source, pos_customer_id, "
             "fujitsu_order_id, fujitsu_address_id, fujitsu_synced_at"
         )
-        .not_.is_("preparer_name", "null")
         .is_("fujitsu_order_id", "null")
         .neq("status", "cancelled")
+        .neq("status", "canceled")
         .order("created_at")
         .limit(20)
         .execute()
     )
-    rows = res.data or []
-    return [r for r in rows if str(r.get("preparer_name") or "").strip()]
+    return list(res.data or [])
 
 
 def fetch_order_items(order_id: str) -> list[dict[str, Any]]:
@@ -1209,8 +1344,9 @@ def insert_hd_order(
             truncate(taker_name, 150, "التطبيق"),
             now,
             now,
-            picker_id,
-            truncate(picker_name, 150, DEFAULT_PICKER_NAME),
+            int(picker_id or 0),
+            # Empty string is intentional for إنتظار التجهيز (no preparer yet).
+            truncate(picker_name, 150, ""),
             customer_no,
             truncate(customer_name, 150, "عميل"),
             truncate(customer_phone, 200, "0"),
@@ -1355,8 +1491,8 @@ def insert_hd_order_item(
             unit,
             pieces,
             STAFF_USER_ID,
-            picker_id,
-            truncate(picker_name, 150, DEFAULT_PICKER_NAME),
+            int(picker_id or 0),
+            truncate(picker_name, 150, ""),
             customer_no,
             class_id,
             class_name,
@@ -1433,22 +1569,28 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 notes=notes,
             )
 
-        seq = next_hd_sequence(cursor, DOC_ORDER, daily=True)
-        order_day = datetime.now().strftime("%y%m%d")
-        fujitsu_order_id_str = f"{order_day}{str(seq).zfill(6)}"
-        fujitsu_order_id = int(fujitsu_order_id_str)
+        # First insert always lands in إنتظار التجهيز with empty picker.
+        # Preparer name/PickerNo are written later when status → 3.
+        _ = preparer  # reserved for status-3 sync only
+        picker_id, picker_name = 0, ""
 
-        picker_id, picker_name = resolve_picker(cursor, preparer)
-        created_at = order.get("created_at")
-        try:
-            order_date = (
-                datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
-                .replace(tzinfo=None)
-                if created_at
-                else datetime.now()
+        fujitsu_order_id, seq, working_date = allocate_daily_order_identity(cursor)
+        fujitsu_order_id_str = str(fujitsu_order_id)
+        # OrderDate must match the SQL Server working day used in OrderId —
+        # never Python utcnow() / UTC created_at (causes YYMMDD collisions).
+        order_date = datetime(
+            working_date.year, working_date.month, working_date.day
+        )
+
+        # Hard guard: never overwrite an existing Fujitsu order header.
+        cursor.execute(
+            "SELECT 1 FROM hd_orders WHERE OrderId = ?",
+            (fujitsu_order_id,),
+        )
+        if cursor.fetchone():
+            raise RuntimeError(
+                f"OrderId {fujitsu_order_id_str} already exists — refusing overwrite"
             )
-        except Exception:
-            order_date = datetime.now()
 
         barcodes = [
             str(product_of(it).get("barcode") or "").strip() for it in items
@@ -1520,6 +1662,20 @@ def sync_one_order(order: dict[str, Any]) -> None:
                 picker_name=picker_name,
                 item=item,
                 discount_info=disc,
+            )
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM hd_order_items
+            WHERE OrderId = ? AND OrderVersion = ?
+            """,
+            (fujitsu_order_id, ORDER_VERSION),
+        )
+        inserted = int((cursor.fetchone() or [0])[0] or 0)
+        if inserted != len(line_payloads):
+            raise RuntimeError(
+                f"hd_order_items count mismatch for {fujitsu_order_id_str}: "
+                f"expected {len(line_payloads)}, got {inserted}"
             )
 
         # EndOrder → WaitingPicking (2). Log Taking(1) → WaitingPicking(2).
@@ -1645,6 +1801,20 @@ def _rebuild_fujitsu_items(
                 picker_name=picker_name,
                 item=item,
                 discount_info=discounts.get(bc),
+            )
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM hd_order_items
+            WHERE OrderId = ? AND OrderVersion = ?
+            """,
+            (fujitsu_order_id, ORDER_VERSION),
+        )
+        inserted = int((cursor.fetchone() or [0])[0] or 0)
+        if inserted != len(items):
+            raise RuntimeError(
+                f"rebuild item count mismatch for {fujitsu_order_id_str}: "
+                f"expected {len(items)}, got {inserted}"
             )
 
         net_total = (
@@ -1790,6 +1960,7 @@ def _apply_fujitsu_status(
     old_status: Optional[int],
     created_at: Any,
     cancel_reason: Optional[str] = None,
+    preparer_name: str = "",
 ) -> None:
     if not fujitsu_order_id_str or fujitsu_order_id_str.upper() == "SKIPPED":
         return
@@ -1798,15 +1969,6 @@ def _apply_fujitsu_status(
 
     fujitsu_order_id = int(fujitsu_order_id_str)
     order_no = int(fujitsu_order_id_str[-6:])
-    try:
-        order_date = (
-            datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
-            .replace(tzinfo=None)
-            if created_at
-            else datetime.now()
-        )
-    except Exception:
-        order_date = datetime.now()
 
     prev = int(old_status) if old_status is not None else STATUS_WAITING_PREP
     prev_name = STATUS.get(prev, "")
@@ -1816,6 +1978,28 @@ def _apply_fujitsu_status(
     conn = connect_sql()
     cursor = conn.cursor()
     try:
+        # Prefer the OrderDate already stored on the Fujitsu header (Cairo day).
+        cursor.execute(
+            "SELECT TOP 1 OrderDate FROM hd_orders WHERE OrderId = ?",
+            (fujitsu_order_id,),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            raw = row[0]
+            order_date = raw if isinstance(raw, datetime) else datetime(
+                raw.year, raw.month, raw.day
+            )
+        else:
+            try:
+                order_date = (
+                    datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+                    .replace(tzinfo=None)
+                    if created_at
+                    else datetime.now()
+                )
+            except Exception:
+                order_date = datetime.now()
+
         if new_status == STATUS_CANCELLED:
             cursor.execute(
                 """
@@ -1844,18 +2028,36 @@ def _apply_fujitsu_status(
                 ),
             )
         elif new_status == 3:
+            picker_id, picker_name = resolve_picker(
+                cursor, preparer_name, allow_default=False
+            )
+            started_by_name = truncate(
+                picker_name or preparer_name, 150, preparer_name or STAFF_USER_NAME
+            )
             cursor.execute(
                 """
                 UPDATE hd_orders
                 SET PreviousStatusCode = StatusCode,
                     PreviousStatusName = StatusName,
                     StatusCode = ?, StatusName = ?,
-                    PickingStartedBy = ?, PickingStartedByName = ?,
+                    PickerNo = ?,
+                    PickerName = ?,
+                    PickingStartedBy = ?,
+                    PickingStartedByName = ?,
                     PickingStartTime = COALESCE(PickingStartTime, ?),
                     ModifiedTime = GETDATE(), DateModified = GETDATE()
                 WHERE OrderId = ?
                 """,
-                (new_status, new_name, STAFF_USER_ID, STAFF_USER_NAME, now, fujitsu_order_id),
+                (
+                    new_status,
+                    new_name,
+                    int(picker_id or 0),
+                    truncate(picker_name or preparer_name, 150, ""),
+                    STAFF_USER_ID,
+                    started_by_name,
+                    now,
+                    fujitsu_order_id,
+                ),
             )
         elif new_status == 4:
             cursor.execute(
@@ -1962,7 +2164,7 @@ def sync_status_and_cancellations() -> None:
         res = (
             supabase.table("orders")
             .select(
-                "id, status, created_at, "
+                "id, status, created_at, preparer_name, "
                 "fujitsu_order_id, fujitsu_status_code"
             )
             .not_.is_("fujitsu_order_id", "null")
@@ -2016,6 +2218,7 @@ def sync_status_and_cancellations() -> None:
                 old_status=prev_i if prev_i is not None else STATUS_WAITING_PREP,
                 created_at=order.get("created_at"),
                 cancel_reason=None,
+                preparer_name=str(order.get("preparer_name") or ""),
             )
         except Exception as exc:
             log(f"⚠️ status sync failed for {fujitsu_id}: {exc}")
