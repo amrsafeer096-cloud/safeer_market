@@ -2933,7 +2933,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get phoneOrderPhoneInvalid =>
-      'اكتب رقم موبايل مصري صحيح (01XXXXXXXXX)';
+      'اكتب رقم موبايل (01…) أو أرضي مصري صحيح';
 
   @override
   String get phoneOrderProductSearchHint => 'ابحث باسم المنتج أو الباركود...';

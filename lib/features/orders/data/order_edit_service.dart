@@ -30,7 +30,7 @@ class OrderEditService {
         .select(
           'id, quantity, price_at_time, weight_in_grams, product_id, '
           'products(id, name, barcode, price, discount_price, image_url, '
-          'stock_quantity)',
+          'stock_quantity, unit, is_weight_based)',
         )
         .eq('order_id', orderId);
 
@@ -46,6 +46,16 @@ class OrderEditService {
       final listPrice = _num(product['price']);
       final discount = _num(product['discount_price']);
       final charged = _num(row['price_at_time']);
+      final unit = '${product['unit'] ?? Product.defaultUnit}'.trim();
+      final flaggedWeight = product['is_weight_based'] == true;
+      final grams = switch (row['weight_in_grams']) {
+        final num g when g > 0 => g.round(),
+        _ => null,
+      };
+      final byWeight = flaggedWeight ||
+          unit == Product.weightUnit ||
+          name.contains(Product.weightUnit) ||
+          grams != null;
       return OrderEditLine(
         productId: productId,
         productName: name.isEmpty ? 'منتج' : name,
@@ -59,11 +69,10 @@ class OrderEditService {
         unitPrice: charged > 0
             ? charged
             : (discount > 0 && discount < listPrice ? discount : listPrice),
-        quantity: _num(row['quantity']).round().clamp(1, 9999),
-        weightInGrams: switch (row['weight_in_grams']) {
-          final num g when g > 0 => g.round(),
-          _ => null,
-        },
+        quantity: byWeight ? 1 : _num(row['quantity']).round().clamp(1, 9999),
+        weightInGrams: grams,
+        isWeightBased: byWeight,
+        unit: unit.isEmpty ? Product.defaultUnit : unit,
         existingItemId: '${row['id']}',
       );
     }).where((l) => l.productId.isNotEmpty).toList();

@@ -1,7 +1,18 @@
-/// Egyptian mobile numbers as typed in the app (`01xxxxxxxxx`) and as Supabase
-/// Auth stores them (E.164, `+201xxxxxxxxx`; `user.phone` drops the `+`).
+/// Egyptian phone numbers as typed in the app and as Supabase Auth stores
+/// mobiles (E.164, `+201xxxxxxxxx`; `user.phone` drops the `+`).
+///
+/// [isValid] = mobile only (auth / staff). [isValidCustomerPhone] also
+/// accepts landlines used on POS customer records.
 abstract final class EgyptianPhone {
+  /// Mobile: `01[0125]` + 8 digits (`010` / `011` / `012` / `015`).
   static final pattern = RegExp(r'^01[0125]\d{8}$');
+
+  /// Landline with area code: `0` + `[2-9]` + 6–8 digits (total 8–10),
+  /// e.g. Cairo/Giza `022852226`, Alex `03……`.
+  static final landlineWithAreaPattern = RegExp(r'^0[2-9]\d{6,8}$');
+
+  /// Local landline without area code: 7–8 digits not starting with `0`/`1`.
+  static final localLandlinePattern = RegExp(r'^[2-9]\d{6,7}$');
 
   /// Arabic-Indic (`٠-٩`) and Eastern Arabic-Indic (`۰-۹`) → Western `0-9`.
   static const _indicToWestern = {
@@ -27,7 +38,19 @@ abstract final class EgyptianPhone {
     '۹': '9',
   };
 
+  /// Mobile only (login / OTP / staff credentials).
   static bool isValid(String local) => pattern.hasMatch(normalize(local));
+
+  /// Customer forms: Egyptian mobile **or** landline.
+  static bool isValidCustomerPhone(String raw) {
+    final digits = normalize(raw);
+    return pattern.hasMatch(digits) ||
+        landlineWithAreaPattern.hasMatch(digits) ||
+        localLandlinePattern.hasMatch(digits);
+  }
+
+  static bool isValidCustomerPhoneOrEmpty(String raw) =>
+      raw.trim().isEmpty || isValidCustomerPhone(raw);
 
   /// Western digits only: map Indic numerals, strip spaces/dashes/bidi marks.
   static String normalize(String raw) {

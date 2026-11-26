@@ -4,27 +4,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../domain/phone_order.dart';
 import '../providers/phone_order_providers.dart';
 
-/// Egyptian mobile helpers shared with new-customer dialogs.
+/// Customer phone helpers (Egyptian mobile + landline).
 abstract final class _Phone {
-  static final _mobile = RegExp(r'^01[0125]\d{8}$');
+  static String local(String raw) => EgyptianPhone.normalize(raw);
 
-  static String local(String raw) {
-    var digits = raw.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('0020')) digits = '0${digits.substring(4)}';
-    if (digits.startsWith('20') && digits.length == 12) {
-      digits = '0${digits.substring(2)}';
-    }
-    if (digits.length == 10 && digits.startsWith('1')) digits = '0$digits';
-    return digits;
-  }
-
-  static bool isValid(String raw) => _mobile.hasMatch(local(raw));
+  static bool isValid(String raw) => EgyptianPhone.isValidCustomerPhone(raw);
 
   static bool isValidOrEmpty(String raw) =>
-      raw.trim().isEmpty || isValid(raw);
+      EgyptianPhone.isValidCustomerPhoneOrEmpty(raw);
 }
 
 String? _optional(TextEditingController c) =>
@@ -290,7 +281,7 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
                             textDirection: TextDirection.ltr,
                             decoration: const InputDecoration(
                               labelText: 'الموبايل الأساسي',
-                              hintText: '01XXXXXXXXX',
+                              hintText: 'موبايل أو أرضي',
                             ),
                             validator: (v) => _Phone.isValid(v ?? '')
                                 ? null
@@ -304,7 +295,7 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
                             textDirection: TextDirection.ltr,
                             decoration: const InputDecoration(
                               labelText: 'رقم إضافي 2',
-                              hintText: '01XXXXXXXXX',
+                              hintText: 'موبايل أو أرضي',
                             ),
                             validator: (v) => _Phone.isValidOrEmpty(v ?? '')
                                 ? null
@@ -318,7 +309,7 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
                             textDirection: TextDirection.ltr,
                             decoration: const InputDecoration(
                               labelText: 'رقم إضافي 3',
-                              hintText: '01XXXXXXXXX',
+                              hintText: 'موبايل أو أرضي',
                             ),
                             validator: (v) => _Phone.isValidOrEmpty(v ?? '')
                                 ? null

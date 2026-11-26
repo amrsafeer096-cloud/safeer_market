@@ -1644,7 +1644,7 @@
   "phoneOrderCustomerZone": "المنطقة",
   "phoneOrderSaveCustomer": "حفظ العميل",
   "phoneOrderNameRequired": "اكتب اسم العميل",
-  "phoneOrderPhoneInvalid": "اكتب رقم موبايل مصري صحيح (01XXXXXXXXX)",
+  "phoneOrderPhoneInvalid": "اكتب رقم موبايل (01…) أو أرضي مصري صحيح",
   "phoneOrderProductSearchHint": "ابحث باسم المنتج أو الباركود...",
   "phoneOrderSearchProductsPrompt": "ابحث عن منتج بالاسم أو الباركود",
   "phoneOrderNoProducts": "لا توجد منتجات مطابقة",

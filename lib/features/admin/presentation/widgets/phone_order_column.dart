@@ -1514,7 +1514,8 @@ class _LockedCustomer extends StatelessWidget {
                     ? const BoxConstraints.tightFor(width: 34, height: 34)
                     : null,
                 onPressed: onChange,
-                icon: Icon(Icons.swap_horiz_rounded, size: iconSize),
+                icon: Icon(Icons.swap_horiz_rounded,
+                    color: palette.accent, size: iconSize),
               ),
               IconButton(
                 key: const Key('phone-order-remove-customer'),
@@ -1523,9 +1524,16 @@ class _LockedCustomer extends StatelessWidget {
                 constraints: compact
                     ? const BoxConstraints.tightFor(width: 34, height: 34)
                     : null,
+                style: IconButton.styleFrom(
+                  foregroundColor: Colors.red.shade700,
+                  hoverColor: Colors.red.shade100,
+                ),
                 onPressed: onRemove,
-                icon: Icon(Icons.person_remove_outlined,
-                    color: Colors.red.shade700, size: iconSize),
+                icon: Icon(
+                  Icons.person_remove_rounded,
+                  color: Colors.red.shade700,
+                  size: 20,
+                ),
               ),
             ],
           ),

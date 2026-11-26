@@ -239,6 +239,11 @@ void main() {
     expect(EgyptianPhone.isValid('01040067954'), isTrue);
     expect(EgyptianPhone.toE164('01040067954'), '+201040067954');
     expect(EgyptianPhone.toLocal('201040067954'), '01040067954');
+    expect(EgyptianPhone.isValidCustomerPhone('022852226'), isTrue);
+    expect(EgyptianPhone.isValidCustomerPhone('2852226'), isTrue);
+    expect(EgyptianPhone.isValidCustomerPhone('01040067954'), isTrue);
+    expect(EgyptianPhone.isValidCustomerPhone('01999999999'), isFalse);
+    expect(EgyptianPhone.isValid('022852226'), isFalse);
   });
 
   testWidgets('login closes when a browser sign-in comes back signed in', (

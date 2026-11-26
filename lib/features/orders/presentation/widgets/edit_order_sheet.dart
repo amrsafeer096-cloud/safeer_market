@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_currency.dart';
@@ -8,6 +9,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../admin/domain/product_search_filter.dart';
 import '../../../admin/presentation/widgets/staff_product_search_tile.dart';
+import '../../../cart/domain/weight_options.dart';
+import '../../../cart/presentation/widgets/weight_picker_sheet.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../data/order_edit_service.dart';
 import '../../domain/order_editability.dart';
@@ -129,7 +132,28 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
     });
   }
 
-  void _addProduct(Product product) {
+  OrderEditLine? _lineOf(String productId) {
+    for (final line in _lines) {
+      if (line.productId == productId) return line;
+    }
+    return null;
+  }
+
+  String _qtyLabel(Product product) {
+    final line = _lineOf(product.id);
+    if (line == null) return '0';
+    if (line.soldByWeight) {
+      final grams = line.weightInGrams ?? 0;
+      return grams > 0 ? WeightOptions.compactLabel(grams) : '0';
+    }
+    return '${line.quantity}';
+  }
+
+  Future<void> _addProduct(Product product) async {
+    if (product.isWeightBased) {
+      await _pickWeight(product);
+      return;
+    }
     final existing = _lines.indexWhere((l) => l.productId == product.id);
     setState(() {
       if (existing >= 0) {
@@ -145,6 +169,47 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
             stockQuantity: product.stockQuantity,
             unitPrice: product.effectivePrice,
             quantity: 1,
+            isWeightBased: false,
+            unit: product.unit,
+          ),
+        );
+      }
+    });
+  }
+
+  Future<void> _pickWeight(Product product) async {
+    final existing = _lineOf(product.id);
+    final grams = await showWeightPickerSheet(
+      context,
+      product: product,
+      initialGrams: existing?.weightInGrams,
+      title: 'اختر الوزن المطلوب',
+      labelFor: WeightOptions.phoneOrderLabel,
+    );
+    if (grams == null || !mounted) return;
+    setState(() {
+      if (grams <= 0) {
+        _lines.removeWhere((l) => l.productId == product.id);
+        return;
+      }
+      if (existing != null) {
+        existing
+          ..weightInGrams = grams
+          ..quantity = 1;
+      } else {
+        _lines.add(
+          OrderEditLine(
+            productId: product.id,
+            productName: product.name,
+            barcode: product.barcode,
+            imageUrl: product.imageUrl,
+            listPrice: product.hasActiveOffer ? product.price : null,
+            stockQuantity: product.stockQuantity,
+            unitPrice: product.effectivePrice,
+            quantity: 1,
+            weightInGrams: grams,
+            isWeightBased: true,
+            unit: Product.weightUnit,
           ),
         );
       }
@@ -154,20 +219,58 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
   void _removeOne(String productId) {
     final i = _lines.indexWhere((l) => l.productId == productId);
     if (i < 0) return;
+    final line = _lines[i];
     setState(() {
-      if (_lines[i].quantity <= 1) {
+      if (line.soldByWeight) {
+        final grams = line.weightInGrams ?? 0;
+        final prev = WeightOptions.previous(grams);
+        if (prev <= 0) {
+          _lines.removeAt(i);
+        } else {
+          line.weightInGrams = prev;
+          line.quantity = 1;
+        }
+        return;
+      }
+      if (line.quantity <= 1) {
         _lines.removeAt(i);
       } else {
-        _lines[i].quantity -= 1;
+        line.quantity -= 1;
       }
     });
   }
 
-  int _qtyOf(String productId) {
-    for (final line in _lines) {
-      if (line.productId == productId) return line.quantity;
+  Future<void> _openLineEditor(Product product) async {
+    final line = _lineOf(product.id);
+    if (product.isWeightBased || (line?.soldByWeight ?? false)) {
+      await _pickWeight(product);
+      return;
     }
-    return 0;
+    if (line == null) {
+      await _addProduct(product);
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _EditOrderQtyDialog(
+        productName: line.productName,
+        initialQuantity: line.quantity,
+        onSave: (qty) {
+          setState(() {
+            if (qty <= 0) {
+              _lines.removeWhere((l) => l.productId == product.id);
+            } else {
+              line.quantity = qty;
+            }
+          });
+        },
+        onRemove: () {
+          setState(() {
+            _lines.removeWhere((l) => l.productId == product.id);
+          });
+        },
+      ),
+    );
   }
 
   Future<void> _closeWithoutSave() async {
@@ -361,12 +464,14 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
           for (final product in _hits) ...[
             StaffProductSearchTile(
               product: product,
-              quantityLabel: '${_qtyOf(product.id)}',
-              inCart: _qtyOf(product.id) > 0,
+              quantityLabel: _qtyLabel(product),
+              inCart: _lineOf(product.id) != null,
               showZeroStockInRed:
                   _filter == ProductSearchFilterMode.allItems,
+              openOnDoubleTap: true,
               onAdd: () => _addProduct(product),
               onRemove: () => _removeOne(product.id),
+              onOpen: () => _openLineEditor(product),
             ),
             const Divider(height: 1, indent: 12),
           ],
@@ -386,8 +491,15 @@ class _EditOrderSheetState extends ConsumerState<EditOrderSheet> {
           for (final line in _lines)
             _OrderLineAsProductTile(
               line: line,
-              onAdd: () => setState(() => line.quantity += 1),
+              onAdd: () {
+                if (line.soldByWeight) {
+                  unawaited(_pickWeight(line.toProduct()));
+                } else {
+                  setState(() => line.quantity += 1);
+                }
+              },
               onRemove: () => _removeOne(line.productId),
+              onOpen: () => unawaited(_openLineEditor(line.toProduct())),
             ),
       ],
     );
@@ -400,20 +512,196 @@ class _OrderLineAsProductTile extends StatelessWidget {
     required this.line,
     required this.onAdd,
     required this.onRemove,
+    required this.onOpen,
   });
 
   final OrderEditLine line;
   final VoidCallback onAdd;
   final VoidCallback onRemove;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
+    final grams = line.weightInGrams;
+    final qtyLabel = line.soldByWeight && grams != null && grams > 0
+        ? WeightOptions.compactLabel(grams)
+        : '${line.quantity}';
     return StaffProductSearchTile(
       product: line.toProduct(),
-      quantityLabel: '${line.quantity}',
+      quantityLabel: qtyLabel,
       inCart: true,
+      openOnDoubleTap: true,
       onAdd: onAdd,
       onRemove: onRemove,
+      onOpen: onOpen,
+    );
+  }
+}
+
+/// Quick piece-quantity editor (pre-filled, +/- keys, cancel item).
+class _EditOrderQtyDialog extends StatefulWidget {
+  const _EditOrderQtyDialog({
+    required this.productName,
+    required this.initialQuantity,
+    required this.onSave,
+    required this.onRemove,
+  });
+
+  final String productName;
+  final int initialQuantity;
+  final ValueChanged<int> onSave;
+  final VoidCallback onRemove;
+
+  @override
+  State<_EditOrderQtyDialog> createState() => _EditOrderQtyDialogState();
+}
+
+class _EditOrderQtyDialogState extends State<_EditOrderQtyDialog> {
+  static const _maxQty = 9999;
+  late final TextEditingController _qty;
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    _qty = TextEditingController(text: '${widget.initialQuantity}');
+    _focus = FocusNode(onKeyEvent: _onKey);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _selectAll();
+      _focus.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _qty.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _selectAll() {
+    _qty.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _qty.text.length,
+    );
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final ch = event.character;
+    final isInc = ch == '+' ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd ||
+        key == LogicalKeyboardKey.arrowUp ||
+        (key == LogicalKeyboardKey.equal && ch == '+');
+    if (isInc) {
+      _bump(1);
+      return KeyEventResult.handled;
+    }
+    final isDec = ch == '-' ||
+        key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract ||
+        key == LogicalKeyboardKey.arrowDown;
+    if (isDec) {
+      _bump(-1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      _save();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _bump(int delta) {
+    final current = int.tryParse(_qty.text.trim()) ?? widget.initialQuantity;
+    final next = (current + delta).clamp(1, _maxQty);
+    setState(() {
+      _qty.text = '$next';
+      _selectAll();
+    });
+  }
+
+  void _save() {
+    final q = int.tryParse(_qty.text.trim()) ?? 0;
+    widget.onSave(q);
+    Navigator.of(context).pop();
+  }
+
+  void _cancelItem() {
+    widget.onRemove();
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const Key('edit-order-qty-dialog'),
+      title: Text(
+        widget.productName,
+        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                key: const Key('edit-order-qty-dec'),
+                onPressed: () => _bump(-1),
+                icon: const Icon(Icons.remove_circle_outline),
+              ),
+              Expanded(
+                child: TextField(
+                  key: const Key('edit-order-qty-field'),
+                  controller: _qty,
+                  focusNode: _focus,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(5),
+                  ],
+                  onSubmitted: (_) => _save(),
+                  decoration: const InputDecoration(
+                    labelText: 'الكمية',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const Key('edit-order-qty-inc'),
+                onPressed: () => _bump(1),
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          key: const Key('edit-order-qty-remove'),
+          onPressed: _cancelItem,
+          style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+          child: const Text('إلغاء الصنف'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إغلاق'),
+        ),
+        FilledButton(
+          key: const Key('edit-order-qty-save'),
+          onPressed: _save,
+          child: const Text('حفظ'),
+        ),
+      ],
     );
   }
 }

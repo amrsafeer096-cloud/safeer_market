@@ -2992,7 +2992,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get phoneOrderPhoneInvalid =>
-      'Enter a valid Egyptian mobile number (01XXXXXXXXX)';
+      'Enter a valid Egyptian mobile (01…) or landline number';
 
   @override
   String get phoneOrderProductSearchHint =>

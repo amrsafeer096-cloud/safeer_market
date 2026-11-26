@@ -925,7 +925,7 @@
   "phoneOrderCustomerZone": "Zone",
   "phoneOrderSaveCustomer": "Save customer",
   "phoneOrderNameRequired": "Enter the customer's name",
-  "phoneOrderPhoneInvalid": "Enter a valid Egyptian mobile number (01XXXXXXXXX)",
+  "phoneOrderPhoneInvalid": "Enter a valid Egyptian mobile (01…) or landline number",
   "phoneOrderProductSearchHint": "Search by product name or barcode...",
   "phoneOrderSearchProductsPrompt": "Search for a product by name or barcode",
   "phoneOrderNoProducts": "No matching products",

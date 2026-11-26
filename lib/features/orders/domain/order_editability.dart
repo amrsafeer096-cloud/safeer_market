@@ -30,6 +30,8 @@ class OrderEditLine {
     this.listPrice,
     this.stockQuantity = 0,
     this.weightInGrams,
+    this.isWeightBased = false,
+    this.unit = Product.defaultUnit,
     this.existingItemId,
   });
 
@@ -44,7 +46,12 @@ class OrderEditLine {
   double unitPrice;
   int quantity;
   int? weightInGrams;
+  final bool isWeightBased;
+  final String unit;
   final String? existingItemId;
+
+  bool get soldByWeight =>
+      isWeightBased || (weightInGrams != null && weightInGrams! > 0);
 
   double get lineTotal {
     final grams = weightInGrams;
@@ -56,7 +63,7 @@ class OrderEditLine {
 
   Map<String, dynamic> toRpcJson() => {
         'product_id': productId,
-        'quantity': quantity < 1 ? 1 : quantity,
+        'quantity': soldByWeight ? 1 : (quantity < 1 ? 1 : quantity),
         'price_at_time': unitPrice,
         if (weightInGrams != null && weightInGrams! > 0)
           'weight_in_grams': weightInGrams,
@@ -74,6 +81,8 @@ class OrderEditLine {
       barcode: barcode,
       imageUrl: imageUrl,
       stockQuantity: stockQuantity,
+      unit: soldByWeight ? Product.weightUnit : unit,
+      isWeightBased: soldByWeight,
     );
   }
 
@@ -81,6 +90,7 @@ class OrderEditLine {
     int? quantity,
     double? unitPrice,
     int? weightInGrams,
+    bool clearWeight = false,
   }) =>
       OrderEditLine(
         productId: productId,
@@ -91,7 +101,10 @@ class OrderEditLine {
         stockQuantity: stockQuantity,
         unitPrice: unitPrice ?? this.unitPrice,
         quantity: quantity ?? this.quantity,
-        weightInGrams: weightInGrams ?? this.weightInGrams,
+        weightInGrams:
+            clearWeight ? null : (weightInGrams ?? this.weightInGrams),
+        isWeightBased: isWeightBased,
+        unit: unit,
         existingItemId: existingItemId,
       );
 }

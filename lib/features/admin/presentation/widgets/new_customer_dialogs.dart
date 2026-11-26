@@ -9,25 +9,15 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../addresses/domain/services/location_service.dart';
+import '../../../auth/domain/egyptian_phone.dart';
 import '../../domain/phone_order.dart';
 import '../providers/phone_order_providers.dart';
 
-/// Phone number helpers shared by both steps.
+/// Phone helpers shared by both steps (mobile + landline).
 abstract final class _Phone {
-  static final _mobile = RegExp(r'^01[0125]\d{8}$');
+  static String local(String raw) => EgyptianPhone.normalize(raw);
 
-  /// 01XXXXXXXXX from what staff typed (+20…, spaces, dashes).
-  static String local(String raw) {
-    var digits = raw.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('0020')) digits = '0${digits.substring(4)}';
-    if (digits.startsWith('20') && digits.length == 12) {
-      digits = '0${digits.substring(2)}';
-    }
-    if (digits.length == 10 && digits.startsWith('1')) digits = '0$digits';
-    return digits;
-  }
-
-  static bool isValid(String raw) => _mobile.hasMatch(local(raw));
+  static bool isValid(String raw) => EgyptianPhone.isValidCustomerPhone(raw);
 }
 
 String? _optional(TextEditingController controller) =>
@@ -145,7 +135,7 @@ class _NewCustomerDialogState extends ConsumerState<NewCustomerDialog> {
                   textDirection: TextDirection.ltr,
                   decoration: const InputDecoration(
                     labelText: 'رقم الهاتف 1',
-                    hintText: '01XXXXXXXXX',
+                    hintText: 'موبايل أو أرضي',
                   ),
                   validator: (value) => _Phone.isValid(value ?? '')
                       ? null
@@ -158,7 +148,7 @@ class _NewCustomerDialogState extends ConsumerState<NewCustomerDialog> {
                   textDirection: TextDirection.ltr,
                   decoration: const InputDecoration(
                     labelText: 'رقم الهاتف 2 - اختياري',
-                    hintText: '01XXXXXXXXX',
+                    hintText: 'موبايل أو أرضي',
                   ),
                   validator: (value) =>
                       (value ?? '').trim().isEmpty || _Phone.isValid(value!)
