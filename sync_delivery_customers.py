@@ -1065,6 +1065,8 @@ def pull_fujitsu_to_supabase(min_row_version):
         full_name = (r.Name or "عميل").strip()
         full_addr = (r.FullAddress or r.StreetAddress or "").strip()
         zone_txt = (r.CityName or "").strip() or None
+        lat_val = _to_float(r.Lat)
+        lon_val = _to_float(r.Lon)
 
         row_payload = {
             "fujitsu_customer_id": str(c_no),
@@ -1207,10 +1209,101 @@ def sync_deleted_customers():
         print(f"⚠️ خطأ أثناء مزامنة المحذوفين: {e}")
 
 
+def backfill_all_fujitsu_addresses(batch_size=200):
+    """
+    One-time (or on-demand) full pull: every active CustomerAddresses row for
+    every pos_customer already linked to Fujitsu → customer_addresses.
+
+    Needed because incremental v_customers sync only runs for RowVersion >
+    watermark, so multi-address customers synced earlier still have one row.
+    """
+    print(
+        f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+        "📦 بدء تعبئة كل عناوين فوجيتسو للعملاء المرتبطين..."
+    )
+    offset = 0
+    total_customers = 0
+    total_addresses = 0
+    while True:
+        try:
+            res = (
+                supabase.table("pos_customers")
+                .select("fujitsu_customer_id, fujitsu_customer_no")
+                .not_.is_("fujitsu_customer_id", "null")
+                .range(offset, offset + batch_size - 1)
+                .execute()
+            )
+        except Exception as exc:
+            print(f"❌ تعذّر قراءة pos_customers للتعبئة: {exc}")
+            break
+
+        rows = res.data or []
+        if not rows:
+            break
+
+        nos = []
+        for row in rows:
+            raw = row.get("fujitsu_customer_no") or row.get("fujitsu_customer_id")
+            try:
+                nos.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+
+        if nos:
+            try:
+                n = pull_fujitsu_addresses_for_customers(nos)
+                total_addresses += n
+                total_customers += len(nos)
+                print(
+                    f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+                    f"📍 دفعة عناوين: {len(nos)} عميل → {n} عنوان "
+                    f"(إجمالي عناوين: {total_addresses})"
+                )
+            except Exception as exc:
+                print(f"⚠️ فشل تعبئة عناوين الدفعة عند offset={offset}: {exc}")
+
+        if len(rows) < batch_size:
+            break
+        offset += batch_size
+
+    print(
+        f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+        f"✅ انتهت تعبئة العناوين: {total_customers} عميل، "
+        f"{total_addresses} عنوان مرفوع/محدّث."
+    )
+    return total_addresses
+
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="مزامنة عملاء/عناوين سفير ماركت ↔ فوجيتسو"
+    )
+    parser.add_argument(
+        "--backfill-addresses",
+        action="store_true",
+        help=(
+            "سحب كل عناوين dbo.CustomerAddresses النشطة لكل العملاء المرتبطين "
+            "إلى customer_addresses ثم الخروج (بدون حلقة المزامنة)."
+        ),
+    )
+    parser.add_argument(
+        "--backfill-then-loop",
+        action="store_true",
+        help="نفّذ تعبئة العناوين مرة ثم ادخل حلقة المزامنة العادية.",
+    )
+    args = parser.parse_args()
+
     print("=" * 65)
     print("🚀 خدمة المزامنة الثنائية لعملاء سفير ماركت (التطبيق <-> فوجيتسو)")
     print("=" * 65)
+
+    if args.backfill_addresses or args.backfill_then_loop:
+        backfill_all_fujitsu_addresses()
+        if args.backfill_addresses and not args.backfill_then_loop:
+            print("🏁 تعبئة العناوين انتهت — خروج.")
+            raise SystemExit(0)
 
     last_row_version = get_last_synced_customer_rowversion()
     print(f"📌 آخر Customer IntRowVersion متزامن في سوبابيز: {last_row_version}")
