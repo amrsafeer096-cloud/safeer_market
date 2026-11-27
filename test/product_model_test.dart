@@ -116,6 +116,32 @@ void main() {
         'price': 90,
       });
       expect(product.unit, 'وزن');
+      expect(product.isWeightBased, isTrue);
+    });
+
+    test('pieces > 1 is never weighted even when name contains وزن', () {
+      final sack = ProductModel.fromJson({
+        'id': 'sack',
+        'name': 'ارز دمياطي عريض وزن',
+        'price': 840,
+        'unit': 'ك * 25',
+        'pieces': 25,
+        'is_weight_based': true, // stale flag must not win
+      });
+      expect(sack.isWeightBased, isFalse);
+      expect(sack.isBoxUnit, isTrue);
+      expect(sack.effectivePieces, 25);
+
+      final loose = ProductModel.fromJson({
+        'id': 'loose',
+        'name': 'ارز دمياطي عريض وزن',
+        'price': 35,
+        'unit': 'وزن',
+        'pieces': 1,
+        'is_weight_based': true,
+      });
+      expect(loose.isWeightBased, isTrue);
+      expect(loose.isBoxUnit, isFalse);
     });
   });
 

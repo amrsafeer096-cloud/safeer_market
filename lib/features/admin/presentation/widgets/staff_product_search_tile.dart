@@ -229,6 +229,18 @@ class StaffProductSearchTile extends StatelessWidget {
             color: Color(0xFF0F172A),
           ),
         ),
+        if (product.effectivePieces > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              'القطع: ${product.effectivePieces}',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF334155),
+              ),
+            ),
+          ),
         ProductOfferBadge(product: product),
         if (product.barcode case final barcode?
             when barcode.trim().isNotEmpty)

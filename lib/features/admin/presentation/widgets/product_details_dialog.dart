@@ -610,6 +610,18 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: palette.muted, fontSize: 13),
               ),
+              if (_product.effectivePieces > 1) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'القطع: ${_product.effectivePieces}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: palette.accent,
+                  ),
+                ),
+              ],
               if (_product.hasActiveOffer) ...[
                 const SizedBox(height: 6),
                 Center(child: ProductOfferBadge(product: _product)),

@@ -375,6 +375,35 @@ def sync_active_with_categories():
             db_unit = unit_map.get(uom_code, uom_code)
             final_unit = db_unit.strip() if db_unit and db_unit != "None" else "قطعة"
 
+            try:
+                pieces = int(float(row.pieces)) if row.pieces is not None else 1
+            except (TypeError, ValueError):
+                pieces = 1
+            if pieces < 1:
+                pieces = 1
+
+            # Per-barcode rule: weighted ONLY when pieces <= 1.
+            # Pieces > 1 is always a pack/sack (integer qty), even if the
+            # item name contains «وزن» or the sibling barcode is sold by kg.
+            unit_l = final_unit.lower()
+            looks_weight_unit = (
+                "كيلو" in final_unit
+                or unit_l in ("kg", "kilo", "كجم")
+                or final_unit.strip() == "وزن"
+            )
+            looks_weight_name = "وزن" in full_item_name
+            is_weighted = pieces <= 1 and (looks_weight_unit or looks_weight_name)
+
+            if is_weighted:
+                final_unit = "وزن"
+            elif pieces > 1:
+                # Prefer ERP carton code «ك * N» so Flutter pack helpers work.
+                if not (
+                    final_unit.startswith("ك")
+                    and any(ch.isdigit() for ch in final_unit)
+                ):
+                    final_unit = f"ك * {pieces}"
+
             raw_sec = str(row.section_name or "").strip()
             raw_grp = str(row.group_name or "").strip()
             if raw_grp in UNLISTED_CATEGORIES or raw_sec in UNLISTED_CATEGORIES:
@@ -407,6 +436,8 @@ def sync_active_with_categories():
                 "category": exact_app_cat,
                 "subcategory": exact_app_cat,
                 "unit": final_unit,
+                "pieces": pieces,
+                "is_weight_based": is_weighted,
             }
             data_to_upsert_dict[barcode_val] = item_data
         data_to_upsert = list(data_to_upsert_dict.values())
@@ -419,9 +450,26 @@ def sync_active_with_categories():
         )
 
         batch_size = 1000
+        drop_pieces_col = False
         for i in range(0, len(data_to_upsert), batch_size):
-            batch = data_to_upsert[i : i + batch_size]
-            supabase.table("products").upsert(batch, on_conflict="barcode").execute()
+            batch = [dict(row) for row in data_to_upsert[i : i + batch_size]]
+            if drop_pieces_col:
+                for row in batch:
+                    row.pop("pieces", None)
+            try:
+                supabase.table("products").upsert(
+                    batch, on_conflict="barcode"
+                ).execute()
+            except Exception as exc:
+                if not drop_pieces_col and "pieces" in str(exc):
+                    drop_pieces_col = True
+                    for row in batch:
+                        row.pop("pieces", None)
+                    supabase.table("products").upsert(
+                        batch, on_conflict="barcode"
+                    ).execute()
+                else:
+                    raise
 
         print(f"[{datetime.now().strftime('%I:%M:%S %p')}] ✅ تمت مزامنة الأصناف/الرصيد/الخصومات بنجاح!")
 

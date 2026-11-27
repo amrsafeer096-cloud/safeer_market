@@ -17,6 +17,7 @@ class Product {
     this.discountPrice,
     this.isActive = true,
     this.createdAt,
+    this.pieces = 1,
     bool isWeightBased = false,
   }) : _isWeightBased = isWeightBased;
 
@@ -65,18 +66,33 @@ class Product {
   /// say.
   final DateTime? createdAt;
 
+  /// Fujitsu `v_hd_items.Pieces` for this barcode (1 = loose/weight unit,
+  /// >1 = sealed pack/sack sold by integer quantity).
+  final int pieces;
+
   final bool _isWeightBased;
 
-  /// Products without the backend flag are still sold by weight when their
-  /// unit or name says so (e.g. «جبنة رومي وزن»).
-  bool get isWeightBased =>
-      _isWeightBased ||
-      unit.trim() == weightUnit ||
-      name.contains(weightUnit) ||
-      canonicalUnit(unit) == 'كيلو';
+  /// Effective pack size: `products.pieces` when >1, else ERP «ك * N» in
+  /// [unit].
+  int get effectivePieces {
+    if (pieces > 1) return pieces;
+    return piecesPerCarton ?? 1;
+  }
 
-  /// Box / pack / carton packaging (`علبة`, `كرتونة`, ERP `ك * N`, …).
+  /// Sold by decimal kg **only** when pack size is 1. Any barcode with
+  /// `pieces > 1` (or unit `ك * N`) is a pack — never the weight picker —
+  /// even if the name contains «وزن».
+  bool get isWeightBased {
+    if (effectivePieces > 1) return false;
+    return _isWeightBased ||
+        unit.trim() == weightUnit ||
+        name.contains(weightUnit) ||
+        canonicalUnit(unit) == 'كيلو';
+  }
+
+  /// Box / pack / carton packaging (`علبة`, `كرتونة`, ERP `ك * N`, pieces>1).
   bool get isBoxUnit {
+    if (effectivePieces > 1) return true;
     if (piecesPerCarton != null) return true;
     final c = canonicalUnit(unit);
     if (c == 'علبة' || c == 'كرتونة' || c == 'باكو') return true;
@@ -100,7 +116,8 @@ class Product {
     final l10n = L10n.current;
     if (isWeightBased) return l10n.unitKilo;
     final stored = unit.trim();
-    if (piecesPerCarton case final count?) return l10n.unitBoxOf('$count');
+    final pack = effectivePieces > 1 ? effectivePieces : null;
+    if (pack != null) return l10n.unitBoxOf('$pack');
     return switch (canonicalUnit(stored)) {
       'قطعة' => l10n.unitPiece,
       'كيلو' => l10n.unitKilo,
@@ -213,6 +230,7 @@ class Product {
         discountPrice: discountPrice,
         isActive: isActive,
         createdAt: createdAt,
+        pieces: pieces,
         isWeightBased: _isWeightBased,
       );
 

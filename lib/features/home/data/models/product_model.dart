@@ -26,6 +26,8 @@ class ProductModel {
       discountPrice: _parseNumber(json['discount_price']),
       isActive: _parseBool(json['is_active']) ?? true,
       createdAt: _parseDate(json['created_at']),
+      pieces: (_parseInt(json['pieces']) ?? 1).clamp(1, 999999),
+      // Persist DB flag; [Product.isWeightBased] still enforces pieces<=1.
       isWeightBased: json['is_weight_based'] == true,
     );
   }
@@ -48,6 +50,8 @@ class ProductModel {
         'is_active': product.isActive,
         if (product.createdAt case final createdAt?)
           'created_at': createdAt.toUtc().toIso8601String(),
+        'pieces': product.pieces < 1 ? 1 : product.pieces,
+        // Store the rule-aware value so caches/offline carts stay consistent.
         'is_weight_based': product.isWeightBased,
       };
 
