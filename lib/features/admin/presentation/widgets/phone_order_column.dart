@@ -1102,7 +1102,10 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       final existing = _staged[product.id];
       if (product.isWeightBased) {
         final grams = existing?.weightInGrams ?? 0;
-        final next = WeightOptions.next(grams);
+        final next = WeightOptions.next(
+          grams,
+          maxGramsLimit: WeightOptions.adminMaxGrams,
+        );
         _staged[product.id] = StagedCartItem(
           product: product,
           weightInGrams: next,

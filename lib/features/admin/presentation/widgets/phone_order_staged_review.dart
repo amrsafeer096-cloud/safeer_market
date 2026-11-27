@@ -80,7 +80,10 @@ class _StagedReviewDialogState extends State<_StagedReviewDialog> {
     if (item == null) return;
     setState(() {
       if (item.weightInGrams != null) {
-        item.weightInGrams = WeightOptions.next(item.weightInGrams!);
+        item.weightInGrams = WeightOptions.next(
+          item.weightInGrams!,
+          maxGramsLimit: WeightOptions.adminMaxGrams,
+        );
       } else if (item.quantity < PhoneOrderState.maxQuantity) {
         item.quantity += 1;
       }
@@ -331,7 +334,10 @@ class _CartLineEditDialogState extends State<_CartLineEditDialog> {
     if (_isWeight) {
       setState(() {
         if (delta > 0) {
-          _weight = WeightOptions.next(_weight!);
+          _weight = WeightOptions.next(
+            _weight!,
+            maxGramsLimit: WeightOptions.adminMaxGrams,
+          );
         } else {
           final prev = WeightOptions.previous(_weight!);
           _weight = prev <= 0 ? _weight : prev;

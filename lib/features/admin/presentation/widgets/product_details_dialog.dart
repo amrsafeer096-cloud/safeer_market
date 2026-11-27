@@ -91,6 +91,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   int? get _effectiveGrams => WeightOptions.parseCustomGrams(
         _weight.text,
         inKilos: _unit == _WeightUnit.kilo,
+        maxGramsLimit: WeightOptions.adminMaxGrams,
       );
 
   bool get _canSubmitWeight {
@@ -274,7 +275,8 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   void _addWeight() {
     final grams = _effectiveGrams;
     if (grams == null || grams <= 0) {
-      setState(() => _error = 'أدخل وزناً صالحاً');
+      setState(() => _error =
+          'أدخل وزناً من 0.001 إلى ${WeightOptions.adminMaxKg.toStringAsFixed(0)} كيلو');
       _weightFocus.requestFocus();
       return;
     }
@@ -407,6 +409,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                 final current = WeightOptions.parseCustomGrams(
                   _weight.text,
                   inKilos: _unit == _WeightUnit.kilo,
+                  maxGramsLimit: WeightOptions.adminMaxGrams,
                 );
                 setState(() {
                   _unit = unit;

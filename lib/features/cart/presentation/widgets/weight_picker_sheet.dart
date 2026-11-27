@@ -155,11 +155,16 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
     super.dispose();
   }
 
+  int get _maxGramsLimit => widget.fastAdminEntry
+      ? WeightOptions.adminMaxGrams
+      : WeightOptions.customerMaxGrams;
+
   int? get _effectiveGrams {
     if (widget.fastAdminEntry || _customMode) {
       return WeightOptions.parseCustomGrams(
         _customCtrl.text,
         inKilos: _unit == _WeightUnit.kilo,
+        maxGramsLimit: _maxGramsLimit,
       );
     }
     return _grams;
@@ -234,6 +239,7 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
               final grams = WeightOptions.parseCustomGrams(
                 _customCtrl.text,
                 inKilos: _unit == _WeightUnit.kilo,
+                maxGramsLimit: _maxGramsLimit,
               );
               setState(() {
                 if (widget.fastAdminEntry) {
@@ -271,11 +277,12 @@ class _WeightPickerSheetState extends State<WeightPickerSheet> {
             ),
           ],
           selected: {_unit},
-          onSelectionChanged: (next) {
+            onSelectionChanged: (next) {
             final unit = next.first;
             final current = WeightOptions.parseCustomGrams(
               _customCtrl.text,
               inKilos: _unit == _WeightUnit.kilo,
+              maxGramsLimit: _maxGramsLimit,
             );
             setState(() {
               _unit = unit;

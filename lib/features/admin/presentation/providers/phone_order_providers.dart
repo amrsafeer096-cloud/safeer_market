@@ -261,7 +261,10 @@ class PhoneOrderController extends Notifier<PhoneOrderState> {
   void add(Product product) {
     if (product.isWeightBased) {
       final grams = state.weightOf(product.id) ?? WeightOptions.defaultGrams;
-      setWeight(product, WeightOptions.next(grams));
+      setWeight(
+        product,
+        WeightOptions.next(grams, maxGramsLimit: WeightOptions.adminMaxGrams),
+      );
       return;
     }
     setQuantity(product, state.quantityOf(product.id) + 1);

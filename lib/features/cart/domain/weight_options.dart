@@ -18,17 +18,31 @@ abstract final class WeightOptions {
 
   /// Above the largest preset the cart steps by half a kilo.
   static const _bulkStep = 500;
-  static const maxGrams = 10000;
+
+  /// Customer app: generous bulk limit (50 kg).
+  static const customerMaxGrams = 50000;
+
+  /// Admin dashboard: bulk orders up to 999 kg (e.g. 20 / 25 / 50 kg rice).
+  static const adminMaxGrams = 999000;
+
+  /// Default parse/step ceiling — customer-facing unless overridden.
+  static const maxGrams = customerMaxGrams;
+
+  /// Customer app piece-item quantity ceiling.
+  static const customerMaxQuantity = 99;
+
+  static double get customerMaxKg => customerMaxGrams / 1000.0;
+  static double get adminMaxKg => adminMaxGrams / 1000.0;
 
   /// Max fractional digits when entering kilos (0.001 kg = 1 g).
   static const maxKgDecimals = 3;
 
-  static int next(int grams) {
+  static int next(int grams, {int maxGramsLimit = maxGrams}) {
     for (final preset in presetsInGrams) {
       if (preset > grams) return preset;
     }
     final stepped = grams + _bulkStep;
-    return stepped > maxGrams ? grams : stepped;
+    return stepped > maxGramsLimit ? grams : stepped;
   }
 
   /// Returns 0 below the smallest preset, which removes the item.
@@ -120,20 +134,25 @@ abstract final class WeightOptions {
     return buffer.toString().trim();
   }
 
-  /// Parse a custom weight field into grams (1…[maxGrams]), or null if invalid.
+  /// Parse a custom weight field into grams (1…[maxGramsLimit]), or null if invalid.
   ///
   /// [inKilos] true → value is kilograms (up to 3 decimals);
   /// false → value is grams (decimals round to nearest gram).
-  static int? parseCustomGrams(String raw, {required bool inKilos}) {
+  /// Defaults to [maxGrams] (customer 50 kg); pass [adminMaxGrams] for staff.
+  static int? parseCustomGrams(
+    String raw, {
+    required bool inKilos,
+    int maxGramsLimit = maxGrams,
+  }) {
     final normalized = normalizeDecimalInput(raw);
     if (normalized.isEmpty) return null;
     final value = double.tryParse(normalized);
     if (value == null || value <= 0) return null;
 
     final grams = inKilos
-        ? (value * 1000).round() // 1.3 → 1300, 0.125 → 125
+        ? (value * 1000).round() // 1.3 → 1300, 0.125 → 125, 20 → 20000
         : value.round();
-    if (grams < 1 || grams > maxGrams) return null;
+    if (grams < 1 || grams > maxGramsLimit) return null;
     return grams;
   }
 

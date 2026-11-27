@@ -74,12 +74,19 @@ class CartNotifier extends Notifier<List<CartItem>> {
       final grams = existing.firstOrNull?.selectedWeightInGrams;
       setWeight(
         product,
-        grams == null ? WeightOptions.defaultGrams : WeightOptions.next(grams),
+        grams == null
+            ? WeightOptions.defaultGrams
+            : WeightOptions.next(
+                grams,
+                maxGramsLimit: WeightOptions.customerMaxGrams,
+              ),
       );
     } else if (existing.isEmpty) {
       state = [...state, CartItem(product: product, quantity: 1)];
     } else {
-      updateQuantity(product.id, existing.first.quantity + 1);
+      final nextQty = existing.first.quantity + 1;
+      if (nextQty > WeightOptions.customerMaxQuantity) return;
+      updateQuantity(product.id, nextQty);
     }
   }
 
@@ -96,9 +103,12 @@ class CartNotifier extends Notifier<List<CartItem>> {
       remove(productId);
       return;
     }
+    final capped = quantity.clamp(1, WeightOptions.customerMaxQuantity);
     state = [
       for (final item in state)
-        item.product.id == productId ? item.copyWith(quantity: quantity) : item,
+        item.product.id == productId
+            ? item.copyWith(quantity: capped)
+            : item,
     ];
   }
 
@@ -107,6 +117,9 @@ class CartNotifier extends Notifier<List<CartItem>> {
     if (grams <= 0) {
       remove(product.id);
       return;
+    }
+    if (grams > WeightOptions.customerMaxGrams) {
+      grams = WeightOptions.customerMaxGrams;
     }
     String? existingNotes;
     for (final existing in state) {

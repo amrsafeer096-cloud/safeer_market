@@ -9,9 +9,13 @@ alter table public.customer_addresses
 alter table public.customer_addresses
   add column if not exists landmark text;
 
-create unique index if not exists customer_addresses_fujitsu_address_id_uidx
-  on public.customer_addresses (fujitsu_address_id)
-  where fujitsu_address_id is not null;
+-- Full UNIQUE (not partial) so PostgREST upsert on_conflict=fujitsu_address_id works.
+-- NULLs are still allowed multiple times under a standard UNIQUE constraint.
+alter table public.customer_addresses
+  drop constraint if exists customer_addresses_fujitsu_address_id_key;
+alter table public.customer_addresses
+  add constraint customer_addresses_fujitsu_address_id_key
+  unique (fujitsu_address_id);
 
 create index if not exists customer_addresses_synced_false_idx
   on public.customer_addresses (synced_to_fujitsu)

@@ -46,6 +46,50 @@ void main() {
       expect(WeightOptions.parseCustomGrams('-1', inKilos: true), isNull);
     });
 
+    test('customer default rejects above 50 kg; admin allows 20–999 kg', () {
+      // 20 kg used to be blocked by the old 10 kg ceiling — now allowed.
+      expect(
+        WeightOptions.parseCustomGrams(
+          '20',
+          inKilos: true,
+          maxGramsLimit: WeightOptions.adminMaxGrams,
+        ),
+        20000,
+      );
+      expect(
+        WeightOptions.parseCustomGrams(
+          '50',
+          inKilos: true,
+          maxGramsLimit: WeightOptions.customerMaxGrams,
+        ),
+        50000,
+      );
+      expect(
+        WeightOptions.parseCustomGrams(
+          '51',
+          inKilos: true,
+          maxGramsLimit: WeightOptions.customerMaxGrams,
+        ),
+        isNull,
+      );
+      expect(
+        WeightOptions.parseCustomGrams(
+          '999',
+          inKilos: true,
+          maxGramsLimit: WeightOptions.adminMaxGrams,
+        ),
+        999000,
+      );
+      expect(
+        WeightOptions.parseCustomGrams(
+          '1000',
+          inKilos: true,
+          maxGramsLimit: WeightOptions.adminMaxGrams,
+        ),
+        isNull,
+      );
+    });
+
     test('kgOf preserves three decimals', () {
       expect(WeightOptions.kgOf(125), 0.125);
       expect(WeightOptions.kgOf(1300), 1.3);

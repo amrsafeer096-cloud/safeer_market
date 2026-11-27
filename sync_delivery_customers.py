@@ -270,83 +270,9 @@ def pull_fujitsu_addresses_for_customers(customer_nos):
     if not payloads:
         return 0
 
-    upserted = 0
-    for i in range(0, len(payloads), 100):
-        chunk = payloads[i : i + 100]
-        try:
-            supabase.table("customer_addresses").upsert(
-                chunk, on_conflict="fujitsu_address_id"
-            ).execute()
-            upserted += len(chunk)
-        except Exception as exc:
-            # Fallback without landmark / synced columns if migration pending.
-            msg = str(exc)
-            stripped = []
-            for row in chunk:
-                copy = dict(row)
-                if "landmark" in msg or "synced_to_fujitsu" in msg:
-                    copy.pop("landmark", None)
-                    copy.pop("synced_to_fujitsu", None)
-                stripped.append(copy)
-            try:
-                # Match existing row by fujitsu_address_id manually when unique
-                # constraint is missing: update-or-insert one by one.
-                for row in stripped:
-                    existing = (
-                        supabase.table("customer_addresses")
-                        .select("id")
-                        .eq("fujitsu_address_id", row["fujitsu_address_id"])
-                        .limit(1)
-                        .execute()
-                    )
-                    if existing.data:
-                        supabase.table("customer_addresses").update(row).eq(
-                            "id", existing.data[0]["id"]
-                        ).execute()
-                    else:
-                        supabase.table("customer_addresses").insert(row).execute()
-                    upserted += 1
-            except Exception as exc2:
-                print(f"⚠️ فشل رفع عناوين العملاء: {exc2}")
-                return upserted
-
-    # Mirror each customer's primary address onto pos_customers.
-    for cust_no, addrs in by_customer.items():
-        pos_id = pos_map.get(str(cust_no))
-        if pos_id is None:
-            continue
-        primary = next(
-            (a for a in addrs if int(getattr(a, "IsPrimary", 0) or 0) == 1),
-            addrs[0],
-        )
-        full = (primary.FullAddress or primary.StreetAddress or "").strip()
-        zone_txt = (primary.CityName or "").strip() or None
-        try:
-            supabase.table("pos_customers").update(
-                {
-                    "address": full or None,
-                    "full_address": full or None,
-                    "street": (primary.StreetAddress or "").strip() or None,
-                    "building": (primary.Building or "").strip() or None,
-                    "floor": (primary.Floor or "").strip() or None,
-                    "apartment": (primary.Apartment or "").strip() or None,
-                    "governorate": (primary.GovName or "").strip() or None,
-                    "city": (primary.TownName or "").strip() or None,
-                    "zone": zone_txt,
-                    "zone_name": zone_txt,
-                    "fujitsu_zone_id": int(primary.CityId)
-                    if primary.CityId is not None
-                    else None,
-                    "lat": _to_float(primary.Lat),
-                    "lng": _to_float(primary.Lon),
-                    "latitude": _to_float(primary.Lat),
-                    "longitude": _to_float(primary.Lon),
-                }
-            ).eq("id", pos_id).execute()
-        except Exception:
-            pass
-
-    return upserted
+    # Bulk upsert only — pos_customers primary fields are already set by the
+    # v_customers pull; avoid N per-customer HTTP updates here.
+    return _bulk_upsert_customer_addresses(payloads, upsert_batch=500)
 
 
 def push_customer_addresses_to_fujitsu():
@@ -1209,67 +1135,260 @@ def sync_deleted_customers():
         print(f"⚠️ خطأ أثناء مزامنة المحذوفين: {e}")
 
 
-def backfill_all_fujitsu_addresses(batch_size=200):
-    """
-    One-time (or on-demand) full pull: every active CustomerAddresses row for
-    every pos_customer already linked to Fujitsu → customer_addresses.
-
-    Needed because incremental v_customers sync only runs for RowVersion >
-    watermark, so multi-address customers synced earlier still have one row.
-    """
-    print(
-        f"[{datetime.now().strftime('%I:%M:%S %p')}] "
-        "📦 بدء تعبئة كل عناوين فوجيتسو للعملاء المرتبطين..."
-    )
+def _load_all_fujitsu_pos_map(page_size=1000):
+    """fujitsu_customer_no/id (str) → pos_customers.id for every linked row."""
+    mapping = {}
     offset = 0
-    total_customers = 0
-    total_addresses = 0
     while True:
-        try:
-            res = (
-                supabase.table("pos_customers")
-                .select("fujitsu_customer_id, fujitsu_customer_no")
-                .not_.is_("fujitsu_customer_id", "null")
-                .range(offset, offset + batch_size - 1)
-                .execute()
-            )
-        except Exception as exc:
-            print(f"❌ تعذّر قراءة pos_customers للتعبئة: {exc}")
-            break
-
+        res = (
+            supabase.table("pos_customers")
+            .select("id, fujitsu_customer_id, fujitsu_customer_no")
+            .not_.is_("fujitsu_customer_id", "null")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
         rows = res.data or []
         if not rows:
             break
-
-        nos = []
         for row in rows:
-            raw = row.get("fujitsu_customer_no") or row.get("fujitsu_customer_id")
-            try:
-                nos.append(int(raw))
-            except (TypeError, ValueError):
+            pos_id = row.get("id")
+            if pos_id is None:
                 continue
-
-        if nos:
-            try:
-                n = pull_fujitsu_addresses_for_customers(nos)
-                total_addresses += n
-                total_customers += len(nos)
-                print(
-                    f"[{datetime.now().strftime('%I:%M:%S %p')}] "
-                    f"📍 دفعة عناوين: {len(nos)} عميل → {n} عنوان "
-                    f"(إجمالي عناوين: {total_addresses})"
-                )
-            except Exception as exc:
-                print(f"⚠️ فشل تعبئة عناوين الدفعة عند offset={offset}: {exc}")
-
-        if len(rows) < batch_size:
+            for key in (
+                row.get("fujitsu_customer_id"),
+                row.get("fujitsu_customer_no"),
+            ):
+                if key is None or str(key).strip() == "":
+                    continue
+                try:
+                    mapping[str(int(key))] = int(pos_id)
+                except (TypeError, ValueError):
+                    mapping[str(key).strip()] = int(pos_id)
+        if len(rows) < page_size:
             break
-        offset += batch_size
+        offset += page_size
+    return mapping
+
+
+def _fetch_all_active_fujitsu_addresses(chunk_size=5000):
+    """
+    All active dbo.CustomerAddresses rows, streamed in AddressId windows
+    of [chunk_size] to keep memory bounded.
+    Yields lists of pyodbc rows.
+    """
+    conn = pyodbc.connect(connection_string)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT ISNULL(MIN(AddressId), 0), ISNULL(MAX(AddressId), 0) "
+            "FROM CustomerAddresses WHERE ISNULL(IsDisabled, 0) = 0"
+        )
+        min_id, max_id = cursor.fetchone()
+        if not max_id or max_id < min_id:
+            return
+
+        start = int(min_id)
+        end = int(max_id)
+        while start <= end:
+            stop = start + chunk_size - 1
+            cursor.execute(
+                """
+                SELECT
+                    AddressId, CustomerNo, Title,
+                    GovName, TownName, CityId, CityName,
+                    Building, Floor, Apartment, Landmark,
+                    StreetAddress, FullAddress, Notes,
+                    Lon, Lat, IsPrimary, BranchId
+                FROM CustomerAddresses
+                WHERE ISNULL(IsDisabled, 0) = 0
+                  AND AddressId BETWEEN ? AND ?
+                ORDER BY CustomerNo ASC, AddressId ASC
+                """,
+                (start, stop),
+            )
+            rows = cursor.fetchall() or []
+            if rows:
+                yield rows
+            start = stop + 1
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _address_row_to_payload(a, pos_id, is_primary):
+    full = (a.FullAddress or a.StreetAddress or "").strip()
+    if not full:
+        return None
+    zone_txt = (a.CityName or "").strip() or None
+    city_id = a.CityId
+    return {
+        "pos_customer_id": pos_id,
+        "fujitsu_address_id": int(a.AddressId),
+        "address": full,
+        "zone": zone_txt,
+        "governorate": (a.GovName or "").strip() or None,
+        "city": (a.TownName or "").strip() or None,
+        "building": (a.Building or "").strip() or None,
+        "floor": (a.Floor or "").strip() or None,
+        "apartment": (a.Apartment or "").strip() or None,
+        "landmark": (a.Landmark or "").strip() or None,
+        "fujitsu_zone_id": str(int(city_id)) if city_id is not None else None,
+        "latitude": _to_float(a.Lat),
+        "longitude": _to_float(a.Lon),
+        "is_primary": is_primary,
+        "synced_to_fujitsu": True,
+    }
+
+
+def _bulk_upsert_customer_addresses(payloads, upsert_batch=500):
+    """Upsert address payloads in large HTTP batches. Returns count written.
+
+    Requires a non-partial UNIQUE on customer_addresses(fujitsu_address_id)
+    (constraint customer_addresses_fujitsu_address_id_key) — PostgREST cannot
+    match ON CONFLICT against a partial unique index.
+    """
+    if not payloads:
+        return 0
+    upserted = 0
+    strip_optional = False
+    for i in range(0, len(payloads), upsert_batch):
+        chunk = payloads[i : i + upsert_batch]
+        if strip_optional:
+            chunk = [
+                {k: v for k, v in row.items()
+                 if k not in ("landmark", "synced_to_fujitsu")}
+                for row in chunk
+            ]
+        try:
+            # on_conflict must name column(s) of a real UNIQUE constraint.
+            supabase.table("customer_addresses").upsert(
+                chunk, on_conflict="fujitsu_address_id"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            msg = str(exc)
+            if not strip_optional and (
+                "landmark" in msg or "synced_to_fujitsu" in msg
+            ):
+                strip_optional = True
+                try:
+                    slim = [
+                        {k: v for k, v in row.items()
+                         if k not in ("landmark", "synced_to_fujitsu")}
+                        for row in chunk
+                    ]
+                    supabase.table("customer_addresses").upsert(
+                        slim, on_conflict="fujitsu_address_id"
+                    ).execute()
+                    upserted += len(slim)
+                    continue
+                except Exception as exc2:
+                    print(f"⚠️ فشل رفع دفعة عناوين ({len(chunk)}): {exc2}")
+                    continue
+            print(f"⚠️ فشل رفع دفعة عناوين ({len(chunk)}): {exc}")
+    return upserted
+
+
+def backfill_all_fujitsu_addresses(
+    page_size=1000,
+    fujitsu_chunk=5000,
+    upsert_batch=500,
+):
+    """
+    Fast full pull of every active CustomerAddresses row for linked customers.
+
+    1) Paginated bulk load of fujitsu_customer_no → pos_customer_id (1000/page)
+    2) Fujitsu addresses in AddressId windows of 5000 (one connection)
+    3) Supabase upserts of 500 rows per HTTP request
+    """
+    t0 = time.time()
+    print(
+        f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+        "📦 بدء تعبئة كل عناوين فوجيتسو (bulk)..."
+    )
+
+    try:
+        pos_map = _load_all_fujitsu_pos_map(page_size=page_size)
+    except Exception as exc:
+        print(f"❌ تعذّر قراءة pos_customers للتعبئة: {exc}")
+        return 0
 
     print(
         f"[{datetime.now().strftime('%I:%M:%S %p')}] "
-        f"✅ انتهت تعبئة العناوين: {total_customers} عميل، "
-        f"{total_addresses} عنوان مرفوع/محدّث."
+        f"🔗 تم تحميل {len(pos_map)} ربط عميل فوجيتسو ↔ سوبابيز."
+    )
+    if not pos_map:
+        return 0
+
+    total_addresses = 0
+    total_rows_seen = 0
+    pending = []
+    # Track AddressIds already marked primary per customer within the stream.
+    primary_seen = set()
+
+    try:
+        for chunk in _fetch_all_active_fujitsu_addresses(chunk_size=fujitsu_chunk):
+            total_rows_seen += len(chunk)
+            # First pass: group this window by CustomerNo for default-primary.
+            by_cust = {}
+            for a in chunk:
+                by_cust.setdefault(int(a.CustomerNo), []).append(a)
+
+            for cust_no, addrs in by_cust.items():
+                pos_id = pos_map.get(str(cust_no))
+                if pos_id is None:
+                    continue
+                has_flagged = any(
+                    int(getattr(a, "IsPrimary", 0) or 0) == 1 for a in addrs
+                )
+                for idx, a in enumerate(addrs):
+                    flagged = int(getattr(a, "IsPrimary", 0) or 0) == 1
+                    if flagged:
+                        is_primary = True
+                        primary_seen.add(cust_no)
+                    elif (
+                        not has_flagged
+                        and cust_no not in primary_seen
+                        and idx == 0
+                    ):
+                        is_primary = True
+                        primary_seen.add(cust_no)
+                    else:
+                        is_primary = False
+                    payload = _address_row_to_payload(a, pos_id, is_primary)
+                    if payload:
+                        pending.append(payload)
+
+            if len(pending) >= upsert_batch:
+                written = _bulk_upsert_customer_addresses(
+                    pending, upsert_batch=upsert_batch
+                )
+                total_addresses += written
+                pending = []
+                print(
+                    f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+                    f"📍 تقدّم: {total_rows_seen} صف فوجيتسو → "
+                    f"{total_addresses} عنوان مرفوع..."
+                )
+    except Exception as exc:
+        print(f"❌ فشل سحب/رفع العناوين: {exc}")
+        if pending:
+            total_addresses += _bulk_upsert_customer_addresses(
+                pending, upsert_batch=upsert_batch
+            )
+        return total_addresses
+
+    if pending:
+        total_addresses += _bulk_upsert_customer_addresses(
+            pending, upsert_batch=upsert_batch
+        )
+
+    elapsed = time.time() - t0
+    print(
+        f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+        f"✅ انتهت تعبئة العناوين: {len(pos_map)} عميل مربوط، "
+        f"{total_rows_seen} صف فوجيتسو، {total_addresses} عنوان مرفوع/محدّث "
+        f"في {elapsed:.1f}s."
     )
     return total_addresses
 
