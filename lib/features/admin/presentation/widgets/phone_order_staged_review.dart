@@ -14,11 +14,13 @@ class StagedCartItem {
     required this.product,
     this.quantity = 1,
     this.weightInGrams,
+    this.notes,
   });
 
   final Product product;
   int quantity;
   int? weightInGrams;
+  String? notes;
 
   double get lineTotal => switch (weightInGrams) {
         final grams? => WeightOptions.priceFor(product.effectivePrice, grams),
@@ -27,7 +29,7 @@ class StagedCartItem {
 
   String get quantityLabel {
     if (weightInGrams != null) {
-      return WeightOptions.phoneOrderLabel(weightInGrams!);
+      return WeightOptions.compactLabel(weightInGrams!);
     }
     return '$quantity';
   }
@@ -61,6 +63,7 @@ class _StagedReviewDialogState extends State<_StagedReviewDialog> {
         product: e.value.product,
         quantity: e.value.quantity,
         weightInGrams: e.value.weightInGrams,
+        notes: e.value.notes,
       ),
   };
 
@@ -133,15 +136,35 @@ class _StagedReviewDialogState extends State<_StagedReviewDialog> {
                         ListTile(
                           key: Key('staged-review-${entry.key}'),
                           contentPadding: EdgeInsets.zero,
+                          isThreeLine: entry.value.notes
+                                  ?.trim()
+                                  .isNotEmpty ==
+                              true,
                           title: Text(
                             entry.value.product.name,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w800),
                           ),
-                          subtitle: Text(
-                            AppCurrency.of(entry.value.lineTotal),
-                            style: TextStyle(color: palette.accent),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                AppCurrency.of(entry.value.lineTotal),
+                                style: TextStyle(color: palette.accent),
+                              ),
+                              if (entry.value.notes case final note?
+                                  when note.trim().isNotEmpty)
+                                Text(
+                                  note,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: palette.muted,
+                                  ),
+                                ),
+                            ],
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -176,7 +199,7 @@ class _StagedReviewDialogState extends State<_StagedReviewDialog> {
             FilledButton(
               key: const Key('staged-review-confirm'),
               onPressed: _confirm,
-              child: const Text('تأكيد وإضافة للسلة'),
+              child: const Text('تأكيد الإضافة للسلة'),
             ),
           ],
         ),

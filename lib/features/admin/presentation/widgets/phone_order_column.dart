@@ -923,7 +923,10 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     ref.read(phoneOrderSearchOpenProvider.notifier).state = open;
   }
 
-  void _dismissSearch({bool clearStaged = true}) {
+  /// Clears the search field / closes the popup.
+  /// Staging is kept by default — cleared only after cart commit, explicit
+  /// «إلغاء المحدد», or order/tab switch ([clearStaged]).
+  void _dismissSearch({bool clearStaged = false}) {
     _debounce?.cancel();
     _search.clear();
     if (!mounted) return;
@@ -936,17 +939,21 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreSearchFocus());
   }
 
+  void _clearStaging() {
+    if (_staged.isEmpty) return;
+    setState(() => _staged.clear());
+    _restoreSearchFocus();
+  }
+
   void _onChanged(String text) {
     _debounce?.cancel();
     final trimmed = text.trim();
     // Open / rebuild from the first character so previous-products
     // filtering updates immediately (network search stays debounced).
+    // Never wipe [_staged] when the query changes or becomes empty.
     setState(() {
       _popupOpen = trimmed.isNotEmpty;
-      if (trimmed.isEmpty) {
-        _query = '';
-        _staged.clear();
-      }
+      if (trimmed.isEmpty) _query = '';
     });
     ref.read(phoneOrderSearchOpenProvider.notifier).state = trimmed.isNotEmpty;
     _debounce = Timer(PhoneOrderColumn.searchDebounce, () {
@@ -990,23 +997,95 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
           product: e.value.product,
           quantity: e.value.quantity,
           weightInGrams: e.value.weightInGrams,
+          notes: e.value.notes,
         ),
     };
     final confirmed = await showStagedReviewDialog(context, staged: snapshot);
     if (!mounted) return;
     if (confirmed == null) {
+      // «رجوع» — keep staging intact.
       _restoreSearchFocus();
       return;
     }
     final controller = ref.read(phoneOrderControllerProvider.notifier);
     for (final item in confirmed.values) {
       if (item.weightInGrams != null) {
-        controller.setWeight(item.product, item.weightInGrams!);
+        controller.setWeight(
+          item.product,
+          item.weightInGrams!,
+          notes: item.notes,
+        );
       } else {
-        controller.addQuantity(item.product, item.quantity);
+        controller.addQuantity(
+          item.product,
+          item.quantity,
+          notes: item.notes,
+        );
       }
     }
-    _dismissSearch();
+    // Commit → clear staging + search.
+    _dismissSearch(clearStaged: true);
+  }
+
+  /// Upsert into the persistent staging buffer (does not touch the cart).
+  void _stageItem(
+    Product product, {
+    int? quantity,
+    int? weightInGrams,
+    String? notes,
+  }) {
+    setState(() {
+      final existing = _staged[product.id];
+      final mergedNotes = notes ?? existing?.notes;
+      if (product.isWeightBased || weightInGrams != null) {
+        final grams = weightInGrams ?? existing?.weightInGrams;
+        if (grams == null || grams <= 0) {
+          _staged.remove(product.id);
+          return;
+        }
+        _staged[product.id] = StagedCartItem(
+          product: product,
+          weightInGrams: grams,
+          notes: mergedNotes,
+        );
+      } else {
+        final qty = quantity ?? existing?.quantity ?? 1;
+        if (qty < 1) {
+          _staged.remove(product.id);
+          return;
+        }
+        _staged[product.id] = StagedCartItem(
+          product: product,
+          quantity: qty.clamp(1, PhoneOrderState.maxQuantity),
+          notes: mergedNotes,
+        );
+      }
+    });
+  }
+
+  /// After a product-card confirm: stage the item, keep other staged lines,
+  /// clear the search field for the next query, restore focus.
+  void _stageFromCard(
+    Product product, {
+    int? quantity,
+    int? weightInGrams,
+    String? notes,
+  }) {
+    _stageItem(
+      product,
+      quantity: quantity,
+      weightInGrams: weightInGrams,
+      notes: notes,
+    );
+    _debounce?.cancel();
+    _search.clear();
+    if (!mounted) return;
+    setState(() {
+      _query = '';
+      _popupOpen = false;
+    });
+    ref.read(phoneOrderSearchOpenProvider.notifier).state = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreSearchFocus());
   }
 
   /// `+` in the search list: stage only — keep popup open.
@@ -1019,11 +1098,16 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         _staged[product.id] = StagedCartItem(
           product: product,
           weightInGrams: next,
+          notes: existing?.notes,
         );
       } else {
         final qty = (existing?.quantity ?? 0) + 1;
         if (qty > PhoneOrderState.maxQuantity) return;
-        _staged[product.id] = StagedCartItem(product: product, quantity: qty);
+        _staged[product.id] = StagedCartItem(
+          product: product,
+          quantity: qty,
+          notes: existing?.notes,
+        );
       }
     });
     _restoreSearchFocus();
@@ -1054,38 +1138,34 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   Future<void> _pickProduct(Product product) async {
     await _addProduct(context, ref, product);
     if (!mounted) return;
-    _dismissSearch();
+    _dismissSearch(clearStaged: false);
   }
 
-  /// Single tap opens the detail card; Enter adds qty and clears search.
+  /// Single tap opens the detail card; confirm stages into [_staged].
   Future<void> _openDetails(Product product) async {
-    String? existingNotes;
-    int? existingGrams;
+    final staged = _staged[product.id];
+    String? cartNotes;
+    int? cartGrams;
+    int? cartQty;
     for (final line in ref.read(phoneOrderControllerProvider).lines) {
       if (line.product.id == product.id) {
-        existingNotes = line.notes;
-        existingGrams = line.weightInGrams;
+        cartNotes = line.notes;
+        cartGrams = line.weightInGrams;
+        cartQty = line.quantity;
         break;
       }
     }
     await showProductDetailsDialog(
       context,
       product: product,
-      initialNotes: existingNotes,
-      initialGrams: existingGrams,
+      initialNotes: staged?.notes ?? cartNotes,
+      initialGrams: staged?.weightInGrams ?? cartGrams,
+      initialQuantity: staged?.quantity ?? cartQty,
       onAddQuantity: (quantity, notes) {
-        ref.read(phoneOrderControllerProvider.notifier).addQuantity(
-              product,
-              quantity,
-              notes: notes,
-            );
-        _dismissSearch();
+        _stageFromCard(product, quantity: quantity, notes: notes);
       },
       onConfirmWeight: (grams, notes) {
-        ref
-            .read(phoneOrderControllerProvider.notifier)
-            .setWeight(product, grams, notes: notes);
-        _dismissSearch();
+        _stageFromCard(product, weightInGrams: grams, notes: notes);
       },
     );
     if (mounted) _restoreSearchFocus();
@@ -1099,7 +1179,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     final customer = state.customer!;
 
     ref.listen(phoneOrderDismissSearchProvider, (prev, next) {
-      if (prev != next) _dismissSearch();
+      // Order/tab switch — wipe staging with the search session.
+      if (prev != next) _dismissSearch(clearStaged: true);
     });
 
     final historyAsync =
@@ -1116,7 +1197,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       final staged = _staged[product.id];
       final countLabel = switch (staged) {
         StagedCartItem(:final weightInGrams?) =>
-          WeightOptions.phoneOrderLabel(weightInGrams),
+          WeightOptions.compactLabel(weightInGrams),
         StagedCartItem(:final quantity) => '$quantity',
         null => '0',
       };
@@ -1246,12 +1327,68 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                     key: const Key('phone-order-search-dismiss'),
                     tooltip: 'إغلاق',
                     visualDensity: VisualDensity.compact,
-                    onPressed: _dismissSearch,
+                    onPressed: () => _dismissSearch(),
                     icon: const Icon(Icons.close_rounded),
                   ),
                 ],
               ),
             ),
+            if (_staged.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: Material(
+                  key: const Key('phone-order-staged-banner'),
+                  color: palette.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'مختار للتأكيد: ${_staged.length} أصناف',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                              color: palette.accent,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          key: const Key('phone-order-staged-clear'),
+                          onPressed: _clearStaging,
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            foregroundColor: palette.muted,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text('إلغاء المحدد'),
+                        ),
+                        const SizedBox(width: 4),
+                        FilledButton(
+                          key: const Key('phone-order-staged-review-btn'),
+                          onPressed: _openStagedReview,
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text(
+                            'مراجعة وتأكيد (Enter)',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const Divider(height: 1),
             Expanded(
               child: Row(
@@ -1357,6 +1494,64 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
 
     final showClear = _popupOpen || _search.text.trim().isNotEmpty;
 
+    /// Visible when popup is closed but items remain staged across searches.
+    Widget? stagingStrip;
+    if (!_popupOpen && _staged.isNotEmpty) {
+      stagingStrip = Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+        child: Material(
+          key: const Key('phone-order-staged-strip'),
+          color: palette.accent.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'مختار للتأكيد: ${_staged.length} أصناف',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: palette.accent,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  key: const Key('phone-order-staged-strip-clear'),
+                  onPressed: _clearStaging,
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: palette.muted,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('إلغاء المحدد'),
+                ),
+                const SizedBox(width: 4),
+                FilledButton(
+                  key: const Key('phone-order-staged-strip-review'),
+                  onPressed: _openStagedReview,
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text(
+                    'مراجعة وتأكيد (Enter)',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     final searchField = Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
       child: TextField(
@@ -1379,7 +1574,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
               if (showClear)
                 TextButton(
                   key: const Key('phone-order-search-clear'),
-                  onPressed: _dismissSearch,
+                  onPressed: () => _dismissSearch(),
                   style: TextButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1409,6 +1604,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           searchField,
+          if (stagingStrip != null) stagingStrip,
           const SizedBox(height: 4),
           Expanded(
             child: Stack(
@@ -1439,6 +1635,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         searchField,
+        if (stagingStrip != null) stagingStrip,
         const SizedBox(height: 4),
         Expanded(
           child: _popupOpen

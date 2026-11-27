@@ -28,6 +28,7 @@ Future<void> showProductDetailsDialog(
   required void Function(int grams, String? notes) onConfirmWeight,
   String? initialNotes,
   int? initialGrams,
+  int? initialQuantity,
 }) {
   return showDialog<void>(
     context: context,
@@ -37,6 +38,7 @@ Future<void> showProductDetailsDialog(
       onConfirmWeight: onConfirmWeight,
       initialNotes: initialNotes,
       initialGrams: initialGrams,
+      initialQuantity: initialQuantity,
     ),
   );
 }
@@ -51,6 +53,7 @@ class ProductDetailsDialog extends StatefulWidget {
     required this.onConfirmWeight,
     this.initialNotes,
     this.initialGrams,
+    this.initialQuantity,
   });
 
   final Product product;
@@ -58,13 +61,16 @@ class ProductDetailsDialog extends StatefulWidget {
   final void Function(int grams, String? notes) onConfirmWeight;
   final String? initialNotes;
   final int? initialGrams;
+  final int? initialQuantity;
 
   @override
   State<ProductDetailsDialog> createState() => _ProductDetailsDialogState();
 }
 
 class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
-  final _quantity = TextEditingController(text: '1');
+  late final _quantity = TextEditingController(
+    text: '${(widget.initialQuantity ?? 1).clamp(1, PhoneOrderState.maxQuantity)}',
+  );
   final _quantityFocus = FocusNode();
   final _weight = TextEditingController();
   final _weightFocus = FocusNode();
@@ -129,9 +135,9 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
         }
         return;
       }
-      _quantity.selection = const TextSelection(
+      _quantity.selection = TextSelection(
         baseOffset: 0,
-        extentOffset: 1,
+        extentOffset: _quantity.text.length,
       );
       _quantityFocus.requestFocus();
     });
@@ -261,7 +267,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         duration: const Duration(seconds: 2),
-        content: Text('تمت إضافة $quantity × ${_product.name} للسلة'),
+        content: Text('تمت إضافة $quantity × ${_product.name} للتأكيد'),
       ));
   }
 
@@ -280,7 +286,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         duration: const Duration(seconds: 2),
-        content: Text('تمت إضافة $label × ${_product.name} للسلة'),
+        content: Text('تمت إضافة $label × ${_product.name} للتأكيد'),
       ));
   }
 
