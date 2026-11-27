@@ -82,6 +82,14 @@ class PhoneOrderColumn extends ConsumerWidget {
           compact: true,
           onChange: controller.detachCustomer,
           onRemove: controller.detachCustomer,
+          onSelectAddress: (updated) async {
+            // Keep supplemental fee at 0; otherwise refresh zone fee.
+            if (state.isSupplemental) {
+              controller.selectCustomer(updated);
+              return;
+            }
+            await controller.selectCustomerWithZoneFee(updated);
+          },
           onEdit: () async {
             final confirmed =
                 await showCustomerDetailsSheet(context, customer: customer);
@@ -1695,14 +1703,16 @@ class _EmptyCustomerSlot extends StatelessWidget {
 }
 
 /// The caller (name, phone, address) in one compact bar, with the button
-/// for their usual and past purchases.
-class _LockedCustomer extends StatelessWidget {
+/// for their usual and past purchases. When the customer has multiple
+/// addresses, shows a one-click switcher that also refreshes delivery fee.
+class _LockedCustomer extends ConsumerStatefulWidget {
   const _LockedCustomer({
     required this.customer,
     required this.onChange,
     required this.onRemove,
     required this.onEdit,
     required this.onShowHistory,
+    required this.onSelectAddress,
     this.isSupplemental = false,
     this.compact = false,
   });
@@ -1712,8 +1722,94 @@ class _LockedCustomer extends StatelessWidget {
   final VoidCallback onRemove;
   final VoidCallback onEdit;
   final VoidCallback onShowHistory;
+  final Future<void> Function(PhoneOrderCustomer updated) onSelectAddress;
   final bool isSupplemental;
   final bool compact;
+
+  @override
+  ConsumerState<_LockedCustomer> createState() => _LockedCustomerState();
+}
+
+class _LockedCustomerState extends ConsumerState<_LockedCustomer> {
+  List<PhoneOrderCustomerAddress> _addresses = const [];
+  var _loadingAddresses = false;
+
+  PhoneOrderCustomer get customer => widget.customer;
+  bool get compact => widget.compact;
+  bool get isSupplemental => widget.isSupplemental;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAddresses();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LockedCustomer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.customer.key != widget.customer.key ||
+        oldWidget.customer.selectedAddressId !=
+            widget.customer.selectedAddressId) {
+      _loadAddresses();
+    }
+  }
+
+  Future<void> _loadAddresses() async {
+    setState(() => _loadingAddresses = true);
+    try {
+      final details = await ref
+          .read(phoneOrdersRepositoryProvider)
+          .fetchCustomerDetails(widget.customer);
+      if (!mounted) return;
+      setState(() {
+        _addresses = details.addresses;
+        _loadingAddresses = false;
+      });
+      // First lock: bind the primary (or first) address so orders carry
+      // the exact fujitsu_address_id without opening «بيانات العميل».
+      final needsBind = customer.selectedAddressId == null ||
+          customer.fujitsuAddressId == null;
+      if (needsBind && details.addresses.isNotEmpty) {
+        final primary =
+            details.addresses.where((a) => a.isPrimary).firstOrNull ??
+                details.addresses.first;
+        final sameAddress = (customer.address ?? '').trim() ==
+                primary.address.trim() ||
+            customer.selectedAddressId == primary.id;
+        if (!sameAddress || customer.fujitsuAddressId != primary.fujitsuAddressId) {
+          await _switchAddress(primary);
+        }
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _addresses = [
+          if ((widget.customer.address ?? '').trim().isNotEmpty)
+            PhoneOrderCustomerAddress(
+              id: widget.customer.selectedAddressId ?? 'legacy',
+              address: widget.customer.address!,
+              zone: widget.customer.zone,
+              fujitsuZoneId: widget.customer.fujitsuZoneId,
+              fujitsuAddressId: widget.customer.fujitsuAddressId,
+              isPrimary: true,
+            ),
+        ];
+        _loadingAddresses = false;
+      });
+    }
+  }
+
+  Future<void> _switchAddress(PhoneOrderCustomerAddress addr) async {
+    final updated = customer.copyWith(
+      address: addr.address,
+      zone: addr.zone,
+      fujitsuZoneId: addr.fujitsuZoneId,
+      fujitsuAddressId: addr.fujitsuAddressId,
+      clearFujitsuAddressId: addr.fujitsuAddressId == null,
+      selectedAddressId: addr.id,
+    );
+    await widget.onSelectAddress(updated);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1725,11 +1821,28 @@ class _LockedCustomer extends StatelessWidget {
         .join(' - ');
     final phones = CustomerPhone.formatPhones(customer.phoneSlots, empty: '');
     final iconSize = compact ? 18.0 : 22.0;
+    final multi = _addresses.length > 1;
+    final selectedIndex = () {
+      final id = customer.selectedAddressId;
+      if (id != null) {
+        final i = _addresses.indexWhere((a) => a.id == id);
+        if (i >= 0) return i;
+      }
+      final byFujitsu = customer.fujitsuAddressId;
+      if (byFujitsu != null) {
+        final i =
+            _addresses.indexWhere((a) => a.fujitsuAddressId == byFujitsu);
+        if (i >= 0) return i;
+      }
+      final primary = _addresses.indexWhere((a) => a.isPrimary);
+      return primary >= 0 ? primary : 0;
+    }();
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         key: const Key('phone-order-locked-customer'),
-        onTap: onEdit,
+        onTap: widget.onEdit,
         borderRadius: BorderRadius.circular(10),
         child: Container(
           margin: compact ? EdgeInsets.zero : const EdgeInsets.fromLTRB(10, 8, 10, 4),
@@ -1784,17 +1897,33 @@ class _LockedCustomer extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    Text(
-                      place.isEmpty ? l10n.phoneOrderNoAddress : place,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: compact ? 12 : 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF111827),
-                        height: 1.25,
+                    if (multi)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: GestureDetector(
+                          // Keep banner onTap from swallowing the switcher.
+                          onTap: () {},
+                          child: _AddressSwitcher(
+                            addresses: _addresses,
+                            selectedIndex: selectedIndex.clamp(
+                                0, _addresses.length - 1),
+                            loading: _loadingAddresses,
+                            onSelected: _switchAddress,
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        place.isEmpty ? l10n.phoneOrderNoAddress : place,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: compact ? 12 : 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF111827),
+                          height: 1.25,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -1819,7 +1948,7 @@ class _LockedCustomer extends StatelessWidget {
                 constraints: compact
                     ? const BoxConstraints.tightFor(width: 34, height: 34)
                     : null,
-                onPressed: onShowHistory,
+                onPressed: widget.onShowHistory,
                 icon: Icon(Icons.history_rounded,
                     color: palette.accent, size: iconSize),
               ),
@@ -1830,7 +1959,7 @@ class _LockedCustomer extends StatelessWidget {
                 constraints: compact
                     ? const BoxConstraints.tightFor(width: 34, height: 34)
                     : null,
-                onPressed: onEdit,
+                onPressed: widget.onEdit,
                 icon: Icon(Icons.edit_rounded,
                     color: palette.accent, size: iconSize),
               ),
@@ -1841,7 +1970,7 @@ class _LockedCustomer extends StatelessWidget {
                 constraints: compact
                     ? const BoxConstraints.tightFor(width: 34, height: 34)
                     : null,
-                onPressed: onChange,
+                onPressed: widget.onChange,
                 icon: Icon(Icons.swap_horiz_rounded,
                     color: palette.accent, size: iconSize),
               ),
@@ -1856,7 +1985,7 @@ class _LockedCustomer extends StatelessWidget {
                   foregroundColor: Colors.red.shade700,
                   hoverColor: Colors.red.shade100,
                 ),
-                onPressed: onRemove,
+                onPressed: widget.onRemove,
                 icon: Icon(
                   Icons.person_remove_rounded,
                   color: Colors.red.shade700,
@@ -1871,6 +2000,111 @@ class _LockedCustomer extends StatelessWidget {
   }
 }
 
+/// Compact multi-address dropdown on the locked-customer banner.
+class _AddressSwitcher extends StatelessWidget {
+  const _AddressSwitcher({
+    required this.addresses,
+    required this.selectedIndex,
+    required this.onSelected,
+    this.loading = false,
+  });
+
+  final List<PhoneOrderCustomerAddress> addresses;
+  final int selectedIndex;
+  final Future<void> Function(PhoneOrderCustomerAddress addr) onSelected;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final current = addresses[selectedIndex.clamp(0, addresses.length - 1)];
+    final label =
+        'العنوان (${selectedIndex + 1} من ${addresses.length}) ▾';
+    return SizedBox(
+      width: double.infinity,
+      child: PopupMenuButton<int>(
+        key: const Key('phone-order-address-switcher'),
+        tooltip: 'تبديل عنوان التوصيل',
+        padding: EdgeInsets.zero,
+        onSelected: (i) {
+          if (i == selectedIndex) return;
+          onSelected(addresses[i]);
+        },
+        itemBuilder: (context) => [
+          for (var i = 0; i < addresses.length; i++)
+            PopupMenuItem<int>(
+              key: Key('phone-order-address-option-$i'),
+              value: i,
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  i == selectedIndex
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  size: 18,
+                  color: palette.accent,
+                ),
+                title: Text(
+                  addresses[i].address,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                subtitle: Text(
+                  [
+                    if ((addresses[i].zone ?? '').isNotEmpty)
+                      addresses[i].zone!,
+                    if (addresses[i].isPrimary) 'افتراضي',
+                  ].join(' • '),
+                  style: TextStyle(fontSize: 11, color: palette.muted),
+                ),
+              ),
+            ),
+        ],
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                current.displayLine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF111827),
+                  height: 1.25,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              key: const Key('phone-order-address-switcher-pill'),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: palette.accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+                border:
+                    Border.all(color: palette.accent.withValues(alpha: 0.35)),
+              ),
+              child: Text(
+                loading ? '…' : label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: palette.accent,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// The bottom bar: always the cart count, the total and «تأكيد وتسجيل الطلب»;
 /// opened, also the cart lines and the delivery fee.

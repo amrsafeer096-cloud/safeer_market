@@ -714,17 +714,39 @@ def ensure_address(
     address: str,
     phones: str = "",
 ) -> int:
+    """
+    Resolve Fujitsu AddressId for an order.
+
+    Prefer the exact selected ``address_id`` when it belongs to this customer
+    (order-taking may choose a non-default address). Only create a new row when
+    no matching id/text exists.
+    """
     full = truncate(address, 3000, "بدون عنوان")
     if address_id:
+        cursor.execute(
+            """
+            SELECT AddressId, FullAddress, StreetAddress
+            FROM CustomerAddresses
+            WHERE AddressId = ?
+              AND CustomerNo = ?
+              AND ISNULL(IsDisabled, 0) = 0
+            """,
+            (address_id, customer_no),
+        )
+        row = cursor.fetchone()
+        if row:
+            # Trust the taker's chosen AddressId even when the printed text
+            # differs slightly from FullAddress (structured vs free-form).
+            return int(row[0])
+
+        # Id may exist under another customer — fall through to match/create.
         cursor.execute(
             "SELECT FullAddress, StreetAddress FROM CustomerAddresses WHERE AddressId = ?",
             (address_id,),
         )
-        row = cursor.fetchone()
-        if row:
-            existing = (str(row[0] or "").strip() or str(row[1] or "").strip())
-            if existing == full.strip() or not (address or "").strip():
-                return int(address_id)
+        orphan = cursor.fetchone()
+        if orphan and not (address or "").strip():
+            return int(address_id)
 
     matched = find_matching_address(
         cursor, customer_no=customer_no, address=address
@@ -742,18 +764,8 @@ def ensure_address(
         phones=phones,
         is_primary=0,
     )
-    try:
-        cursor.execute(
-            """
-            UPDATE Customers
-            SET DefaultAddressId = ?, ModifiedBy = ?, DateModified = GETDATE(),
-                last_modified_time = GETDATE()
-            WHERE CustomerNo = ?
-            """,
-            (new_id, STAFF_USER_ID, customer_no),
-        )
-    except Exception:
-        pass
+    # Do NOT overwrite Customers.DefaultAddressId — the order may use a
+    # secondary address while the Fujitsu default stays unchanged.
     return new_id
 
 

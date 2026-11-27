@@ -214,6 +214,44 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
     setState(() => _selectedAddressId = result.id);
   }
 
+  Future<void> _setDefaultAddress(PhoneOrderCustomerAddress addr) async {
+    if (addr.fromAppAddresses || addr.id == 'legacy') return;
+    final id = addr.customerAddressId;
+    if (id == null) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(phoneOrdersRepositoryProvider).upsertCustomerAddress(
+            posCustomerId: _customer.posCustomerId,
+            userId: _customer.userId,
+            addressId: id,
+            address: addr.address,
+            zone: addr.zone,
+            branch: addr.branch,
+            governorate: addr.governorate,
+            city: addr.city,
+            building: addr.building,
+            floor: addr.floor,
+            apartment: addr.apartment,
+            latitude: addr.latitude,
+            longitude: addr.longitude,
+            fujitsuZoneId: addr.fujitsuZoneId,
+            isPrimary: true,
+          );
+      await _load();
+      if (!mounted) return;
+      setState(() {
+        _selectedAddressId = addr.id;
+        _saving = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '$error';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -327,13 +365,36 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
                                 ),
                                 secondary: addr.isPrimary
                                     ? Chip(
+                                        key: Key(
+                                            'customer-details-default-${addr.id}'),
                                         label: const Text('افتراضي',
                                             style: TextStyle(fontSize: 11)),
                                         visualDensity: VisualDensity.compact,
                                         backgroundColor: palette.accent
                                             .withValues(alpha: 0.12),
                                       )
-                                    : null,
+                                    : TextButton(
+                                        key: Key(
+                                            'customer-details-make-default-${addr.id}'),
+                                        onPressed: _saving
+                                            ? null
+                                            : () => _setDefaultAddress(addr),
+                                        style: TextButton.styleFrom(
+                                          visualDensity: VisualDensity.compact,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6),
+                                          minimumSize: const Size(0, 28),
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        child: const Text(
+                                          'تعيين كافتراضي',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
                               ),
                           if (_error != null) ...[
                             const SizedBox(height: 8),

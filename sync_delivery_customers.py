@@ -133,6 +133,463 @@ def fetch_profile_address(user_id):
     return {}
 
 
+def _to_float(v):
+    try:
+        return float(v) if v is not None and str(v).strip() != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _next_address_id(cursor):
+    """Allocate the next Fujitsu CustomerAddresses.AddressId (DocType 105)."""
+    cursor.execute(
+        """
+        UPDATE hd_sequence
+        SET Sequence = CASE
+            WHEN Sequence < (SELECT ISNULL(MAX(AddressId), 19000) FROM CustomerAddresses)
+            THEN (SELECT ISNULL(MAX(AddressId), 19000) FROM CustomerAddresses) + 1
+            ELSE Sequence + 1
+        END,
+        ModifiedTime = GETDATE()
+        OUTPUT INSERTED.Sequence
+        WHERE DocType = 105 AND Branch = 0
+        """
+    )
+    row = cursor.fetchone()
+    if row:
+        return int(row[0])
+    cursor.execute("SELECT ISNULL(MAX(AddressId), 19000) + 1 FROM CustomerAddresses")
+    return int(cursor.fetchone()[0])
+
+
+def _pos_id_by_fujitsu_customer_no(customer_nos):
+    """Map Fujitsu CustomerNo → pos_customers.id for a batch of numbers."""
+    mapping = {}
+    nos = [str(int(n)) for n in customer_nos if n is not None]
+    if not nos:
+        return mapping
+    for i in range(0, len(nos), 100):
+        chunk = nos[i : i + 100]
+        try:
+            res = (
+                supabase.table("pos_customers")
+                .select("id, fujitsu_customer_id, fujitsu_customer_no")
+                .in_("fujitsu_customer_id", chunk)
+                .execute()
+            )
+        except Exception:
+            continue
+        for row in res.data or []:
+            key = str(row.get("fujitsu_customer_id") or row.get("fujitsu_customer_no") or "")
+            if key and row.get("id") is not None:
+                mapping[key] = int(row["id"])
+    return mapping
+
+
+def pull_fujitsu_addresses_for_customers(customer_nos):
+    """
+    Pull ALL active dbo.CustomerAddresses rows for the given CustomerNo list
+    into public.customer_addresses (keyed by fujitsu_address_id).
+    """
+    nos = sorted({int(n) for n in customer_nos if n is not None})
+    if not nos:
+        return 0
+
+    pos_map = _pos_id_by_fujitsu_customer_no(nos)
+    if not pos_map:
+        return 0
+
+    conn = pyodbc.connect(connection_string)
+    cursor = conn.cursor()
+    try:
+        # Parameterized IN clause
+        placeholders = ",".join("?" for _ in nos)
+        cursor.execute(
+            f"""
+            SELECT
+                AddressId, CustomerNo, Title,
+                GovName, TownName, CityId, CityName,
+                Building, Floor, Apartment, Landmark,
+                StreetAddress, FullAddress, Notes,
+                Lon, Lat, IsPrimary, BranchId
+            FROM CustomerAddresses
+            WHERE ISNULL(IsDisabled, 0) = 0
+              AND CustomerNo IN ({placeholders})
+            ORDER BY CustomerNo ASC, AddressId ASC
+            """,
+            tuple(nos),
+        )
+        rows = cursor.fetchall() or []
+    finally:
+        cursor.close()
+        conn.close()
+
+    if not rows:
+        return 0
+
+    # Group by customer to decide default when none is IsPrimary.
+    by_customer = {}
+    for r in rows:
+        by_customer.setdefault(int(r.CustomerNo), []).append(r)
+
+    payloads = []
+    for cust_no, addrs in by_customer.items():
+        pos_id = pos_map.get(str(cust_no))
+        if pos_id is None:
+            continue
+        has_primary = any(int(getattr(a, "IsPrimary", 0) or 0) == 1 for a in addrs)
+        for idx, a in enumerate(addrs):
+            full = (a.FullAddress or a.StreetAddress or "").strip()
+            if not full:
+                continue
+            is_primary = int(getattr(a, "IsPrimary", 0) or 0) == 1
+            if not has_primary and idx == 0:
+                is_primary = True
+            zone_txt = (a.CityName or "").strip() or None
+            city_id = a.CityId
+            payloads.append(
+                {
+                    "pos_customer_id": pos_id,
+                    "fujitsu_address_id": int(a.AddressId),
+                    "address": full,
+                    "zone": zone_txt,
+                    "governorate": (a.GovName or "").strip() or None,
+                    "city": (a.TownName or "").strip() or None,
+                    "building": (a.Building or "").strip() or None,
+                    "floor": (a.Floor or "").strip() or None,
+                    "apartment": (a.Apartment or "").strip() or None,
+                    "landmark": (a.Landmark or "").strip() or None,
+                    "fujitsu_zone_id": str(int(city_id)) if city_id is not None else None,
+                    "latitude": _to_float(a.Lat),
+                    "longitude": _to_float(a.Lon),
+                    "is_primary": is_primary,
+                    "synced_to_fujitsu": True,
+                }
+            )
+
+    if not payloads:
+        return 0
+
+    upserted = 0
+    for i in range(0, len(payloads), 100):
+        chunk = payloads[i : i + 100]
+        try:
+            supabase.table("customer_addresses").upsert(
+                chunk, on_conflict="fujitsu_address_id"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            # Fallback without landmark / synced columns if migration pending.
+            msg = str(exc)
+            stripped = []
+            for row in chunk:
+                copy = dict(row)
+                if "landmark" in msg or "synced_to_fujitsu" in msg:
+                    copy.pop("landmark", None)
+                    copy.pop("synced_to_fujitsu", None)
+                stripped.append(copy)
+            try:
+                # Match existing row by fujitsu_address_id manually when unique
+                # constraint is missing: update-or-insert one by one.
+                for row in stripped:
+                    existing = (
+                        supabase.table("customer_addresses")
+                        .select("id")
+                        .eq("fujitsu_address_id", row["fujitsu_address_id"])
+                        .limit(1)
+                        .execute()
+                    )
+                    if existing.data:
+                        supabase.table("customer_addresses").update(row).eq(
+                            "id", existing.data[0]["id"]
+                        ).execute()
+                    else:
+                        supabase.table("customer_addresses").insert(row).execute()
+                    upserted += 1
+            except Exception as exc2:
+                print(f"⚠️ فشل رفع عناوين العملاء: {exc2}")
+                return upserted
+
+    # Mirror each customer's primary address onto pos_customers.
+    for cust_no, addrs in by_customer.items():
+        pos_id = pos_map.get(str(cust_no))
+        if pos_id is None:
+            continue
+        primary = next(
+            (a for a in addrs if int(getattr(a, "IsPrimary", 0) or 0) == 1),
+            addrs[0],
+        )
+        full = (primary.FullAddress or primary.StreetAddress or "").strip()
+        zone_txt = (primary.CityName or "").strip() or None
+        try:
+            supabase.table("pos_customers").update(
+                {
+                    "address": full or None,
+                    "full_address": full or None,
+                    "street": (primary.StreetAddress or "").strip() or None,
+                    "building": (primary.Building or "").strip() or None,
+                    "floor": (primary.Floor or "").strip() or None,
+                    "apartment": (primary.Apartment or "").strip() or None,
+                    "governorate": (primary.GovName or "").strip() or None,
+                    "city": (primary.TownName or "").strip() or None,
+                    "zone": zone_txt,
+                    "zone_name": zone_txt,
+                    "fujitsu_zone_id": int(primary.CityId)
+                    if primary.CityId is not None
+                    else None,
+                    "lat": _to_float(primary.Lat),
+                    "lng": _to_float(primary.Lon),
+                    "latitude": _to_float(primary.Lat),
+                    "longitude": _to_float(primary.Lon),
+                }
+            ).eq("id", pos_id).execute()
+        except Exception:
+            pass
+
+    return upserted
+
+
+def push_customer_addresses_to_fujitsu():
+    """
+    Reverse sync: customer_addresses with synced_to_fujitsu=false →
+    insert/update dbo.CustomerAddresses, then write AddressId back.
+    """
+    try:
+        res = (
+            supabase.table("customer_addresses")
+            .select(
+                "id, pos_customer_id, address, zone, governorate, city, "
+                "building, floor, apartment, landmark, fujitsu_zone_id, "
+                "fujitsu_address_id, is_primary, latitude, longitude"
+            )
+            .eq("synced_to_fujitsu", False)
+            .not_.is_("pos_customer_id", "null")
+            .limit(100)
+            .execute()
+        )
+        pending = res.data or []
+    except Exception as exc:
+        if "synced_to_fujitsu" in str(exc):
+            return
+        print(f"⚠️ قراءة عناوين غير المتزامنة: {exc}")
+        return
+
+    if not pending:
+        return
+
+    # Load linked Fujitsu customer numbers.
+    pos_ids = sorted({int(r["pos_customer_id"]) for r in pending if r.get("pos_customer_id")})
+    pos_info = {}
+    for i in range(0, len(pos_ids), 100):
+        chunk = pos_ids[i : i + 100]
+        try:
+            cres = (
+                supabase.table("pos_customers")
+                .select(
+                    "id, fujitsu_customer_id, fujitsu_customer_no, "
+                    "phone, phone2, phone3, phone4, phone5"
+                )
+                .in_("id", chunk)
+                .execute()
+            )
+        except Exception:
+            continue
+        for row in cres.data or []:
+            pos_info[int(row["id"])] = row
+
+    conn = pyodbc.connect(connection_string)
+    cursor = conn.cursor()
+    pushed = 0
+    try:
+        for addr in pending:
+            pos_id = int(addr["pos_customer_id"])
+            info = pos_info.get(pos_id)
+            if not info:
+                continue
+            cust_no_raw = info.get("fujitsu_customer_no") or info.get(
+                "fujitsu_customer_id"
+            )
+            try:
+                cust_no = int(cust_no_raw) if cust_no_raw is not None else None
+            except (TypeError, ValueError):
+                cust_no = None
+            if not cust_no:
+                # Customer not linked to Fujitsu yet — wait for customer push.
+                continue
+
+            zone_id, zone_name, town_name, gov_name = get_zone_info(
+                addr.get("fujitsu_zone_id") or 2
+            )
+            if addr.get("governorate"):
+                gov_name = str(addr["governorate"]).strip() or gov_name
+            if addr.get("city"):
+                town_name = str(addr["city"]).strip() or town_name
+            if addr.get("zone"):
+                zone_name = str(addr["zone"]).strip() or zone_name
+
+            building = str(addr.get("building") or "").strip() or None
+            floor = str(addr.get("floor") or "").strip() or None
+            apartment = str(addr.get("apartment") or "").strip() or None
+            landmark = str(addr.get("landmark") or "").strip() or None
+            street = str(addr.get("address") or "غير محدد").strip()
+            full_addr = street
+            lat_str = (
+                str(addr["latitude"]) if addr.get("latitude") is not None else None
+            )
+            lon_str = (
+                str(addr["longitude"]) if addr.get("longitude") is not None else None
+            )
+            is_primary = 1 if addr.get("is_primary") else 0
+            now = datetime.now()
+
+            phones = []
+            for key in ("phone", "phone2", "phone3", "phone4", "phone5"):
+                p = clean_phone(info.get(key) or "")
+                if p and p not in phones:
+                    phones.append(p)
+            phone_blob = " - ".join(phones) if phones else None
+
+            try:
+                existing_id = addr.get("fujitsu_address_id")
+                try:
+                    existing_id = int(existing_id) if existing_id is not None else None
+                except (TypeError, ValueError):
+                    existing_id = None
+
+                if existing_id:
+                    cursor.execute(
+                        """
+                        UPDATE CustomerAddresses
+                        SET Title = ?, GovName = ?, TownName = ?,
+                            CityId = ?, CityName = ?,
+                            Building = ?, Floor = ?, Apartment = ?,
+                            Landmark = ?, StreetAddress = ?, FullAddress = ?,
+                            AddressPhones = ?, Lon = ?, Lat = ?,
+                            IsPrimary = ?, DateModified = ?, last_modified_time = ?
+                        WHERE AddressId = ? AND CustomerNo = ?
+                        """,
+                        (
+                            "افتراضي" if is_primary else "عنوان",
+                            gov_name,
+                            town_name,
+                            zone_id,
+                            zone_name,
+                            building,
+                            floor,
+                            apartment,
+                            landmark,
+                            street,
+                            full_addr,
+                            phone_blob,
+                            lon_str,
+                            lat_str,
+                            is_primary,
+                            now,
+                            now,
+                            existing_id,
+                            cust_no,
+                        ),
+                    )
+                    if cursor.rowcount == 0:
+                        # Stale id — insert a new row instead.
+                        existing_id = None
+
+                if not existing_id:
+                    new_id = _next_address_id(cursor)
+                    cursor.execute(
+                        """
+                        INSERT INTO CustomerAddresses (
+                            AddressId, CustomerNo, Title, CountryId, CountryName,
+                            GovId, GovName, TownId, TownName,
+                            CityId, CityName, Building, Floor, Apartment,
+                            Landmark, StreetAddress, FullAddress, AddressPhones,
+                            Lon, Lat, IsPrimary, BranchId, AddedFrom, IsDisabled,
+                            NeedsConfirmation, IsConfirmed, AppVersion,
+                            DateCreated, DateModified, SourceRowVersion,
+                            CreatedRowVersion, CreatedAt, ModifiedAt,
+                            last_modified_time
+                        ) VALUES (
+                            ?, ?, ?, 0, N'مصر',
+                            1, ?, 1, ?,
+                            ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?, ?, 101, 0, 0,
+                            0, 0, '1.0.0.56',
+                            ?, ?, 0,
+                            0, 0, 0, ?
+                        )
+                        """,
+                        (
+                            new_id,
+                            cust_no,
+                            "افتراضي" if is_primary else "عنوان",
+                            gov_name,
+                            town_name,
+                            zone_id,
+                            zone_name,
+                            building,
+                            floor,
+                            apartment,
+                            landmark,
+                            street,
+                            full_addr,
+                            phone_blob,
+                            lon_str,
+                            lat_str,
+                            is_primary,
+                            now,
+                            now,
+                            now,
+                        ),
+                    )
+                    existing_id = new_id
+
+                if is_primary:
+                    try:
+                        cursor.execute(
+                            """
+                            UPDATE Customers
+                            SET DefaultAddressId = ?, DateModified = GETDATE(),
+                                last_modified_time = GETDATE()
+                            WHERE CustomerNo = ?
+                            """,
+                            (existing_id, cust_no),
+                        )
+                        # Clear other primaries in Fujitsu for this customer.
+                        cursor.execute(
+                            """
+                            UPDATE CustomerAddresses
+                            SET IsPrimary = 0, DateModified = GETDATE()
+                            WHERE CustomerNo = ? AND AddressId <> ?
+                              AND ISNULL(IsPrimary, 0) = 1
+                            """,
+                            (cust_no, existing_id),
+                        )
+                    except Exception:
+                        pass
+
+                conn.commit()
+                supabase.table("customer_addresses").update(
+                    {
+                        "fujitsu_address_id": existing_id,
+                        "synced_to_fujitsu": True,
+                    }
+                ).eq("id", addr["id"]).execute()
+                pushed += 1
+            except Exception as exc:
+                conn.rollback()
+                print(f"❌ فشل مزامنة العنوان ({addr.get('id')}) لفوجيتسو: {exc}")
+    finally:
+        cursor.close()
+        conn.close()
+
+    if pushed:
+        print(
+            f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+            f"✅ تم مزامنة ({pushed}) عنوان من سوبابيز → فوجيتسو."
+        )
+
+
 def get_next_fujitsu_ids(cursor):
     """
     حجز الرقم التالي من جدول hd_sequence الرسمي الخاص بفوجيتسو
@@ -254,15 +711,25 @@ def push_supabase_to_fujitsu(table_name):
 
                 if existing:
                     existing_no = existing[0]
-                    supabase.table(table_name).update(
-                        {
-                            "synced_to_fujitsu": True,
-                            "fujitsu_customer_id": str(existing_no),
-                        }
-                    ).eq("id", cust_id).execute()
+                    update_payload = {
+                        "synced_to_fujitsu": True,
+                        "fujitsu_customer_id": str(existing_no),
+                    }
+                    try:
+                        update_payload["fujitsu_customer_no"] = int(existing_no)
+                    except (TypeError, ValueError):
+                        pass
+                    supabase.table(table_name).update(update_payload).eq(
+                        "id", cust_id
+                    ).execute()
                     print(
                         f"ℹ️ العميل ({name} - {phone1}) موجود مسبقاً في فوجيتسو برقم ({existing_no}) -> تم ربطه."
                     )
+                    # Pull every Fujitsu address for this newly-linked customer.
+                    try:
+                        pull_fujitsu_addresses_for_customers([int(existing_no)])
+                    except Exception as exc:
+                        print(f"⚠️ سحب عناوين العميل المرتبط ({existing_no}): {exc}")
                     continue
 
                 addr = fetch_profile_address(cust_id) if table_name == "profiles" else {}
@@ -396,12 +863,49 @@ def push_supabase_to_fujitsu(table_name):
                 )
                 conn.commit()
 
-                supabase.table(table_name).update(
-                    {
-                        "synced_to_fujitsu": True,
-                        "fujitsu_customer_id": str(new_cust_no),
-                    }
-                ).eq("id", cust_id).execute()
+                update_payload = {
+                    "synced_to_fujitsu": True,
+                    "fujitsu_customer_id": str(new_cust_no),
+                }
+                try:
+                    update_payload["fujitsu_customer_no"] = int(new_cust_no)
+                except (TypeError, ValueError):
+                    pass
+                supabase.table(table_name).update(update_payload).eq(
+                    "id", cust_id
+                ).execute()
+
+                # Write the new AddressId onto the primary customer_addresses row.
+                if table_name == "pos_customers":
+                    try:
+                        primary_addr = (
+                            supabase.table("customer_addresses")
+                            .select("id")
+                            .eq("pos_customer_id", cust_id)
+                            .eq("is_primary", True)
+                            .limit(1)
+                            .execute()
+                        )
+                        target = (primary_addr.data or [None])[0]
+                        if not target:
+                            any_addr = (
+                                supabase.table("customer_addresses")
+                                .select("id")
+                                .eq("pos_customer_id", cust_id)
+                                .order("id")
+                                .limit(1)
+                                .execute()
+                            )
+                            target = (any_addr.data or [None])[0]
+                        if target:
+                            supabase.table("customer_addresses").update(
+                                {
+                                    "fujitsu_address_id": new_addr_id,
+                                    "synced_to_fujitsu": True,
+                                }
+                            ).eq("id", target["id"]).execute()
+                    except Exception:
+                        pass
 
                 print(
                     f"[{datetime.now().strftime('%I:%M:%S %p')}] "
@@ -524,6 +1028,7 @@ def pull_fujitsu_to_supabase(min_row_version):
     )
 
     batch = []
+    synced_customer_nos = []
     new_max_rv = min_row_version
 
     for r in rows:
@@ -561,15 +1066,6 @@ def pull_fujitsu_to_supabase(min_row_version):
         full_addr = (r.FullAddress or r.StreetAddress or "").strip()
         zone_txt = (r.CityName or "").strip() or None
 
-        def to_float(v):
-            try:
-                return float(v) if v is not None and str(v).strip() != "" else None
-            except ValueError:
-                return None
-
-        lat_val = to_float(r.Lat)
-        lon_val = to_float(r.Lon)
-
         row_payload = {
             "fujitsu_customer_id": str(c_no),
             "fujitsu_customer_no": c_no,
@@ -602,6 +1098,7 @@ def pull_fujitsu_to_supabase(min_row_version):
             "fujitsu_row_version": rv if rv else None,
         }
         batch.append(row_payload)
+        synced_customer_nos.append(c_no)
 
     if batch:
         try:
@@ -635,6 +1132,17 @@ def pull_fujitsu_to_supabase(min_row_version):
             else:
                 print(f"❌ خطأ أثناء رفع العملاء لسوبابيز: {e}")
                 return min_row_version
+
+        # Pull ALL active addresses for every customer in this batch.
+        try:
+            n_addr = pull_fujitsu_addresses_for_customers(synced_customer_nos)
+            if n_addr:
+                print(
+                    f"[{datetime.now().strftime('%I:%M:%S %p')}] "
+                    f"📍 تم مزامنة ({n_addr}) عنوان من CustomerAddresses."
+                )
+        except Exception as exc:
+            print(f"⚠️ مزامنة عناوين العملاء: {exc}")
 
     return new_max_rv
 
@@ -715,6 +1223,8 @@ if __name__ == "__main__":
             # 1) نقل العملاء الجداد من التطبيق/الداشبورد إلى فوجيتسو
             push_supabase_to_fujitsu("pos_customers")
             push_supabase_to_fujitsu("profiles")
+            # 1b) عناوين جديدة/معدّلة من الداشبورد → CustomerAddresses
+            push_customer_addresses_to_fujitsu()
 
             # 2) سحب العملاء من v_customers (Trusty SyncCustomerCache / RowVersion)
             new_rv = pull_fujitsu_to_supabase(last_row_version)
