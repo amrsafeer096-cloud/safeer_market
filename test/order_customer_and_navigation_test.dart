@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:safeer_market/core/config/store_location.dart';
 import 'package:safeer_market/core/routing/app_routes.dart';
 import 'package:safeer_market/core/theme/app_theme.dart';
+import 'package:safeer_market/features/addresses/data/services/free_osm_place_search_service.dart';
 import 'package:safeer_market/features/addresses/data/services/google_places_search_service.dart';
 import 'package:safeer_market/features/addresses/domain/services/location_service.dart';
 import 'package:safeer_market/features/addresses/domain/services/place_search_service.dart';
@@ -362,6 +363,121 @@ void main() {
       await tester.tap(find.text('تأكيد الموقع'));
       await tester.pumpAndSettle();
       expect(confirmed?.point, const LatLng(_lat, _lng));
+    });
+  });
+
+  group('FreeOsmPlaceSearchService', () {
+    test('encodes & in Photon query and parses GeoJSON null-safely', () async {
+      late Uri seen;
+      final service = FreeOsmPlaceSearchService(
+        client: MockClient((request) async {
+          seen = request.url;
+          expect(request.headers['User-Agent'], 'SafeerMarketApp/1.0');
+          return http.Response.bytes(
+            utf8.encode(jsonEncode({
+              'features': [
+                {
+                  'geometry': {
+                    'coordinates': [_lng, _lat],
+                  },
+                  'properties': {
+                    'name': 'Sama & Hala',
+                    'street': 'Abbas El Akkad',
+                    'city': 'Cairo',
+                    'district': 'Nasr City',
+                  },
+                },
+                {
+                  'geometry': {'coordinates': [null, null]},
+                  'properties': {'name': 'broken'},
+                },
+                {
+                  'properties': {'name': 'no geometry'},
+                },
+              ],
+            })),
+            200,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final suggestions =
+          await service.suggest('sama & hala', near: const LatLng(_lat, _lng));
+      expect(seen.host, 'photon.komoot.io');
+      expect(seen.queryParameters['q'], 'sama & hala');
+      expect(seen.queryParameters['limit'], '8');
+      expect(seen.queryParameters['bbox'], '24.7,22.0,36.9,31.7');
+      expect(suggestions, hasLength(1));
+      expect(suggestions.single.title, 'Sama & Hala');
+      expect(suggestions.single.subtitle, contains('Nasr City'));
+      expect(suggestions.single.point, const LatLng(_lat, _lng));
+      expect(
+        await service.locate(suggestions.single),
+        const LatLng(_lat, _lng),
+      );
+    });
+
+    test('falls back to Nominatim when Photon returns nothing', () async {
+      final hosts = <String>[];
+      final service = FreeOsmPlaceSearchService(
+        client: MockClient((request) async {
+          hosts.add(request.url.host);
+          if (request.url.host.contains('photon')) {
+            return http.Response.bytes(
+              utf8.encode(jsonEncode({'features': []})),
+              200,
+              request: request,
+            );
+          }
+          expect(request.headers['User-Agent'], 'SafeerMarketApp/1.0');
+          expect(request.headers['Accept-Language'], 'ar,en');
+          expect(request.url.queryParameters['countrycodes'], 'eg');
+          expect(request.url.queryParameters['q'], 'sama & hala');
+          return http.Response.bytes(
+            utf8.encode(jsonEncode([
+              {
+                'lat': '$_lat',
+                'lon': '$_lng',
+                'display_name': 'Sama Hala, Nasr City, Cairo',
+                'address': {
+                  'name': 'Sama Hala',
+                  'suburb': 'Nasr City',
+                  'city': 'Cairo',
+                },
+              },
+            ])),
+            200,
+            request: request,
+          );
+        }),
+      );
+
+      final suggestions = await service.suggest('sama & hala');
+      expect(hosts, ['photon.komoot.io', 'nominatim.openstreetmap.org']);
+      expect(suggestions.single.title, 'Sama Hala');
+      expect(suggestions.single.point, const LatLng(_lat, _lng));
+    });
+
+    test('parses raw coordinates and Google Maps URLs', () async {
+      final service = FreeOsmPlaceSearchService(
+        client: MockClient((_) async => fail('network should not run')),
+      );
+
+      final coords = await service.suggest('30.0561, 31.3301');
+      expect(coords.single.point, const LatLng(_lat, _lng));
+      expect(coords.single.subtitle, 'إحداثيات');
+
+      final maps = await service.suggest(
+        'https://maps.google.com/?q=30.0561,31.3301',
+      );
+      expect(maps.single.point, const LatLng(_lat, _lng));
+
+      final at = await service.suggest(
+        'https://www.google.com/maps/@30.0561,31.3301,17z',
+      );
+      expect(at.single.point, const LatLng(_lat, _lng));
     });
   });
 

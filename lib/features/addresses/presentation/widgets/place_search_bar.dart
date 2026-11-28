@@ -15,7 +15,7 @@ class PlaceSearchBar extends ConsumerStatefulWidget {
   const PlaceSearchBar({super.key, required this.near, required this.onPicked});
 
   /// How long typing pauses before a search runs.
-  static const debounce = Duration(milliseconds: 400);
+  static const debounce = Duration(milliseconds: 350);
 
   /// Where the map is, so nearby places come first.
   final LatLng near;
@@ -69,16 +69,26 @@ class _PlaceSearchBarState extends ConsumerState<PlaceSearchBar> {
           .read(placeSearchServiceProvider)
           .suggest(text, near: widget.near);
       if (!mounted || request != _request) return;
+      // Pasted Maps URL / raw coordinates → jump the pin immediately.
+      if (results.length == 1 &&
+          results.first.point != null &&
+          results.first.subtitle == 'إحداثيات') {
+        await _pick(results.first);
+        return;
+      }
       setState(() {
         _loading = false;
         _results = results;
       });
     } catch (error) {
       if (!mounted || request != _request) return;
+      final l10n = AppLocalizations.of(context);
       setState(() {
         _loading = false;
         _results = null;
-        _error = AppLocalizations.of(context)!.mapSearchFailed('$error');
+        _error = l10n == null
+            ? '$error'
+            : l10n.mapSearchFailed('$error');
       });
     }
   }
@@ -99,9 +109,11 @@ class _PlaceSearchBarState extends ConsumerState<PlaceSearchBar> {
       widget.onPicked(point);
     } catch (error) {
       if (!mounted || request != _request) return;
+      final l10n = AppLocalizations.of(context);
       setState(() {
         _loading = false;
-        _error = AppLocalizations.of(context)!.mapSearchFailed('$error');
+        _error =
+            l10n == null ? '$error' : l10n.mapSearchFailed('$error');
       });
     }
   }
@@ -158,7 +170,7 @@ class _PlaceSearchBarState extends ConsumerState<PlaceSearchBar> {
             ),
           ),
         ),
-        if (_error != null || results != null)
+        if (_error case final error?)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Material(
@@ -167,46 +179,55 @@ class _PlaceSearchBarState extends ConsumerState<PlaceSearchBar> {
               shadowColor: Colors.black26,
               borderRadius: BorderRadius.circular(14),
               clipBehavior: Clip.antiAlias,
-              child: _error != null
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(error, style: TextStyle(color: palette.muted)),
+              ),
+            ),
+          )
+        else if (results != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Material(
+              color: palette.card,
+              elevation: 3,
+              shadowColor: Colors.black26,
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: results.isEmpty
                   ? Padding(
                       padding: const EdgeInsets.all(14),
-                      child:
-                          Text(_error!, style: TextStyle(color: palette.muted)),
+                      child: Text(l10n.mapSearchNoResults,
+                          style: TextStyle(color: palette.muted)),
                     )
-                  : results!.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Text(l10n.mapSearchNoResults,
-                              style: TextStyle(color: palette.muted)),
-                        )
-                      : ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 280),
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            padding: EdgeInsets.zero,
-                            itemCount: results.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final place = results[index];
-                              return ListTile(
-                                key: Key('map-search-result-$index'),
-                                dense: true,
-                                leading: Icon(Icons.place_outlined,
-                                    color: palette.accent),
-                                title: Text(place.title,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w700)),
-                                subtitle: place.subtitle == null
-                                    ? null
-                                    : Text(place.subtitle!,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis),
-                                onTap: () => _pick(place),
-                              );
-                            },
-                          ),
-                        ),
+                  : ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 280),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        itemCount: results.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final place = results[index];
+                          final subtitle = place.subtitle;
+                          return ListTile(
+                            key: Key('map-search-result-$index'),
+                            dense: true,
+                            leading: Icon(Icons.place_outlined,
+                                color: palette.accent),
+                            title: Text(place.title,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                            subtitle: subtitle == null
+                                ? null
+                                : Text(subtitle,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis),
+                            onTap: () => _pick(place),
+                          );
+                        },
+                      ),
+                    ),
             ),
           ),
       ],

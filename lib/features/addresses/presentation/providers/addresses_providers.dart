@@ -1,13 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/config/app_config.dart';
 import '../../../../core/l10n/l10n.dart';
 import '../../../../core/network/supabase_providers.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../data/repositories/supabase_addresses_repository.dart';
 import '../../data/services/device_location_service.dart';
-import '../../data/services/device_place_search_service.dart';
-import '../../data/services/google_places_search_service.dart';
+import '../../data/services/free_osm_place_search_service.dart';
 import '../../domain/entities/address.dart';
 import '../../domain/repositories/addresses_repository.dart';
 import '../../domain/services/location_service.dart';
@@ -21,15 +19,9 @@ final locationServiceProvider = Provider<LocationService>(
   (ref) => DeviceLocationService(),
 );
 
-/// The map's search bar: Google Places when a key is configured, otherwise
-/// the device's geocoder.
+/// The map's search bar: free Photon + Nominatim (no API key).
 final placeSearchServiceProvider = Provider<PlaceSearchService>((ref) {
-  const key = AppConfig.googlePlacesApiKey;
-  if (key.isEmpty) return const DevicePlaceSearchService();
-  return GooglePlacesSearchService(
-    apiKey: key,
-    languageCode: L10n.localeName,
-  );
+  return FreeOsmPlaceSearchService();
 });
 
 /// The signed-in user's saved addresses; empty for guests.

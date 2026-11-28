@@ -28,10 +28,8 @@ abstract final class AppConfig {
   /// match the intent filter in AndroidManifest.xml / URL type in Info.plist.
   static const authRedirectUrl = 'io.supabase.safeermarket://login-callback/';
 
-  /// Key for Google Places API (New), used by the map's place search
-  /// (`--dart-define=GOOGLE_PLACES_API_KEY=...`). Enable "Places API (New)"
-  /// for it in Google Cloud. Without it, search falls back to the device's
-  /// geocoder.
+  /// Legacy Google Places API key. Address map search now uses free Photon +
+  /// Nominatim and ignores this define.
   static const googlePlacesApiKey = String.fromEnvironment(
     'GOOGLE_PLACES_API_KEY',
   );
