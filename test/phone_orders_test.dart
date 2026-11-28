@@ -99,6 +99,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     String? governorate,
     String? city,
     String? building,
+    String? street,
+    String? landmark,
     String? floor,
     String? apartment,
     double? latitude,
@@ -122,6 +124,8 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
       'governorate': governorate,
       'city': city,
       'building': building,
+      'street': street,
+      'landmark': landmark,
       'floor': floor,
       'apartment': apartment,
       'latitude': latitude,
@@ -197,8 +201,11 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     String? governorate,
     String? city,
     String? building,
+    String? street,
+    String? landmark,
     String? floor,
     String? apartment,
+    String? notes,
     double? latitude,
     double? longitude,
     String? fujitsuZoneId,
@@ -212,8 +219,11 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
       governorate: governorate,
       city: city,
       building: building,
+      street: street,
+      landmark: landmark,
       floor: floor,
       apartment: apartment,
+      notes: notes,
       latitude: latitude,
       longitude: longitude,
       fujitsuZoneId: fujitsuZoneId,
@@ -1031,10 +1041,14 @@ void main() {
       expect(text('address-customer-name'), 'سارة علي');
       expect(text('address-customer-phone'), '01198765432');
 
-      // Right side: building / floor / apartment. Left side: dropdowns.
+      // Right side: building / floor / apartment / street. Left: dropdowns.
       expect(find.text('المبنى'), findsOneWidget);
       expect(find.text('الدور'), findsOneWidget);
-      expect(find.text('الشقة'), findsOneWidget);
+      expect(find.text('شقة'), findsOneWidget);
+      expect(find.text('الشارع'), findsOneWidget);
+      expect(find.text('علامة مميزة'), findsOneWidget);
+      expect(find.text('أقرب فرع'), findsOneWidget);
+      expect(find.byKey(const Key('address-composed')), findsOneWidget);
       expect(
         tester.getCenter(find.byKey(const Key('address-building'))).dx,
         greaterThan(
@@ -1048,16 +1062,9 @@ void main() {
       await tester.enterText(find.byKey(const Key('address-building')), '12');
       await tester.enterText(find.byKey(const Key('address-floor')), '3');
       await tester.enterText(find.byKey(const Key('address-apartment')), '7');
-
-      await tester.tap(find.byKey(const Key('address-city')));
-      await tester.pumpAndSettle();
-      for (final city in ['مدينة نصر', 'مصر الجديدة', 'التجمع الخامس']) {
-        expect(find.text(city), findsWidgets, reason: city);
-      }
-      await tester.tap(find.text('مدينة نصر').last);
       await tester.pumpAndSettle();
 
-      // The zones come from delivery_zones, with their delivery fee.
+      // City defaults to مدينة نصر; zones load for that city.
       await tester.tap(find.byKey(const ValueKey('address-area-مدينة نصر')));
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('الحي السابع').last);
@@ -1072,19 +1079,23 @@ void main() {
       expect(repository.created.single['zone'], 'الحي السابع');
       expect(
         repository.created.single['address'],
-        'مبنى 12، الدور 3، شقة 7، الحي السابع، مدينة نصر، القاهرة',
+        '12 - الدور 3 - شقة 7 - الحي السابع - مدينة نصر - القاهرة',
       );
       expect(repository.createdDetails.single, {
         // The chosen zone's Fujitsu id is saved with the customer.
         'fujitsu_zone_id': 'Z7',
         'phone2': '01255555555',
         'phone3': null,
+        'phone4': null,
+        'phone5': null,
         'notes': null,
-        'branch': null,
+        'branch': 'حي الزهور',
         'type': PhoneOrderCustomerType.vip,
         'governorate': 'القاهرة',
         'city': 'مدينة نصر',
         'building': '12',
+        'street': null,
+        'landmark': null,
         'floor': '3',
         'apartment': '7',
         'latitude': null,

@@ -247,6 +247,12 @@ def pull_fujitsu_addresses_for_customers(customer_nos):
                 is_primary = True
             zone_txt = (a.CityName or "").strip() or None
             city_id = a.CityId
+            street = (a.StreetAddress or "").strip() or None
+            if street and street.startswith("ش "):
+                street_raw = street[2:].strip() or street
+            else:
+                street_raw = street
+            notes_val = (str(a.Notes).strip() if getattr(a, "Notes", None) else None) or None
             payloads.append(
                 {
                     "pos_customer_id": pos_id,
@@ -256,9 +262,11 @@ def pull_fujitsu_addresses_for_customers(customer_nos):
                     "governorate": (a.GovName or "").strip() or None,
                     "city": (a.TownName or "").strip() or None,
                     "building": (a.Building or "").strip() or None,
+                    "street": street_raw,
                     "floor": (a.Floor or "").strip() or None,
                     "apartment": (a.Apartment or "").strip() or None,
                     "landmark": (a.Landmark or "").strip() or None,
+                    "notes": notes_val,
                     "fujitsu_zone_id": str(int(city_id)) if city_id is not None else None,
                     "latitude": _to_float(a.Lat),
                     "longitude": _to_float(a.Lon),
@@ -284,9 +292,10 @@ def push_customer_addresses_to_fujitsu():
         res = (
             supabase.table("customer_addresses")
             .select(
-                "id, pos_customer_id, address, zone, governorate, city, "
-                "building, floor, apartment, landmark, fujitsu_zone_id, "
-                "fujitsu_address_id, is_primary, latitude, longitude"
+                "id, pos_customer_id, address, zone, branch, governorate, city, "
+                "building, street, floor, apartment, landmark, notes, "
+                "fujitsu_zone_id, fujitsu_address_id, is_primary, "
+                "latitude, longitude"
             )
             .eq("synced_to_fujitsu", False)
             .not_.is_("pos_customer_id", "null")
@@ -357,8 +366,23 @@ def push_customer_addresses_to_fujitsu():
             floor = str(addr.get("floor") or "").strip() or None
             apartment = str(addr.get("apartment") or "").strip() or None
             landmark = str(addr.get("landmark") or "").strip() or None
-            street = str(addr.get("address") or "غير محدد").strip()
-            full_addr = street
+            notes = str(addr.get("notes") or "").strip() or None
+            street_raw = str(addr.get("street") or "").strip()
+            street = _fujitsu_street_part(street_raw) if street_raw else None
+            full_addr = str(addr.get("address") or "").strip()
+            if not full_addr:
+                full_addr = compose_fujitsu_address(
+                    building=building,
+                    street=street_raw or None,
+                    landmark=landmark,
+                    floor=floor,
+                    apartment=apartment,
+                    zone=zone_name,
+                    city=town_name,
+                    governorate=gov_name,
+                ) or "غير محدد"
+            if not street:
+                street = full_addr
             lat_str = (
                 str(addr["latitude"]) if addr.get("latitude") is not None else None
             )
@@ -390,7 +414,7 @@ def push_customer_addresses_to_fujitsu():
                             CityId = ?, CityName = ?,
                             Building = ?, Floor = ?, Apartment = ?,
                             Landmark = ?, StreetAddress = ?, FullAddress = ?,
-                            AddressPhones = ?, Lon = ?, Lat = ?,
+                            Notes = ?, AddressPhones = ?, Lon = ?, Lat = ?,
                             IsPrimary = ?, DateModified = ?, last_modified_time = ?
                         WHERE AddressId = ? AND CustomerNo = ?
                         """,
@@ -406,6 +430,7 @@ def push_customer_addresses_to_fujitsu():
                             landmark,
                             street,
                             full_addr,
+                            notes,
                             phone_blob,
                             lon_str,
                             lat_str,
@@ -428,7 +453,8 @@ def push_customer_addresses_to_fujitsu():
                             AddressId, CustomerNo, Title, CountryId, CountryName,
                             GovId, GovName, TownId, TownName,
                             CityId, CityName, Building, Floor, Apartment,
-                            Landmark, StreetAddress, FullAddress, AddressPhones,
+                            Landmark, StreetAddress, FullAddress, Notes,
+                            AddressPhones,
                             Lon, Lat, IsPrimary, BranchId, AddedFrom, IsDisabled,
                             NeedsConfirmation, IsConfirmed, AppVersion,
                             DateCreated, DateModified, SourceRowVersion,
@@ -439,6 +465,7 @@ def push_customer_addresses_to_fujitsu():
                             1, ?, 1, ?,
                             ?, ?, ?, ?, ?,
                             ?, ?, ?, ?,
+                            ?,
                             ?, ?, ?, 101, 0, 0,
                             0, 0, '1.0.0.56',
                             ?, ?, 0,
@@ -459,6 +486,7 @@ def push_customer_addresses_to_fujitsu():
                             landmark,
                             street,
                             full_addr,
+                            notes,
                             phone_blob,
                             lon_str,
                             lat_str,
@@ -668,31 +696,46 @@ def push_supabase_to_fujitsu(table_name):
                 )
                 zone_id, zone_name, town_name, gov_name = get_zone_info(raw_zone_id)
 
-                building = str(cust.get("building") or addr.get("building") or "").strip()
-                floor = str(cust.get("floor") or addr.get("floor") or "").strip()
-                apartment = str(cust.get("apartment") or addr.get("apartment") or "").strip()
-                street = str(
+                building = (
+                    str(cust.get("building") or addr.get("building") or "").strip()
+                    or None
+                )
+                floor = (
+                    str(cust.get("floor") or addr.get("floor") or "").strip() or None
+                )
+                apartment = (
+                    str(cust.get("apartment") or addr.get("apartment") or "").strip()
+                    or None
+                )
+                street_raw = str(
                     cust.get("street")
                     or cust.get("street_address")
                     or addr.get("street")
-                    or cust.get("address")
-                    or cust.get("full_address")
-                    or "غير محدد"
+                    or ""
                 ).strip()
-                landmark = cust.get("landmark") or addr.get("landmark") or None
-
-                parts = []
-                if building:
-                    parts.append(building)
-                if street:
-                    parts.append(street)
-                if floor:
-                    parts.append(f"الدور {floor}")
-                if apartment:
-                    parts.append(f"شقة {apartment}")
-                if zone_name:
-                    parts.append(zone_name)
-                full_addr = " - ".join(parts) if parts else street
+                street = _fujitsu_street_part(street_raw) if street_raw else None
+                landmark = (
+                    str(cust.get("landmark") or addr.get("landmark") or "").strip()
+                    or None
+                )
+                gov_for_line = str(cust.get("governorate") or gov_name or "").strip() or None
+                city_for_line = str(cust.get("city") or town_name or "").strip() or None
+                full_addr = str(
+                    cust.get("address") or cust.get("full_address") or ""
+                ).strip()
+                if not full_addr:
+                    full_addr = compose_fujitsu_address(
+                        building=building,
+                        street=street_raw or None,
+                        landmark=landmark,
+                        floor=floor,
+                        apartment=apartment,
+                        zone=zone_name,
+                        city=city_for_line,
+                        governorate=gov_for_line,
+                    ) or "غير محدد"
+                if not street:
+                    street = full_addr
 
                 lat = cust.get("latitude") or cust.get("lat") or addr.get("lat")
                 lon = cust.get("longitude") or cust.get("lng") or addr.get("lng")
@@ -744,13 +787,17 @@ def push_supabase_to_fujitsu(table_name):
                     ),
                 )
 
+                addr_notes = (
+                    str(cust.get("address_notes") or notes or "").strip() or None
+                )
                 cursor.execute(
                     """
                     INSERT INTO CustomerAddresses (
                         AddressId, CustomerNo, Title, CountryId, CountryName,
                         GovId, GovName, TownId, TownName,
                         CityId, CityName, Building, Floor, Apartment,
-                        Landmark, StreetAddress, FullAddress, AddressPhones, Lon, Lat,
+                        Landmark, StreetAddress, FullAddress, Notes,
+                        AddressPhones, Lon, Lat,
                         IsPrimary, BranchId, AddedFrom, IsDisabled,
                         NeedsConfirmation, IsConfirmed, AppVersion,
                         DateCreated, DateModified, SourceRowVersion,
@@ -759,7 +806,8 @@ def push_supabase_to_fujitsu(table_name):
                         ?, ?, N'افتراضي', 0, N'مصر',
                         1, ?, 1, ?,
                         ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?,
                         1, 101, 0, 0,
                         0, 0, '1.0.0.56',
                         ?, ?, 0,
@@ -779,6 +827,7 @@ def push_supabase_to_fujitsu(table_name):
                         landmark,
                         street,
                         full_addr,
+                        addr_notes,
                         phone_blob if phone_blob else None,
                         lon_str,
                         lat_str,
@@ -1215,12 +1264,62 @@ def _fetch_all_active_fujitsu_addresses(chunk_size=5000):
         conn.close()
 
 
+def _fujitsu_street_part(street):
+    """Prefix street with «ش » unless the caller already typed it."""
+    t = (street or "").strip()
+    if not t:
+        return None
+    if t == "ش" or t.startswith("ش ") or t.startswith("ش."):
+        return t
+    return f"ش {t}"
+
+
+def compose_fujitsu_address(
+    building=None,
+    street=None,
+    landmark=None,
+    floor=None,
+    apartment=None,
+    zone=None,
+    city=None,
+    governorate=None,
+):
+    """Exact TrustyDelivery full-address formula (join with « - »)."""
+    parts = []
+    b = (building or "").strip()
+    if b:
+        parts.append(b)
+    s = _fujitsu_street_part(street)
+    if s:
+        parts.append(s)
+    lm = (landmark or "").strip()
+    if lm:
+        parts.append(lm if lm.startswith("ع.م") else f"ع.م {lm}")
+    f = (floor or "").strip()
+    if f:
+        parts.append(f"الدور {f}")
+    a = (apartment or "").strip()
+    if a:
+        parts.append(f"شقة {a}")
+    for value in (zone, city, governorate):
+        v = (value or "").strip()
+        if v:
+            parts.append(v)
+    return " - ".join(parts) if parts else None
+
+
 def _address_row_to_payload(a, pos_id, is_primary):
     full = (a.FullAddress or a.StreetAddress or "").strip()
     if not full:
         return None
     zone_txt = (a.CityName or "").strip() or None
     city_id = a.CityId
+    street = (a.StreetAddress or "").strip() or None
+    # Prefer raw street without forced prefix when pulling back.
+    if street and street.startswith("ش "):
+        street_raw = street[2:].strip() or street
+    else:
+        street_raw = street
     return {
         "pos_customer_id": pos_id,
         "fujitsu_address_id": int(a.AddressId),
@@ -1229,9 +1328,11 @@ def _address_row_to_payload(a, pos_id, is_primary):
         "governorate": (a.GovName or "").strip() or None,
         "city": (a.TownName or "").strip() or None,
         "building": (a.Building or "").strip() or None,
+        "street": street_raw,
         "floor": (a.Floor or "").strip() or None,
         "apartment": (a.Apartment or "").strip() or None,
         "landmark": (a.Landmark or "").strip() or None,
+        "notes": (str(a.Notes).strip() if getattr(a, "Notes", None) else None) or None,
         "fujitsu_zone_id": str(int(city_id)) if city_id is not None else None,
         "latitude": _to_float(a.Lat),
         "longitude": _to_float(a.Lon),

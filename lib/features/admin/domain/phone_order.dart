@@ -84,8 +84,11 @@ class PhoneOrderCustomerAddress {
     this.governorate,
     this.city,
     this.building,
+    this.street,
+    this.landmark,
     this.floor,
     this.apartment,
+    this.notes,
     this.latitude,
     this.longitude,
     this.fujitsuZoneId,
@@ -102,8 +105,11 @@ class PhoneOrderCustomerAddress {
   final String? governorate;
   final String? city;
   final String? building;
+  final String? street;
+  final String? landmark;
   final String? floor;
   final String? apartment;
+  final String? notes;
   final double? latitude;
   final double? longitude;
   final String? fujitsuZoneId;

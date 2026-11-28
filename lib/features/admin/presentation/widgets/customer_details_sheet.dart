@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../auth/domain/customer_phone.dart';
 import '../../domain/phone_order.dart';
 import '../providers/phone_order_providers.dart';
 import 'customer_phones_editor.dart';
+import 'structured_address_fields.dart';
 
 String? _optional(TextEditingController c) =>
     c.text.trim().isEmpty ? null : c.text.trim();
@@ -230,8 +230,11 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
             governorate: addr.governorate,
             city: addr.city,
             building: addr.building,
+            street: addr.street,
+            landmark: addr.landmark,
             floor: addr.floor,
             apartment: addr.apartment,
+            notes: addr.notes,
             latitude: addr.latitude,
             longitude: addr.longitude,
             fujitsuZoneId: addr.fujitsuZoneId,
@@ -462,7 +465,8 @@ class _CustomerDetailsSheetState extends ConsumerState<CustomerDetailsSheet> {
   }
 }
 
-/// Compact add/edit address form used from «بيانات العميل».
+/// Add/edit address form used from «بيانات العميل» — Fujitsu structured
+/// fields with customer name/code pre-filled (read-only) at the top.
 class _AddressEditorDialog extends ConsumerStatefulWidget {
   const _AddressEditorDialog({
     required this.customer,
@@ -479,35 +483,38 @@ class _AddressEditorDialog extends ConsumerStatefulWidget {
 
 class _AddressEditorDialogState extends ConsumerState<_AddressEditorDialog> {
   final _form = GlobalKey<FormState>();
-  late final _building =
-      TextEditingController(text: widget.existing?.building ?? '');
-  late final _floor = TextEditingController(text: widget.existing?.floor ?? '');
-  late final _apartment =
-      TextEditingController(text: widget.existing?.apartment ?? '');
-  late final _branch =
-      TextEditingController(text: widget.existing?.branch ?? '');
-  late final _addressLine =
-      TextEditingController(text: widget.existing?.address ?? '');
-
-  String? _governorate;
-  String? _city;
-  String? _area;
+  late final StructuredAddressControllers _address;
   var _saving = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _governorate = widget.existing?.governorate;
-    _city = widget.existing?.city;
-    _area = widget.existing?.fujitsuZoneId ?? widget.existing?.zone;
+    final existing = widget.existing;
+    _address = StructuredAddressControllers(
+      building: existing?.building,
+      floor: existing?.floor,
+      apartment: existing?.apartment,
+      street: existing?.street,
+      landmark: existing?.landmark,
+      branch: existing?.branch ?? 'حي الزهور',
+      notes: existing?.notes,
+      composed: existing?.address,
+      governorate: existing?.governorate ?? 'القاهرة',
+      city: existing?.city ?? 'مدينة نصر',
+      area: existing?.fujitsuZoneId ?? existing?.zone,
+    );
+    if ((existing?.address ?? '').trim().isNotEmpty) {
+      _address.autoCompose = false;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_address.autoCompose) _syncComposed();
+    });
   }
 
   @override
   void dispose() {
-    for (final c in [_building, _floor, _apartment, _branch, _addressLine]) {
-      c.dispose();
-    }
+    _address.dispose();
     super.dispose();
   }
 
@@ -516,41 +523,37 @@ class _AddressEditorDialogState extends ConsumerState<_AddressEditorDialog> {
 
   String get _currentGovernorate {
     final geo = _geo;
-    final chosen = _governorate;
+    final chosen = _address.governorate;
     return chosen != null && geo.governorates.contains(chosen)
         ? chosen
         : geo.governorates.first;
   }
 
   PhoneOrderArea? get _selectedZone {
-    final id = _area;
+    final id = _address.area;
     if (id == null) return null;
-    final zones =
-        ref.read(phoneOrderAreasProvider(_city)).valueOrNull ?? const [];
+    final zones = ref
+            .read(phoneOrderAreasProvider(_address.city))
+            .valueOrNull ??
+        const [];
     for (final z in zones) {
       if (z.id == id || z.name == id) return z;
     }
     return null;
   }
 
-  String _composeLine() {
-    final typed = _optional(_addressLine);
-    if (typed != null) return typed;
-    final zone = _selectedZone;
-    final parts = [
-      if (_optional(_building) case final b?) 'مبنى $b',
-      if (_optional(_floor) case final f?) 'الدور $f',
-      if (_optional(_apartment) case final a?) 'شقة $a',
-      if (zone?.name != null) zone!.name,
-      if (_city != null) _city,
-      _currentGovernorate,
-    ];
-    return parts.join('، ');
+  void _syncComposed() {
+    _address.refreshComposed(
+      zoneName: _selectedZone?.name,
+      governorateFallback: _currentGovernorate,
+    );
+    if (mounted) setState(() {});
   }
 
   Future<void> _save() async {
     if (_saving || !_form.currentState!.validate()) return;
-    final line = _composeLine().trim();
+    _syncComposed();
+    final line = _address.composed.text.trim();
     if (line.isEmpty) {
       setState(() => _error = 'أدخل عنواناً أو اختر المنطقة');
       return;
@@ -561,22 +564,25 @@ class _AddressEditorDialogState extends ConsumerState<_AddressEditorDialog> {
     });
     try {
       final zone = _selectedZone;
-      final saved = await ref.read(phoneOrdersRepositoryProvider).upsertCustomerAddress(
-            posCustomerId: widget.customer.posCustomerId,
-            userId: widget.customer.userId,
-            addressId: widget.existing?.customerAddressId,
-            address: line,
-            zone: zone?.name ?? _city,
-            branch: _optional(_branch),
-            governorate: _currentGovernorate,
-            city: _city,
-            building: _optional(_building),
-            floor: _optional(_floor),
-            apartment: _optional(_apartment),
-            fujitsuZoneId: zone?.fujitsuZoneId,
-            isPrimary: widget.existing?.isPrimary ??
-                true, // first / edited primary stays primary when none
-          );
+      final saved =
+          await ref.read(phoneOrdersRepositoryProvider).upsertCustomerAddress(
+                posCustomerId: widget.customer.posCustomerId,
+                userId: widget.customer.userId,
+                addressId: widget.existing?.customerAddressId,
+                address: line,
+                zone: zone?.name ?? _address.city,
+                branch: _address.optional(_address.branch),
+                governorate: _currentGovernorate,
+                city: _address.city,
+                building: _address.optional(_address.building),
+                street: _address.optional(_address.street),
+                landmark: _address.optional(_address.landmark),
+                floor: _address.optional(_address.floor),
+                apartment: _address.optional(_address.apartment),
+                notes: _address.optional(_address.notes),
+                fujitsuZoneId: zone?.fujitsuZoneId,
+                isPrimary: widget.existing?.isPrimary ?? true,
+              );
       if (mounted) Navigator.of(context).pop(saved);
     } catch (error) {
       if (!mounted) return;
@@ -590,151 +596,99 @@ class _AddressEditorDialogState extends ConsumerState<_AddressEditorDialog> {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final zones = ref.watch(phoneOrderAreasProvider(_city)).valueOrNull ??
-        const <PhoneOrderArea>[];
-    final geo = ref.watch(phoneOrderGeoProvider).valueOrNull ?? ZoneGeo.fallback;
-    final governorate = _currentGovernorate;
-    final cities = geo.citiesOf(governorate);
-    final fee = zones
-        .where((z) => z.id == _area || z.name == _area)
-        .map((z) => z.deliveryFee)
-        .firstOrNull;
+    final customerNo = widget.customer.fujitsuCustomerNo;
+    final name = widget.customer.fullName?.trim() ?? '';
 
-    return AlertDialog(
+    return Dialog(
       key: const Key('customer-address-editor'),
       backgroundColor: palette.card,
-      title: Text(widget.existing == null ? 'إضافة عنوان' : 'تعديل العنوان'),
-      content: SizedBox(
-        width: 420,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640, maxHeight: 760),
         child: Form(
           key: _form,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  key: const Key('addr-edit-line'),
-                  controller: _addressLine,
-                  decoration: const InputDecoration(
-                    labelText: 'العنوان',
-                    hintText: 'شارع / وصف مختصر (اختياري إن اخترت المبنى والمنطقة)',
-                  ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
+                  widget.existing == null ? 'إضافة عنوان' : 'تعديل العنوان',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w900, fontSize: 18),
                 ),
-                TextFormField(
-                  key: const Key('addr-edit-building'),
-                  controller: _building,
-                  decoration: const InputDecoration(labelText: 'المبنى'),
-                ),
-                TextFormField(
-                  key: const Key('addr-edit-floor'),
-                  controller: _floor,
-                  decoration: const InputDecoration(labelText: 'الدور'),
-                ),
-                TextFormField(
-                  key: const Key('addr-edit-apartment'),
-                  controller: _apartment,
-                  decoration: const InputDecoration(labelText: 'الشقة'),
-                ),
-                TextFormField(
-                  key: const Key('addr-edit-branch'),
-                  controller: _branch,
-                  decoration: const InputDecoration(labelText: 'الفرع'),
-                ),
-                DropdownButtonFormField<String>(
-                  key: const Key('addr-edit-governorate'),
-                  initialValue: governorate,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'المحافظة'),
-                  items: [
-                    for (final name in geo.governorates)
-                      DropdownMenuItem(value: name, child: Text(name)),
-                  ],
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() {
-                      _governorate = v;
-                      _city = null;
-                      _area = null;
-                    });
-                  },
-                ),
-                KeyedSubtree(
-                  key: ValueKey('cities-$governorate'),
-                  child: DropdownButtonFormField<String>(
-                    key: const Key('addr-edit-city'),
-                    initialValue: cities.contains(_city) ? _city : null,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'المدينة'),
-                    items: [
-                      for (final city in cities)
-                        DropdownMenuItem(value: city, child: Text(city)),
-                    ],
-                    onChanged: (v) => setState(() {
-                      _city = v;
-                      _area = null;
-                    }),
-                  ),
-                ),
-                DropdownButtonFormField<String>(
-                  key: ValueKey('area-$_city'),
-                  initialValue: zones.any((z) => z.id == _area || z.name == _area)
-                      ? _area
-                      : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'المنطقة'),
-                  items: [
-                    for (final z in zones)
-                      DropdownMenuItem(
-                        value: z.id,
-                        child: Text(
-                          z.deliveryFee == null
-                              ? z.name
-                              : '${z.name} (${AppCurrency.of(z.deliveryFee!)})',
-                          overflow: TextOverflow.ellipsis,
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextFormField(
+                        key: const Key('addr-edit-customer-name'),
+                        initialValue: name,
+                        readOnly: true,
+                        enabled: false,
+                        decoration: const InputDecoration(
+                          labelText: 'اسم العميل',
                         ),
                       ),
-                  ],
-                  onChanged: zones.isEmpty
-                      ? null
-                      : (v) => setState(() => _area = v),
-                ),
-                if (fee != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      'رسوم التوصيل: ${AppCurrency.of(fee)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.success,
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        key: const Key('addr-edit-customer-no'),
+                        initialValue: customerNo?.toString() ?? '—',
+                        readOnly: true,
+                        enabled: false,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم العميل',
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      StructuredAddressFields(
+                        controllers: _address,
+                        onChanged: _syncComposed,
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_error!,
+                            style:
+                                const TextStyle(color: AppColors.secondary)),
+                      ],
+                    ],
                   ),
-                if (_error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(_error!,
-                      style: const TextStyle(color: AppColors.secondary)),
-                ],
-              ],
-            ),
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed:
+                          _saving ? null : () => Navigator.pop(context),
+                      child: const Text('إلغاء'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      key: const Key('addr-edit-save'),
+                      onPressed: _saving ? null : _save,
+                      child: _saving
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('حفظ'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('إلغاء'),
-        ),
-        FilledButton(
-          key: const Key('addr-edit-save'),
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 }

@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../../../core/constants/app_currency.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
@@ -13,9 +12,7 @@ import '../../../auth/domain/customer_phone.dart';
 import '../../domain/phone_order.dart';
 import '../providers/phone_order_providers.dart';
 import 'customer_phones_editor.dart';
-
-String? _optional(TextEditingController controller) =>
-    controller.text.trim().isEmpty ? null : controller.text.trim();
+import 'structured_address_fields.dart';
 
 // ---------------------------------------------------------------------------
 // Step 1: «+ عميل جديد»
@@ -209,13 +206,11 @@ class _NewCustomerDialogState extends ConsumerState<NewCustomerDialog> {
 }
 
 // ---------------------------------------------------------------------------
-// Step 2: «إضافة عنوان»
+// Step 2: «إضافة عنوان» (new customer)
 // ---------------------------------------------------------------------------
 
-/// Name and phone (pre-filled from step 1), then the address in two sides:
-/// building / floor / apartment, and governorate / city / zone. «إضافة موقع
-/// العميل (GPS)» opens the customer app's map picker; the pin is saved in
-/// Supabase for the driver app. Saving creates the customer and pops it.
+/// Name / phones (from step 1) plus Fujitsu structured address fields and a
+/// live-composed full address. Saving creates the customer and pops it.
 class CustomerAddressDialog extends ConsumerStatefulWidget {
   const CustomerAddressDialog({
     super.key,
@@ -236,8 +231,8 @@ class CustomerAddressDialog extends ConsumerStatefulWidget {
   final String? phone5;
   final PhoneOrderCustomerType type;
 
-  /// Below this width the two sides stack.
-  static const sideBySideMinWidth = 520.0;
+  static const sideBySideMinWidth =
+      StructuredAddressFields.sideBySideMinWidth;
 
   @override
   ConsumerState<CustomerAddressDialog> createState() =>
@@ -248,15 +243,7 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
   final _form = GlobalKey<FormState>();
   final _phonesKey = GlobalKey<CustomerPhonesEditorState>();
   late final _name = TextEditingController(text: widget.name);
-  final _building = TextEditingController();
-  final _floor = TextEditingController();
-  final _apartment = TextEditingController();
-
-  String? _governorate;
-  String? _city;
-
-  /// The chosen zone's [PhoneOrderArea.id] (its Fujitsu zone id).
-  String? _area;
+  late final _address = StructuredAddressControllers();
   LatLng? _location;
   bool _saving = false;
   String? _error;
@@ -270,22 +257,46 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
       ];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncComposed());
+  }
+
+  @override
   void dispose() {
-    for (final controller in [_name, _building, _floor, _apartment]) {
-      controller.dispose();
-    }
+    _name.dispose();
+    _address.dispose();
     super.dispose();
   }
 
-  /// The governorates and cities come from «المناطق» (Cairo when none).
-  ZoneGeo get _geo => ref.read(phoneOrderGeoProvider).valueOrNull ?? ZoneGeo.fallback;
+  ZoneGeo get _geo =>
+      ref.read(phoneOrderGeoProvider).valueOrNull ?? ZoneGeo.fallback;
 
   String get _currentGovernorate {
     final geo = _geo;
-    final chosen = _governorate;
+    final chosen = _address.governorate;
     return chosen != null && geo.governorates.contains(chosen)
         ? chosen
         : geo.governorates.first;
+  }
+
+  PhoneOrderArea? get _selectedZone {
+    final id = _address.area;
+    if (id == null) return null;
+    final zones = ref.read(phoneOrderAreasProvider(_address.city)).valueOrNull ??
+        const [];
+    for (final zone in zones) {
+      if (zone.id == id || zone.name == id) return zone;
+    }
+    return null;
+  }
+
+  void _syncComposed() {
+    _address.refreshComposed(
+      zoneName: _selectedZone?.name,
+      governorateFallback: _currentGovernorate,
+    );
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickLocation() async {
@@ -297,37 +308,17 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
     setState(() => _location = picked.point);
   }
 
-  /// The zone picked in the dropdown (null when none is chosen).
-  PhoneOrderArea? get _selectedZone {
-    final id = _area;
-    if (id == null) return null;
-    final zones =
-        ref.read(phoneOrderAreasProvider(_city)).valueOrNull ?? const [];
-    for (final zone in zones) {
-      if (zone.id == id) return zone;
-    }
-    return null;
-  }
-
-  String? get _addressLine {
-    final area = _selectedZone?.name;
-    final city = _city;
-    final parts = [
-      if (_optional(_building) case final building?) 'مبنى $building',
-      if (_optional(_floor) case final floor?) 'الدور $floor',
-      if (_optional(_apartment) case final apartment?) 'شقة $apartment',
-      if (area != null) area,
-      if (city != null) city,
-    ];
-    // The governorate alone isn't an address.
-    return parts.isEmpty ? null : [...parts, _currentGovernorate].join('، ');
-  }
-
   Future<void> _save() async {
     if (_saving || !_form.currentState!.validate()) return;
     final phoneError = _phonesKey.currentState?.validate();
     if (phoneError != null) {
       setState(() => _error = phoneError);
+      return;
+    }
+    _syncComposed();
+    final line = _address.composed.text.trim();
+    if (line.isEmpty) {
+      setState(() => _error = 'أدخل عنواناً أو اختر المنطقة');
       return;
     }
     setState(() {
@@ -342,19 +333,23 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
           await ref.read(phoneOrdersRepositoryProvider).createCustomer(
                 fullName: _name.text.trim(),
                 phone: slots[0] ?? '',
-                address: _addressLine,
-                zone: zone?.name ?? _city,
+                address: line,
+                zone: zone?.name ?? _address.city,
                 fujitsuZoneId: zone?.fujitsuZoneId,
                 phone2: slots[1],
                 phone3: slots[2],
                 phone4: slots[3],
                 phone5: slots[4],
+                notes: _address.optional(_address.notes),
+                branch: _address.optional(_address.branch),
                 type: widget.type,
                 governorate: _currentGovernorate,
-                city: _city,
-                building: _optional(_building),
-                floor: _optional(_floor),
-                apartment: _optional(_apartment),
+                city: _address.city,
+                building: _address.optional(_address.building),
+                street: _address.optional(_address.street),
+                landmark: _address.optional(_address.landmark),
+                floor: _address.optional(_address.floor),
+                apartment: _address.optional(_address.apartment),
                 latitude: _location?.latitude,
                 longitude: _location?.longitude,
               );
@@ -369,184 +364,18 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
     }
   }
 
-  Widget _field(
-    Key key,
-    TextEditingController controller,
-    String label, {
-    TextInputType? keyboardType,
-  }) =>
-      TextFormField(
-        key: key,
-        controller: controller,
-        keyboardType: keyboardType,
-        decoration: InputDecoration(labelText: label),
-      );
-
-  /// Right side (the start, in Arabic): building, floor, apartment.
-  Widget _buildingSide() => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _field(const Key('address-building'), _building, 'المبنى'),
-          _field(const Key('address-floor'), _floor, 'الدور'),
-          _field(const Key('address-apartment'), _apartment, 'الشقة'),
-        ],
-      );
-
-  /// Left side: governorate, city and zone dropdowns.
-  Widget _areaSide() {
-    final areas = ref.watch(phoneOrderAreasProvider(_city));
-    final zones = areas.valueOrNull ?? const <PhoneOrderArea>[];
-    final geo = ref.watch(phoneOrderGeoProvider).valueOrNull ?? ZoneGeo.fallback;
-    final governorate = _currentGovernorate;
-    final cities = geo.citiesOf(governorate);
-    final fee = zones
-        .where((zone) => zone.id == _area)
-        .map((zone) => zone.deliveryFee)
-        .firstOrNull;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        DropdownButtonFormField<String>(
-          key: const Key('address-governorate'),
-          initialValue: governorate,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'المحافظة'),
-          items: [
-            for (final name in geo.governorates)
-              DropdownMenuItem(value: name, child: Text(name)),
-          ],
-          onChanged: (value) {
-            if (value == null) return;
-            setState(() {
-              _governorate = value;
-              _city = null;
-              _area = null;
-            });
-          },
-        ),
-        const SizedBox(height: 4),
-        // Rebuilt per governorate so a stale city never stays selected.
-        KeyedSubtree(
-          key: ValueKey('cities-of-$governorate'),
-          child: DropdownButtonFormField<String>(
-            key: const Key('address-city'),
-            initialValue: cities.contains(_city) ? _city : null,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'المدينة'),
-            items: [
-              for (final city in cities)
-                DropdownMenuItem(value: city, child: Text(city)),
-            ],
-            onChanged: (value) => setState(() {
-              _city = value;
-              _area = null;
-            }),
-          ),
-        ),
-        const SizedBox(height: 4),
-        // Rebuilt per city so a stale zone never stays selected.
-        DropdownButtonFormField<String>(
-          key: ValueKey('address-area-$_city'),
-          initialValue: zones.any((zone) => zone.id == _area) ? _area : null,
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: 'المنطقة',
-            helperText: zones.isEmpty ? 'لا توجد مناطق مسجلة بعد' : null,
-          ),
-          items: [
-            for (final zone in zones)
-              DropdownMenuItem(
-                value: zone.id,
-                child: Text(
-                  zone.deliveryFee == null
-                      ? zone.name
-                      : '${zone.name} (${AppCurrency.of(zone.deliveryFee!)})',
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ],
-          onChanged:
-              zones.isEmpty ? null : (value) => setState(() => _area = value),
-        ),
-        if (fee != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              'رسوم التوصيل: ${AppCurrency.of(fee)}',
-              key: const Key('address-zone-fee'),
-              style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.success),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _gpsSection() {
-    final palette = context.palette;
-    final location = _location;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        OutlinedButton.icon(
-          key: const Key('address-pick-gps'),
-          onPressed: _saving ? null : _pickLocation,
-          icon: Icon(location == null
-              ? Icons.add_location_alt_rounded
-              : Icons.edit_location_alt_rounded),
-          label: Text(
-            location == null
-                ? 'إضافة موقع العميل (GPS)'
-                : 'تغيير موقع العميل (GPS)',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-        ),
-        if (location != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Row(
-              key: const Key('address-gps-set'),
-              children: [
-                const Icon(Icons.check_circle_rounded,
-                    size: 16, color: AppColors.success),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'تم تحديد الموقع: '
-                    '${location.latitude.toStringAsFixed(5)}, '
-                    '${location.longitude.toStringAsFixed(5)}',
-                    textDirection: TextDirection.ltr,
-                    style: TextStyle(fontSize: 12, color: palette.muted),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'إزالة الموقع',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  onPressed: () => setState(() => _location = null),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final palette = context.palette;
+    final location = _location;
     return Dialog(
       key: const Key('customer-address-dialog'),
       backgroundColor: palette.card,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 640, maxHeight: 720),
+        constraints: const BoxConstraints(maxWidth: 640, maxHeight: 760),
         child: Form(
           key: _form,
           child: Column(
@@ -581,31 +410,17 @@ class _CustomerAddressDialogState extends ConsumerState<CustomerAddressDialog> {
                         initialPhones: _initialPhones,
                       ),
                       const SizedBox(height: 8),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          if (constraints.maxWidth <
-                              CustomerAddressDialog.sideBySideMinWidth - 40) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _buildingSide(),
-                                const SizedBox(height: 4),
-                                _areaSide(),
-                              ],
-                            );
-                          }
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(child: _buildingSide()),
-                              const SizedBox(width: 16),
-                              Expanded(child: _areaSide()),
-                            ],
-                          );
-                        },
+                      StructuredAddressFields(
+                        controllers: _address,
+                        onChanged: _syncComposed,
+                        showGps: true,
+                        locationLabel: location == null
+                            ? null
+                            : '${location.latitude.toStringAsFixed(5)}, '
+                                '${location.longitude.toStringAsFixed(5)}',
+                        onPickGps: _saving ? null : _pickLocation,
+                        onClearGps: () => setState(() => _location = null),
                       ),
-                      const SizedBox(height: 16),
-                      _gpsSection(),
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(_error!,
