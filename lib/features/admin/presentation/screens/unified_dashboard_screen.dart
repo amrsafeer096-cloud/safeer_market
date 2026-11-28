@@ -19,9 +19,12 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../core/widgets/resizable_columns.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../../core/widgets/barcode_scan_icon.dart';
-import '../../../home/presentation/widgets/product_image.dart';
+import '../../../catalog/presentation/screens/product_image_viewer.dart';
+import '../../../home/domain/entities/product.dart';
 import '../../../home/presentation/widgets/product_thumb.dart';
 import '../../domain/admin_permissions.dart';
+import '../widgets/admin_product_image_upload.dart';
+import '../widgets/draggable_product_image.dart';
 import '../../domain/entities/admin_order.dart';
 import '../../domain/entities/order_status.dart';
 import '../../domain/order_prep_timer.dart';
@@ -2622,10 +2625,56 @@ class _ActionCard extends StatelessWidget {
 // 8. شاشات الإدارة الكاملة (المنتجات، الطاقم، التقارير)
 // ==========================================
 
-class _ProductsGridView extends ConsumerWidget {
+class _ProductsGridView extends ConsumerStatefulWidget {
   const _ProductsGridView();
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ProductsGridView> createState() => _ProductsGridViewState();
+}
+
+class _ProductsGridViewState extends ConsumerState<_ProductsGridView> {
+  /// Optimistic `image_url` overrides keyed by product id after upload.
+  final Map<String, String> _imageOverrides = {};
+
+  Product _asProduct(Map<String, dynamic> p) {
+    final id = '${p['id']}';
+    final stock = switch (p['stock_quantity']) {
+      final num n => n.round(),
+      final String t => int.tryParse(t) ?? 0,
+      _ => 0,
+    };
+    return Product(
+      id: id,
+      name: p['name']?.toString() ?? '',
+      price: double.tryParse('${p['price']}') ?? 0,
+      imageUrl: _imageOverrides[id] ?? p['image_url']?.toString(),
+      barcode: p['barcode']?.toString(),
+      stockQuantity: stock,
+      isActive: p['is_active'] as bool? ?? true,
+    );
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text(message),
+      ));
+  }
+
+  Future<void> _copyName(String name) async {
+    await Clipboard.setData(ClipboardData(text: name));
+    if (mounted) _toast('تم نسخ اسم الصنف');
+  }
+
+  Future<void> _copyBarcode(String barcode) async {
+    await Clipboard.setData(ClipboardData(text: barcode));
+    if (mounted) _toast('تم نسخ الباركود');
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final productsAsync = ref.watch(adminProductsProvider);
     final currentFilter = ref.watch(adminProductFilterProvider);
@@ -2696,29 +2745,31 @@ class _ProductsGridView extends ConsumerWidget {
               error: (err, stack) =>
                   Center(child: Text(l10n.adminErrorOccurred('$err'))),
               data: (products) {
-                if (products.isEmpty)
+                if (products.isEmpty) {
                   return Center(
                       child: Text(l10n.adminNoProducts,
                           style:
                               TextStyle(fontSize: 18, color: palette.muted)));
+                }
                 return GridView.builder(
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 240,
-                            mainAxisExtent: 320,
+                            mainAxisExtent: 340,
                             crossAxisSpacing: 16,
                             mainAxisSpacing: 16),
                     itemCount: products.length,
                     itemBuilder: (context, index) {
                       final p = products[index];
-                      final isActive = p['is_active'] ?? true;
-                      final barcode =
-                          p['barcode'] ?? p['id'].toString().substring(0, 6);
-                      final stock = switch (p['stock_quantity']) {
-                        final num n => n.round(),
-                        final String t => int.tryParse(t) ?? 0,
-                        _ => 0,
-                      };
+                      final product = _asProduct(p);
+                      final isActive = product.isActive;
+                      final barcode = (product.barcode?.trim().isNotEmpty == true)
+                          ? product.barcode!.trim()
+                          : product.id.substring(0, product.id.length.clamp(0, 6));
+                      final stock = product.stockQuantity;
+                      final imageUrl = product.hasValidImageUrl
+                          ? product.imageUrl
+                          : null;
                       return Container(
                         decoration: BoxDecoration(
                             color: palette.card,
@@ -2728,7 +2779,8 @@ class _ProductsGridView extends ConsumerWidget {
                           children: [
                             Expanded(
                               child: Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 12, 12, 8),
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
                                     color: Colors.white,
@@ -2737,12 +2789,57 @@ class _ProductsGridView extends ConsumerWidget {
                                   ),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(10),
-                                    child: Center(
-                                      child: ProductImage(
-                                        imageUrl: p['image_url'],
-                                        fit: BoxFit.contain,
-                                        placeholderBackground: false,
-                                      ),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            key: Key(
+                                                'admin-product-image-${product.id}'),
+                                            onTap: () => showProductImageViewer(
+                                              context,
+                                              product,
+                                              imageUrl: imageUrl,
+                                            ),
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(6),
+                                              child: DraggableProductImage(
+                                                imageUrl: imageUrl,
+                                                fit: BoxFit.contain,
+                                                iconSize: 40,
+                                                padding: EdgeInsets.zero,
+                                                onTap: () =>
+                                                    showProductImageViewer(
+                                                  context,
+                                                  product,
+                                                  imageUrl: imageUrl,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        PositionedDirectional(
+                                          bottom: 6,
+                                          start: 6,
+                                          child: AdminProductCameraButton(
+                                            key: Key(
+                                                'admin-product-camera-${product.id}'),
+                                            onPressed: () =>
+                                                showAdminProductImagePicker(
+                                              context,
+                                              product: product,
+                                              onUploaded: (url) {
+                                                setState(() =>
+                                                    _imageOverrides[
+                                                        product.id] = url);
+                                                ref.invalidate(
+                                                    adminProductsProvider);
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -2753,55 +2850,69 @@ class _ProductsGridView extends ConsumerWidget {
                               padding: const EdgeInsets.all(12),
                               child: Column(
                                 children: [
-                                  Tooltip(
-                                      message: l10n.adminCopyProductName,
-                                      child: InkWell(
-                                          onTap: () {
-                                            Clipboard.setData(ClipboardData(
-                                                text: p['name'] ?? ''));
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(SnackBar(
-                                                    content: Text(
-                                                        l10n.adminCopied)));
-                                          },
-                                          child: Text(p['name'] ?? '',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
-                                              style: const TextStyle(
-                                                  fontWeight:
-                                                      FontWeight.bold)))),
-                                  const SizedBox(height: 4),
-                                  Tooltip(
-                                      message: l10n.adminCopyBarcode,
-                                      child: InkWell(
-                                          onTap: () {
-                                            Clipboard.setData(
-                                                ClipboardData(text: barcode));
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(SnackBar(
-                                                    content: Text(
-                                                        l10n.adminCopied)));
-                                          },
-                                          child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Text(
-                                                    l10n.adminBarcodeValue(
-                                                        '$barcode'),
-                                                    style: TextStyle(
-                                                        fontSize: 11,
-                                                        color: palette.muted)),
-                                                const SizedBox(width: 4),
-                                                Icon(Icons.copy,
-                                                    size: 12,
-                                                    color: palette.muted)
-                                              ]))),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          product.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        key: Key(
+                                            'admin-product-copy-name-${product.id}'),
+                                        tooltip: l10n.adminCopyProductName,
+                                        visualDensity: VisualDensity.compact,
+                                        padding: EdgeInsets.zero,
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                                width: 28, height: 28),
+                                        onPressed: () =>
+                                            _copyName(product.name),
+                                        icon: Icon(Icons.copy,
+                                            size: 16, color: palette.accent),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          l10n.adminBarcodeValue(barcode),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: palette.muted),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        key: Key(
+                                            'admin-product-copy-barcode-${product.id}'),
+                                        tooltip: l10n.adminCopyBarcode,
+                                        visualDensity: VisualDensity.compact,
+                                        padding: EdgeInsets.zero,
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                                width: 28, height: 28),
+                                        onPressed: () =>
+                                            _copyBarcode(barcode),
+                                        icon: Icon(Icons.copy,
+                                            size: 16, color: palette.muted),
+                                      ),
+                                    ],
+                                  ),
                                   const SizedBox(height: 4),
                                   Text(
                                     'المخزون: $stock',
-                                    key: Key('admin-product-stock-${p['id']}'),
+                                    key: Key(
+                                        'admin-product-stock-${product.id}'),
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w800,
@@ -2811,10 +2922,7 @@ class _ProductsGridView extends ConsumerWidget {
                                     ),
                                   ),
                                   const SizedBox(height: 4),
-                                  Text(
-                                      AppCurrency.of(double.tryParse(
-                                              p['price'].toString()) ??
-                                          0),
+                                  Text(AppCurrency.of(product.price),
                                       style: TextStyle(
                                           color: palette.accent,
                                           fontWeight: FontWeight.bold)),
@@ -2828,7 +2936,7 @@ class _ProductsGridView extends ConsumerWidget {
                                   await Supabase.instance.client
                                       .from('products')
                                       .update({'is_active': !isActive}).eq(
-                                          'id', p['id']);
+                                          'id', product.id);
                                   ref.invalidate(adminProductsProvider);
                                 } catch (e) {
                                   scaffold.showSnackBar(SnackBar(

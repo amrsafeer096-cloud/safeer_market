@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:pasteboard/pasteboard.dart';
 import 'package:share_plus/share_plus.dart';
@@ -9,9 +10,11 @@ import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../../core/web/web_image_clipboard.dart';
+import '../../../../l10n/app_localizations.dart';
 import '../../../cart/domain/weight_options.dart';
 import '../../../home/domain/entities/product.dart';
 import '../../domain/phone_order.dart';
+import 'admin_product_image_upload.dart';
 import 'draggable_product_image.dart';
 import 'staff_product_search_tile.dart';
 
@@ -45,7 +48,7 @@ Future<void> showProductDetailsDialog(
 
 enum _WeightUnit { kilo, gram }
 
-class ProductDetailsDialog extends StatefulWidget {
+class ProductDetailsDialog extends ConsumerStatefulWidget {
   const ProductDetailsDialog({
     super.key,
     required this.product,
@@ -64,10 +67,11 @@ class ProductDetailsDialog extends StatefulWidget {
   final int? initialQuantity;
 
   @override
-  State<ProductDetailsDialog> createState() => _ProductDetailsDialogState();
+  ConsumerState<ProductDetailsDialog> createState() =>
+      _ProductDetailsDialogState();
 }
 
-class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
+class _ProductDetailsDialogState extends ConsumerState<ProductDetailsDialog> {
   late final _quantity = TextEditingController(
     text: '${(widget.initialQuantity ?? 1).clamp(1, PhoneOrderState.maxQuantity)}',
   );
@@ -79,9 +83,13 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   String? _error;
   var _unit = _WeightUnit.kilo;
   int? _selectedQuickPick;
+  String? _uploadedImageUrl;
 
   Product get _product => widget.product;
-  String? get _imageUrl => _product.hasValidImageUrl ? _product.imageUrl : null;
+  String? get _imageUrl {
+    final url = (_uploadedImageUrl ?? _product.imageUrl)?.trim();
+    return Product.isValidImageUrl(url) ? url : null;
+  }
 
   String? get _trimmedNotes {
     final t = _notes.text.trim();
@@ -250,6 +258,19 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
   Future<void> _copyBarcode(String barcode) async {
     await Clipboard.setData(ClipboardData(text: barcode.trim()));
     if (mounted) _toast('تم نسخ الباركود');
+  }
+
+  Future<void> _copyName() async {
+    await Clipboard.setData(ClipboardData(text: _product.name));
+    if (mounted) _toast('تم نسخ اسم الصنف');
+  }
+
+  void _uploadImage() {
+    showAdminProductImagePicker(
+      context,
+      product: _product,
+      onUploaded: (url) => setState(() => _uploadedImageUrl = url),
+    );
   }
 
   void _addBulk() {
@@ -521,7 +542,7 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                   ),
                 ),
                 if (onTap != null)
-                  Icon(Icons.copy_rounded, size: 18, color: palette.accent),
+                  Icon(Icons.copy, size: 16, color: palette.accent),
               ],
             ),
           ),
@@ -597,11 +618,27 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                _product.name,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w900, fontSize: 16, height: 1.35),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _product.name,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          height: 1.35),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('product-dialog-copy-name'),
+                    tooltip:
+                        AppLocalizations.of(context)!.adminCopyProductName,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _copyName,
+                    icon: Icon(Icons.copy, size: 16, color: palette.accent),
+                  ),
+                ],
               ),
               const SizedBox(height: 2),
               Text(
@@ -636,11 +673,25 @@ class _ProductDetailsDialogState extends State<ProductDetailsDialog> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: DraggableProductImage(
-                    imageUrl: _imageUrl,
-                    iconSize: 56,
-                    fit: BoxFit.contain,
-                    padding: const EdgeInsets.all(8),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      DraggableProductImage(
+                        imageUrl: _imageUrl,
+                        iconSize: 56,
+                        fit: BoxFit.contain,
+                        padding: const EdgeInsets.all(8),
+                      ),
+                      if (!_busy)
+                        PositionedDirectional(
+                          bottom: 8,
+                          start: 8,
+                          child: AdminProductCameraButton(
+                            key: const Key('product-dialog-camera'),
+                            onPressed: _uploadImage,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
