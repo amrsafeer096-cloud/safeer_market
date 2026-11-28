@@ -236,6 +236,7 @@ class _FakePhoneOrders implements PhoneOrdersRepository {
     String query, {
     MainCategory? category,
     ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
+    bool offersOnly = false,
   }) async =>
       [_milk, _rice]
           .where((p) => p.name.contains(query) || p.barcode == query)

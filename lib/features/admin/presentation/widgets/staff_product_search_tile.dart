@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 import '../../../../core/constants/app_currency.dart';
 import '../../../../core/theme/app_palette.dart';
 import '../../../home/domain/entities/product.dart';
-import '../../../home/presentation/widgets/product_image.dart';
 import '../../domain/product_search_filter.dart';
+import 'draggable_product_image.dart';
 
 /// Funnel `PopupMenuButton` for the three product-search modes.
 class ProductSearchFilterButton extends StatelessWidget {
@@ -198,11 +198,12 @@ class StaffProductSearchTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: ColoredBox(
           color: const Color(0xFFFFFFFF),
-          child: ProductImage(
+          child: DraggableProductImage(
             imageUrl: product.hasValidImageUrl ? product.imageUrl : null,
             iconSize: 26,
             fit: BoxFit.contain,
             padding: const EdgeInsets.all(4),
+            onTap: onOpen,
           ),
         ),
       ),

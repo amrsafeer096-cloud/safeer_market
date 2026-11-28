@@ -85,10 +85,12 @@ abstract class PhoneOrdersRepository {
 
   /// Products by name or barcode, optionally within [category].
   /// [filter] defaults to positive stock only («المخزون الفعلي»).
+  /// [offersOnly] ANDs the active-offer constraint (تلقي الطلبات chips).
   Future<List<Product>> searchProducts(
     String query, {
     MainCategory? category,
     ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
+    bool offersOnly = false,
   });
 
   /// Records the order (status pending, «جديد») and returns its id.

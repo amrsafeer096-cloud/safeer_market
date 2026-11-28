@@ -16,12 +16,14 @@ class DraggableProductImage extends StatefulWidget {
     this.fit = BoxFit.contain,
     this.iconSize = 56,
     this.padding = const EdgeInsets.all(8),
+    this.onTap,
   });
 
   final String? imageUrl;
   final BoxFit fit;
   final double iconSize;
   final EdgeInsetsGeometry padding;
+  final VoidCallback? onTap;
 
   @override
   State<DraggableProductImage> createState() => _DraggableProductImageState();
@@ -29,6 +31,7 @@ class DraggableProductImage extends StatefulWidget {
 
 class _DraggableProductImageState extends State<DraggableProductImage> {
   static final _registered = <String>{};
+  static final _onTap = <String, VoidCallback?>{};
 
   String? _viewType;
 
@@ -43,7 +46,18 @@ class _DraggableProductImageState extends State<DraggableProductImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl) {
       _register();
+    } else if (_viewType != null) {
+      _onTap[_viewType!] = widget.onTap;
     }
+  }
+
+  @override
+  void dispose() {
+    final viewType = _viewType;
+    if (viewType != null && identical(_onTap[viewType], widget.onTap)) {
+      _onTap[viewType] = null;
+    }
+    super.dispose();
   }
 
   void _register() {
@@ -69,22 +83,26 @@ class _DraggableProductImageState extends State<DraggableProductImage> {
           ..style.padding = '0'
           ..style.backgroundColor = 'white'
           ..style.cursor = 'grab';
+        img.onClick.listen((_) => _onTap[viewType]?.call());
         return img;
       });
     }
     _viewType = viewType;
+    _onTap[viewType] = widget.onTap;
   }
 
   @override
   Widget build(BuildContext context) {
     final viewType = _viewType;
     if (viewType == null) {
-      return ProductImage(
+      final placeholder = ProductImage(
         imageUrl: null,
         fit: widget.fit,
         iconSize: widget.iconSize,
         padding: widget.padding,
       );
+      if (widget.onTap == null) return placeholder;
+      return GestureDetector(onTap: widget.onTap, child: placeholder);
     }
     return Padding(
       padding: widget.padding,

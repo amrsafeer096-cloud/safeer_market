@@ -251,21 +251,25 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     String query, {
     MainCategory? category,
     ProductSearchFilterMode filter = ProductSearchFilterMode.inStock,
+    bool offersOnly = false,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty && category == null) return const [];
 
     var request = _client.from('products').select(_productColumns);
+    final wantOffers =
+        offersOnly || filter == ProductSearchFilterMode.offers;
     request = switch (filter) {
       // «المخزون الفعلي»: active + stock > 0 only.
       ProductSearchFilterMode.inStock => request.inStock(),
       // «كل الأصناف»: no stock / is_active filters — show exact stock.
       ProductSearchFilterMode.allItems => request,
-      ProductSearchFilterMode.offers => request
-          .not('is_active', 'is', false)
-          .not('discount_price', 'is', null)
-          .gt('discount_price', 0),
+      // Legacy «العروض» dropdown (تعديل الطلب): active rows with a discount.
+      ProductSearchFilterMode.offers => request.not('is_active', 'is', false),
     };
+    if (wantOffers) {
+      request = request.not('discount_price', 'is', null).gt('discount_price', 0);
+    }
     if (category != null) {
       request = request.inFilter('category', [
         for (final name in category.subCategories) ...[name, '$name '],
@@ -296,7 +300,7 @@ class SupabasePhoneOrdersRepository implements PhoneOrdersRepository {
     try {
       final rows = await request.order('name').limit(productLimit * 2);
       var products = rows.map(ProductModel.fromJson).toList();
-      if (filter == ProductSearchFilterMode.offers) {
+      if (wantOffers) {
         products = [
           for (final product in products)
             if (product.hasActiveOffer) product,

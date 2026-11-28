@@ -34,6 +34,7 @@ typedef PhoneOrderProductQuery = ({
   String text,
   MainCategory? category,
   ProductSearchFilterMode filter,
+  bool offersOnly,
 });
 
 final phoneOrderProductsProvider = FutureProvider.autoDispose
@@ -42,6 +43,7 @@ final phoneOrderProductsProvider = FutureProvider.autoDispose
         query.text,
         category: query.category,
         filter: query.filter,
+        offersOnly: query.offersOnly,
       );
 });
 

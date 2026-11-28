@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_currency.dart';
@@ -28,6 +29,7 @@ import 'phone_order_staged_review.dart';
 import 'phone_order_today_panel.dart';
 import 'product_details_dialog.dart';
 import 'same_day_order_dialog.dart';
+import 'draggable_product_image.dart';
 import 'staff_product_search_tile.dart';
 
 /// «تلقي الطلبات»: find (or add) the caller, build their cart, and place
@@ -869,17 +871,28 @@ class _OrderBuilder extends ConsumerStatefulWidget {
   ConsumerState<_OrderBuilder> createState() => _OrderBuilderState();
 }
 
-/// Packaging filter chips beside «نتائج البحث».
-enum _UnitPackFilter { all, piece, box, weight }
+/// Packaging filter chips beside «نتائج البحث» (multi-select OR).
+enum _UnitPackFilter { piece, box, weight }
 
 class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   Timer? _debounce;
   String _query = '';
-  var _filter = ProductSearchFilterMode.inStock;
-  var _unitPackFilter = _UnitPackFilter.all;
+
+  /// Stock scope: «المخزون الفعلي» (default) vs «كل الأصناف».
+  var _stockScope = ProductSearchFilterMode.inStock;
+
+  /// Independent «العروض» toggle (AND with stock / unit filters).
+  var _offersOnly = false;
+
+  /// Empty = «الكل»; otherwise OR across selected unit chips.
+  final Set<_UnitPackFilter> _unitPacks = {};
+
   var _popupOpen = false;
+
+  /// Highlighted cart line for keyboard nav when the search popup is closed.
+  int _cartSelectedIndex = 0;
 
   /// Staged +/- picks inside the search popup (not yet in the cart).
   final Map<String, StagedCartItem> _staged = {};
@@ -891,12 +904,14 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
   PhoneOrderProductQuery get _productQuery => (
         text: _query,
         category: null,
-        filter: _filter,
+        filter: _stockScope,
+        offersOnly: _offersOnly,
       );
 
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleCartKey);
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreSearchFocus());
   }
 
@@ -908,10 +923,66 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleCartKey);
     _debounce?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  /// Cart keyboard nav when the search popup is closed (Enter still stages).
+  bool _handleCartKey(KeyEvent event) {
+    if (!mounted || _popupOpen || event is! KeyDownEvent) return false;
+    final lines = ref.read(phoneOrderControllerProvider).lines;
+    if (lines.isEmpty) return false;
+    final key = event.logicalKey;
+
+    void select(int index) {
+      setState(() => _cartSelectedIndex = index.clamp(0, lines.length - 1));
+    }
+
+    if (key == LogicalKeyboardKey.arrowDown) {
+      select(_cartSelectedIndex + 1);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      select(_cartSelectedIndex - 1);
+      return true;
+    }
+
+    final selected = lines[_cartSelectedIndex.clamp(0, lines.length - 1)];
+    final controller = ref.read(phoneOrderControllerProvider.notifier);
+
+    if (key == LogicalKeyboardKey.numpadAdd ||
+        key == LogicalKeyboardKey.add ||
+        (key == LogicalKeyboardKey.equal &&
+            HardwareKeyboard.instance.isShiftPressed)) {
+      _addProduct(context, ref, selected.product);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.numpadSubtract ||
+        key == LogicalKeyboardKey.minus) {
+      // Don't steal `-` while typing a search query.
+      if (_search.text.trim().isNotEmpty && _searchFocus.hasFocus) {
+        return false;
+      }
+      controller.remove(selected.product);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.delete) {
+      if (selected.weightInGrams != null) {
+        controller.setWeight(selected.product, 0);
+      } else {
+        controller.setQuantity(selected.product, 0);
+      }
+      setState(() {
+        final nextLen = ref.read(phoneOrderControllerProvider).lines.length;
+        _cartSelectedIndex =
+            nextLen == 0 ? 0 : _cartSelectedIndex.clamp(0, nextLen - 1);
+      });
+      return true;
+    }
+    return false;
   }
 
   void _restoreSearchFocus() {
@@ -947,12 +1018,6 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreSearchFocus());
   }
 
-  void _clearStaging() {
-    if (_staged.isEmpty) return;
-    setState(() => _staged.clear());
-    _restoreSearchFocus();
-  }
-
   void _onChanged(String text) {
     _debounce?.cancel();
     final trimmed = text.trim();
@@ -985,7 +1050,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
           phoneOrderProductsProvider((
             text: code,
             category: null,
-            filter: _filter,
+            filter: _stockScope,
+            offersOnly: _offersOnly,
           )).future);
       final match =
           products.where((product) => product.barcode?.trim() == code);
@@ -1197,12 +1263,14 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
     final historyAsync =
         ref.watch(phoneOrderCustomerHistoryProvider(customer.key));
 
-    bool matchesUnitPack(Product product) => switch (_unitPackFilter) {
-          _UnitPackFilter.all => true,
-          _UnitPackFilter.piece => product.isPieceUnit,
-          _UnitPackFilter.box => product.isBoxUnit,
-          _UnitPackFilter.weight => product.isWeightBased,
-        };
+    bool matchesUnitPack(Product product) {
+      if (_unitPacks.isEmpty) return true;
+      return (_unitPacks.contains(_UnitPackFilter.piece) &&
+              product.isPieceUnit) ||
+          (_unitPacks.contains(_UnitPackFilter.box) && product.isBoxUnit) ||
+          (_unitPacks.contains(_UnitPackFilter.weight) &&
+              product.isWeightBased);
+    }
 
     Widget productTile(Product product) {
       final staged = _staged[product.id];
@@ -1220,7 +1288,7 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         // +/- IconButtons keep their own handlers and do not open it.
         openOnDoubleTap: false,
         keyPrefix: 'phone-order',
-        showZeroStockInRed: _filter == ProductSearchFilterMode.allItems,
+        showZeroStockInRed: _stockScope == ProductSearchFilterMode.allItems,
         onAdd: () => _stageInc(product),
         onOpen: () => _openDetails(product),
         onRemove: () => _stageDec(product),
@@ -1241,23 +1309,25 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       ];
     }
 
-    void selectUnitPack(_UnitPackFilter next) {
+    void toggleUnitPack(_UnitPackFilter? value) {
       setState(() {
-        // Tap active chip again → back to «الكل».
-        _unitPackFilter =
-            _unitPackFilter == next && next != _UnitPackFilter.all
-                ? _UnitPackFilter.all
-                : next;
+        if (value == null) {
+          _unitPacks.clear();
+        } else if (!_unitPacks.remove(value)) {
+          _unitPacks.add(value);
+        }
       });
       _restoreSearchFocus();
     }
 
-    Widget unitPackChip({
+    Widget filterChip({
       required Key key,
       required String label,
-      required _UnitPackFilter value,
+      required bool selected,
+      required VoidCallback onTap,
+      Color? selectedColor,
     }) {
-      final selected = _unitPackFilter == value;
+      final color = selectedColor ?? palette.accent;
       return FilterChip(
         key: key,
         label: Text(
@@ -1274,8 +1344,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const EdgeInsets.symmetric(horizontal: 6),
         labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-        selectedColor: palette.accent,
-        onSelected: (_) => selectUnitPack(value),
+        selectedColor: color,
+        onSelected: (_) => onTap(),
       );
     }
 
@@ -1296,42 +1366,84 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 6, 4, 4),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'نتائج البحث',
-                    style: TextStyle(fontWeight: FontWeight.w900),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'نتائج البحث',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          unitPackChip(
-                            key: const Key('phone-order-unit-filter-all'),
-                            label: 'الكل',
-                            value: _UnitPackFilter.all,
-                          ),
-                          const SizedBox(width: 4),
-                          unitPackChip(
-                            key: const Key('phone-order-unit-filter-piece'),
-                            label: 'قطعة',
-                            value: _UnitPackFilter.piece,
-                          ),
-                          const SizedBox(width: 4),
-                          unitPackChip(
-                            key: const Key('phone-order-unit-filter-box'),
-                            label: 'علبة',
-                            value: _UnitPackFilter.box,
-                          ),
-                          const SizedBox(width: 4),
-                          unitPackChip(
-                            key: const Key('phone-order-unit-filter-weight'),
-                            label: 'وزن',
-                            value: _UnitPackFilter.weight,
-                          ),
-                        ],
-                      ),
+                  Expanded(
+                    child: Wrap(
+                      key: const Key('phone-order-filter-bar'),
+                      spacing: 4,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        filterChip(
+                          key: const Key('phone-order-filter-in-stock'),
+                          label: 'المخزون الفعلي',
+                          selected:
+                              _stockScope == ProductSearchFilterMode.inStock,
+                          onTap: () {
+                            setState(() => _stockScope =
+                                ProductSearchFilterMode.inStock);
+                            _restoreSearchFocus();
+                          },
+                        ),
+                        filterChip(
+                          key: const Key('phone-order-filter-all-items'),
+                          label: 'كل الأصناف',
+                          selected:
+                              _stockScope == ProductSearchFilterMode.allItems,
+                          onTap: () {
+                            setState(() => _stockScope =
+                                ProductSearchFilterMode.allItems);
+                            _restoreSearchFocus();
+                          },
+                        ),
+                        filterChip(
+                          key: const Key('phone-order-filter-offers'),
+                          label: 'العروض',
+                          selected: _offersOnly,
+                          selectedColor: Colors.red.shade700,
+                          onTap: () {
+                            setState(() => _offersOnly = !_offersOnly);
+                            _restoreSearchFocus();
+                          },
+                        ),
+                        filterChip(
+                          key: const Key('phone-order-unit-filter-all'),
+                          label: 'الكل',
+                          selected: _unitPacks.isEmpty,
+                          onTap: () => toggleUnitPack(null),
+                        ),
+                        filterChip(
+                          key: const Key('phone-order-unit-filter-piece'),
+                          label: 'قطعة',
+                          selected:
+                              _unitPacks.contains(_UnitPackFilter.piece),
+                          onTap: () =>
+                              toggleUnitPack(_UnitPackFilter.piece),
+                        ),
+                        filterChip(
+                          key: const Key('phone-order-unit-filter-box'),
+                          label: 'علبة',
+                          selected: _unitPacks.contains(_UnitPackFilter.box),
+                          onTap: () => toggleUnitPack(_UnitPackFilter.box),
+                        ),
+                        filterChip(
+                          key: const Key('phone-order-unit-filter-weight'),
+                          label: 'وزن',
+                          selected:
+                              _unitPacks.contains(_UnitPackFilter.weight),
+                          onTap: () =>
+                              toggleUnitPack(_UnitPackFilter.weight),
+                        ),
+                      ],
                     ),
                   ),
                   IconButton(
@@ -1344,62 +1456,6 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                 ],
               ),
             ),
-            if (_staged.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                child: Material(
-                  key: const Key('phone-order-staged-banner'),
-                  color: palette.accent.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'مختار للتأكيد: ${_staged.length} أصناف',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                              color: palette.accent,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          key: const Key('phone-order-staged-clear'),
-                          onPressed: _clearStaging,
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            foregroundColor: palette.muted,
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            minimumSize: const Size(0, 32),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: const Text('إلغاء المحدد'),
-                        ),
-                        const SizedBox(width: 4),
-                        FilledButton(
-                          key: const Key('phone-order-staged-review-btn'),
-                          onPressed: _openStagedReview,
-                          style: FilledButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            minimumSize: const Size(0, 32),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: const Text(
-                            'مراجعة وتأكيد (Enter)',
-                            style: TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
             const Divider(height: 1),
             Expanded(
               child: Row(
@@ -1505,64 +1561,6 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
 
     final showClear = _popupOpen || _search.text.trim().isNotEmpty;
 
-    /// Visible when popup is closed but items remain staged across searches.
-    Widget? stagingStrip;
-    if (!_popupOpen && _staged.isNotEmpty) {
-      stagingStrip = Padding(
-        padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
-        child: Material(
-          key: const Key('phone-order-staged-strip'),
-          color: palette.accent.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'مختار للتأكيد: ${_staged.length} أصناف',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
-                      color: palette.accent,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  key: const Key('phone-order-staged-strip-clear'),
-                  onPressed: _clearStaging,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    foregroundColor: palette.muted,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('إلغاء المحدد'),
-                ),
-                const SizedBox(width: 4),
-                FilledButton(
-                  key: const Key('phone-order-staged-strip-review'),
-                  onPressed: _openStagedReview,
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(
-                    'مراجعة وتأكيد (Enter)',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
     final searchField = Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
       child: TextField(
@@ -1579,11 +1577,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         decoration: InputDecoration(
           hintText: l10n.phoneOrderProductSearchHint,
           prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
-          suffixIcon: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showClear)
-                TextButton(
+          suffixIcon: showClear
+              ? TextButton(
                   key: const Key('phone-order-search-clear'),
                   onPressed: () => _dismissSearch(),
                   style: TextButton.styleFrom(
@@ -1596,13 +1591,8 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                     'مسح',
                     style: TextStyle(fontWeight: FontWeight.w800),
                   ),
-                ),
-              ProductSearchFilterButton(
-                mode: _filter,
-                onChanged: (mode) => setState(() => _filter = mode),
-              ),
-            ],
-          ),
+                )
+              : null,
           border: const OutlineInputBorder(),
           isDense: true,
         ),
@@ -1615,7 +1605,6 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           searchField,
-          if (stagingStrip != null) stagingStrip,
           const SizedBox(height: 4),
           Expanded(
             child: Stack(
@@ -1627,6 +1616,10 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
                   onToggle: () {},
                   onPlaced: widget.onPlaced,
                   title: 'سلة العميل',
+                  selectedIndex: _cartSelectedIndex,
+                  keyboardNavEnabled: !_popupOpen,
+                  onSelectedIndexChanged: (i) =>
+                      setState(() => _cartSelectedIndex = i),
                 ),
                 if (_popupOpen)
                   Positioned.fill(
@@ -1646,7 +1639,6 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         searchField,
-        if (stagingStrip != null) stagingStrip,
         const SizedBox(height: 4),
         Expanded(
           child: _popupOpen
@@ -1663,6 +1655,10 @@ class _OrderBuilderState extends ConsumerState<_OrderBuilder> {
           open: _cartOpen,
           onToggle: () => setState(() => _cartOpen = !_cartOpen),
           onPlaced: widget.onPlaced,
+          selectedIndex: _cartSelectedIndex,
+          keyboardNavEnabled: !_popupOpen,
+          onSelectedIndexChanged: (i) =>
+              setState(() => _cartSelectedIndex = i),
         ),
       ],
     );
@@ -2118,6 +2114,9 @@ class _CartPanel extends ConsumerWidget {
     required this.onPlaced,
     this.alwaysOpen = false,
     this.title,
+    this.selectedIndex = 0,
+    this.keyboardNavEnabled = false,
+    this.onSelectedIndexChanged,
   });
 
   /// Cart lines shown before the list scrolls (collapsible bar mode).
@@ -2136,6 +2135,11 @@ class _CartPanel extends ConsumerWidget {
   /// Optional header shown in the always-open center cart.
   final String? title;
 
+  /// Keyboard / click highlight in «سلة العميل».
+  final int selectedIndex;
+  final bool keyboardNavEnabled;
+  final ValueChanged<int>? onSelectedIndexChanged;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
@@ -2145,6 +2149,14 @@ class _CartPanel extends ConsumerWidget {
     final controller = ref.read(phoneOrderControllerProvider.notifier);
     void onAdd(Product product) => _addProduct(context, ref, product);
     void onRemove(Product product) => controller.remove(product);
+    void onDelete(PhoneOrderLine line) {
+      if (line.weightInGrams != null) {
+        controller.setWeight(line.product, 0);
+      } else {
+        controller.setQuantity(line.product, 0);
+      }
+    }
+
     void onFee(double fee) => controller.setDeliveryFee(fee);
     void onConfirm() => _confirmOrder(context, ref, onPlaced);
     Future<void> onEditLine(PhoneOrderLine line) async {
@@ -2155,13 +2167,7 @@ class _CartPanel extends ConsumerWidget {
             controller.setQuantity(line.product, q, notes: notes),
         onSetWeightGrams: (g, notes) =>
             controller.setWeight(line.product, g, notes: notes),
-        onRemove: () {
-          if (line.weightInGrams != null) {
-            controller.setWeight(line.product, 0);
-          } else {
-            controller.setQuantity(line.product, 0);
-          }
-        },
+        onRemove: () => onDelete(line),
       );
     }
 
@@ -2205,12 +2211,15 @@ class _CartPanel extends ConsumerWidget {
       return ListView(
         shrinkWrap: shrinkWrap,
         children: [
-          for (final line in state.lines)
+          for (var i = 0; i < state.lines.length; i++)
             _CartLine(
-              line: line,
-              onAdd: () => onAdd(line.product),
-              onRemove: () => onRemove(line.product),
-              onEdit: () => onEditLine(line),
+              line: state.lines[i],
+              selected: keyboardNavEnabled && i == selectedIndex,
+              onAdd: () => onAdd(state.lines[i].product),
+              onRemove: () => onRemove(state.lines[i].product),
+              onDelete: () => onDelete(state.lines[i]),
+              onEdit: () => onEditLine(state.lines[i]),
+              onSelect: () => onSelectedIndexChanged?.call(i),
             ),
         ],
       );
@@ -2472,13 +2481,19 @@ class _CartLine extends StatelessWidget {
     required this.line,
     required this.onAdd,
     required this.onRemove,
+    required this.onDelete,
     required this.onEdit,
+    this.selected = false,
+    this.onSelect,
   });
 
   final PhoneOrderLine line;
   final VoidCallback onAdd;
   final VoidCallback onRemove;
+  final VoidCallback onDelete;
   final VoidCallback onEdit;
+  final bool selected;
+  final VoidCallback? onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -2486,98 +2501,151 @@ class _CartLine extends StatelessWidget {
     final id = line.product.id;
     final weightLabel = line.weightInGrams == null
         ? null
-        : WeightOptions.phoneOrderLabel(line.weightInGrams!);
-    final qtyLabel = weightLabel ?? '${line.quantity}';
-    return InkWell(
-      key: Key('phone-order-cart-line-$id'),
-      onDoubleTap: onEdit,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    line.product.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: Color(0xFF0F172A),
-                      height: 1.3,
+        : WeightOptions.compactLabel(line.weightInGrams!);
+    final qtyBadge = weightLabel != null
+        ? weightLabel
+        : '${line.quantity} ×';
+    final qtyBetween = weightLabel == null ? '${line.quantity}' : '×1';
+    final imageUrl =
+        line.product.hasValidImageUrl ? line.product.imageUrl : null;
+
+    return Material(
+      color: selected
+          ? palette.accent.withValues(alpha: 0.12)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        key: Key('phone-order-cart-line-$id'),
+        onTap: onSelect,
+        onDoubleTap: onEdit,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          child: Row(
+            children: [
+              SizedBox.square(
+                dimension: 48,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: ColoredBox(
+                    color: Colors.white,
+                    child: DraggableProductImage(
+                      imageUrl: imageUrl,
+                      iconSize: 22,
+                      fit: BoxFit.contain,
+                      padding: const EdgeInsets.all(3),
+                      onTap: onEdit,
                     ),
                   ),
-                  Text(
-                    '${AppCurrency.of(line.product.effectivePrice)} / ${line.product.displayUnit}',
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
-                    ),
-                  ),
-                  if (line.product.hasActiveOffer)
-                    ProductOfferBadge(product: line.product),
-                  if (weightLabel != null)
-                    Text(
-                      'الوزن: $weightLabel',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: palette.accent,
-                      ),
-                    ),
-                  if (line.trimmedNotes case final note?)
-                    Text(
-                      'ملاحظة: $note',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.amber.shade900,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            IconButton(
-              key: Key('phone-order-dec-$id'),
-              visualDensity: VisualDensity.compact,
-              onPressed: onRemove,
-              icon: const Icon(Icons.remove_circle_outline),
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 28),
-              child: Text(
-                weightLabel == null ? qtyLabel : '×1',
-                key: Key('phone-order-qty-$id'),
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
-              ),
-            ),
-            IconButton(
-              key: Key('phone-order-inc-$id'),
-              visualDensity: VisualDensity.compact,
-              onPressed: onAdd,
-              icon: const Icon(Icons.add_circle_outline),
-            ),
-            SizedBox(
-              width: 84,
-              child: Text(
-                AppCurrency.of(line.total),
-                textAlign: TextAlign.end,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13.5,
-                  color: Color(0xFF0F172A),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            line.product.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: Color(0xFF0F172A),
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          key: Key('phone-order-cart-qty-badge-$id'),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: palette.accent.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            qtyBadge,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12.5,
+                              color: palette.accent,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '${AppCurrency.of(line.product.effectivePrice)} / ${line.product.displayUnit}',
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    if (line.product.hasActiveOffer)
+                      ProductOfferBadge(product: line.product),
+                    if (line.trimmedNotes case final note?)
+                      Text(
+                        'ملاحظة: $note',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              IconButton(
+                key: Key('phone-order-dec-$id'),
+                visualDensity: VisualDensity.compact,
+                onPressed: onRemove,
+                icon: const Icon(Icons.remove_circle_outline),
+              ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 28),
+                child: Text(
+                  qtyBetween,
+                  key: Key('phone-order-qty-$id'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w900, fontSize: 13),
+                ),
+              ),
+              IconButton(
+                key: Key('phone-order-inc-$id'),
+                visualDensity: VisualDensity.compact,
+                onPressed: onAdd,
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+              IconButton(
+                key: Key('phone-order-delete-$id'),
+                tooltip: 'حذف الصنف',
+                visualDensity: VisualDensity.compact,
+                onPressed: onDelete,
+                icon: Icon(Icons.delete_outline, color: Colors.red.shade600),
+              ),
+              SizedBox(
+                width: 72,
+                child: Text(
+                  AppCurrency.of(line.total),
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

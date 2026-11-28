@@ -7,6 +7,7 @@ enum ProductSearchFilterMode {
   allItems,
 
   /// Only products with an active `discount_price` offer.
+  /// Kept for «تعديل الطلب» dropdown; تلقي الطلبات uses [offersOnly] instead.
   offers;
 
   String get label => switch (this) {
@@ -16,6 +17,9 @@ enum ProductSearchFilterMode {
       };
 
   bool get isDefault => this == inStock;
+
+  /// Stock scope chips (excludes the legacy combined «العروض» mode).
+  bool get isStockScope => this == inStock || this == allItems;
 }
 
 /// Normalize Arabic (and Latin) text for substring search: alef variants,
